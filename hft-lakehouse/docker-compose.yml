@@ -1,0 +1,69 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: hft-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hft-network
+
+  timescaledb:
+    image: timescale/timescaledb:2.14.2-pg16
+    container_name: hft-timescaledb
+    ports:
+      - "${TIMESCALEDB_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${TIMESCALEDB_USER:-postgres}
+      POSTGRES_PASSWORD: ${TIMESCALEDB_PASSWORD:-postgres}
+      POSTGRES_DB: ${TIMESCALEDB_DB:-hft_lakehouse}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TIMESCALEDB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hft-network
+
+  ingestion-client:
+    build:
+      context: ./apps/ingestion-client
+      dockerfile: Dockerfile
+    container_name: hft-ingestion-client
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      TIMESCALEDB_HOST: timescaledb
+      TIMESCALEDB_PORT: 5432
+      TIMESCALEDB_USER: ${TIMESCALEDB_USER:-postgres}
+      TIMESCALEDB_PASSWORD: ${TIMESCALEDB_PASSWORD:-postgres}
+      TIMESCALEDB_DB: ${TIMESCALEDB_DB:-hft_lakehouse}
+      TRADINGVIEW_WS_URL: ${TRADINGVIEW_WS_URL}
+      TRADINGVIEW_USERNAME: ${TRADINGVIEW_USERNAME}
+      TRADINGVIEW_PASSWORD: ${TRADINGVIEW_PASSWORD}
+    networks:
+      - hft-network
+
+networks:
+  hft-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  timescaledb_data:
