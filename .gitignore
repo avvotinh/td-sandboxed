@@ -1,0 +1,61 @@
+# HFT Data Lakehouse - Git Ignore Configuration
+# NFR6: Prevent secrets from being committed
+
+# Environment files (contains secrets)
+.env
+.env.local
+.env.*.local
+
+# Docker volumes and data
+data/
+*.db
+*.sqlite
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# Build artifacts
+bin/
+build/
+dist/
+*.exe
+
+# Go specific
+vendor/
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# Python specific (for future Epic 2)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+env/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Benchmark results
+benchmark_results/
+*.benchmark
+
+# Docker
+docker-compose.override.yml
