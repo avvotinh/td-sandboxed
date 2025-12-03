@@ -1,0 +1,61 @@
+# Workflow Status Template
+
+# This tracks progress through BMM methodology Analysis, Planning, and Solutioning phases.
+# Implementation phase is tracked separately in sprint-status.yaml
+
+# STATUS DEFINITIONS:
+# ==================
+# Initial Status (before completion):
+#   - required: Must be completed to progress
+#   - optional: Can be completed but not required
+#   - recommended: Strongly suggested but not required
+#   - conditional: Required only if certain conditions met (e.g., if_has_ui)
+#
+# Completion Status:
+#   - {file-path}: File created/found (e.g., "docs/product-brief.md")
+#   - skipped: Optional/conditional workflow that was skipped
+
+generated: "2025-11-25"
+last_updated: "2025-12-03"
+project: "FTMO Trading System"
+project_type: "greenfield"
+selected_track: "method"
+field_type: "greenfield"
+workflow_path: ".bmad/bmm/workflows/workflow-status/paths/method-greenfield.yaml"
+
+# Focus: trading-engine service (scoped implementation)
+current_focus: "trading-engine"
+focus_note: "Epics and implementation readiness scoped to trading-engine service only. Other services (tv-api, mt5-bridge, notification) require separate epic breakdowns."
+
+workflow_status:
+  # Phase 0: Discovery (Optional) - User-selected during workflow-init
+  brainstorm-project: "docs/brainstorming-session-results-2025-11-25.md"
+  research: "optional"
+  product-brief: "docs/product-brief-FTMO-Trading-System-2025-12-03.md"
+
+  # Phase 1: Planning - Required
+  prd: "docs/prd.md"  # Updated to v2.0 (2025-12-03)
+  validate-prd: "optional"
+  create-design: "skipped"  # Not required - developer tool with no UI
+
+  # Phase 2: Solutioning - Required
+  create-architecture: "docs/architecture.md"  # Updated to v2.0 (2025-12-03)
+  create-epics-and-stories: "docs/epics-trading-engine.md"  # Scoped to trading-engine
+  test-design: "recommended"
+  validate-architecture: "optional"
+  implementation-readiness: "docs/implementation-readiness-report-2025-12-03.md"
+
+  # Phase 3: Implementation - Required
+  sprint-planning: "required"  # Creates sprint plan - subsequent work tracked in sprint-status.yaml
+
+# Implementation readiness status
+readiness:
+  status: "READY"
+  date: "2025-12-03"
+  scope: "trading-engine"
+  fr_coverage: "67/67 (100%)"
+  epics: 9
+  stories: 45
+  critical_issues: 0
+  high_priority_concerns: 3
+  confidence: "HIGH"

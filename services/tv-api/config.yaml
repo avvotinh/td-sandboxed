@@ -1,0 +1,34 @@
+# Multi-Symbol Multi-Timeframe Configuration Example
+# Both tv-chart and tv-quote will load this file by default when run from the project root
+
+# Logging configuration (optional)
+logging:
+  level: "info"    # Options: debug, info, warn, error
+  format: "text"   # Options: text, json
+
+subscriptions:
+  - symbol: "OANDA:EURUSD"
+    timeframe: "1"
+
+  - symbol: "COINBASE:BTCUSD"
+    timeframe: "1"
+
+  - symbol: "OANDA:XAUUSD"
+    timeframe: "1"
+
+quote_subscriptions:
+  - symbol: "OANDA:XAUUSD"
+  - symbol: "OANDA:EURUSD"
+  - symbol: "COINBASE:BTCUSD"
+
+# Configuration Notes:
+# - At least one subscription type (chart or quote) is required
+# - Maximum 50 subscriptions per type allowed
+# - Duplicates will be automatically removed with a warning
+# - Symbol format: EXCHANGE:TICKER (e.g., "NASDAQ:AAPL")
+# - Supported timeframes: 1, 5, 15, 30, 60 (minutes), D (daily), W (weekly), M (monthly)
+# - Logging defaults to "info" level and "text" format if not specified
+#
+# Usage:
+#   ./bin/tv-chart    # For chart data (OHLCV candles)
+#   ./bin/tv-quote    # For quote data (real-time prices)

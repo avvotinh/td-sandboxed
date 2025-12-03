@@ -1,0 +1,122 @@
+# Sprint Status - Trading Engine
+# generated: 2025-12-03
+# project: Sandboxed
+# project_key: trading-engine
+# tracking_system: file-system
+# story_location: {project-root}/docs/sprint-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic exists in epic file but not contexted
+#   - contexted or in-progress
+#   - done: Epic completed
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - drafted: Story file created in stories folder by *create-story
+#   - ready-for-dev: Draft approved and story context created by *story-ready
+#   - in-progress: Developer actively working on implementation by *dev-story
+#   - review: Implementation complete, ready for review by *code-review
+#   - done: Story completed by *story-done
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - completed: Retrospective has been done by *retrospective
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epics should be marked `in-progress` before stories can be marked beyond `backlog`
+# - SM typically drafts next story ONLY after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', dev reviews, then Dev moves to 'done'
+
+generated: 2025-12-03
+project: Sandboxed
+project_key: trading-engine
+tracking_system: file-system
+story_location: "{project-root}/docs/sprint-artifacts"
+
+development_status:
+  # Epic 1: Foundation & Project Setup
+  epic-1: backlog
+  1-1-initialize-project-structure: backlog
+  1-2-configuration-system-with-validation: backlog
+  1-3-structured-logging-setup: backlog
+  1-4-cli-entry-point: backlog
+  1-5-docker-configuration: backlog
+  epic-1-retrospective: optional
+
+  # Epic 2: Adapters & External Integration
+  epic-2: backlog
+  2-1-redis-data-adapter: backlog
+  2-2-timescaledb-adapter: backlog
+  2-3-zeromq-execution-adapter: backlog
+  2-4-mock-adapters-for-testing: backlog
+  2-5-data-quality-validation: backlog
+  epic-2-retrospective: optional
+
+  # Epic 3: FTMO Compliance Engine
+  epic-3: backlog
+  3-1-yaml-rule-configuration-loader: backlog
+  3-2-daily-loss-validator: backlog
+  3-3-total-drawdown-validator: backlog
+  3-4-profit-target-trading-days-tracker: backlog
+  3-5-multi-layer-compliance-validation: backlog
+  3-6-immutable-audit-logger: backlog
+  3-7-emergency-stop-mechanism: backlog
+  epic-3-retrospective: optional
+
+  # Epic 4: Strategy Framework
+  epic-4: backlog
+  4-1-ftmo-base-strategy-class: backlog
+  4-2-ftmo-position-sizer: backlog
+  4-3-ma-crossover-example-strategy: backlog
+  4-4-multi-symbol-management: backlog
+  4-5-trade-decision-logging: backlog
+  epic-4-retrospective: optional
+
+  # Epic 5: Backtesting & Validation
+  epic-5: backlog
+  5-1-nautilus-backtest-integration: backlog
+  5-2-dynamic-spread-model: backlog
+  5-3-slippage-simulation: backlog
+  5-4-latency-simulation: backlog
+  5-5-walk-forward-analysis: backlog
+  5-6-validation-report-generator: backlog
+  epic-5-retrospective: optional
+
+  # Epic 6: State Management & Recovery
+  epic-6: backlog
+  6-1-real-time-state-cache: backlog
+  6-2-redis-state-snapshots: backlog
+  6-3-crash-recovery-manager: backlog
+  6-4-broker-state-reconciliation: backlog
+  6-5-trade-persistence: backlog
+  epic-6-retrospective: optional
+
+  # Epic 7: Risk Management & Safety
+  epic-7: backlog
+  7-1-duplicate-order-prevention: backlog
+  7-2-connection-health-monitor: backlog
+  7-3-automatic-reconnection: backlog
+  7-4-fail-safe-defaults: backlog
+  7-5-aggregate-exposure-tracking: backlog
+  epic-7-retrospective: optional
+
+  # Epic 8: Paper Trading & CLI
+  epic-8: backlog
+  8-1-paper-trading-mode: backlog
+  8-2-mode-indication-in-logs-and-alerts: backlog
+  8-3-paper-vs-backtest-comparison: backlog
+  8-4-live-trading-mode: backlog
+  8-5-hot-reload-configuration: backlog
+  epic-8-retrospective: optional
+
+  # Epic 9: Testing & Quality
+  epic-9: backlog
+  9-1-unit-test-framework: backlog
+  9-2-integration-test-suite: backlog
+  9-3-historical-scenario-replay: backlog
+  9-4-backtest-as-integration-test: backlog
+  9-5-zero-false-negatives-validation: backlog
+  epic-9-retrospective: optional

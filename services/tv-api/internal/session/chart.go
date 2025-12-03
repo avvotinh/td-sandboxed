@@ -1,0 +1,667 @@
+package session
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/avvotinh/tv-api/internal/protocol"
+)
+
+// ChartSession represents a historical chart data session.
+type ChartSession struct {
+	id                string
+	sessionID         string // For logging purposes
+	client            ClientBridge
+	periods           map[int64]*Period
+	infos             *MarketInfo
+	currentSeries     int
+	symbolID          string
+	symbol            string // Store symbol for reconnection
+	timeframe         string // Store timeframe for reconnection
+	studyListeners    map[string][]func(interface{})
+	callbacks         map[string][]func(...interface{})
+	mu                sync.RWMutex
+	state             SessionState
+	reconnectionState *ReconnectionState
+	ctx               context.Context
+	logger            *slog.Logger
+}
+
+// Period represents an OHLCV candle.
+type Period struct {
+	Time   int64   `json:"time"`
+	Open   float64 `json:"open"`
+	Close  float64 `json:"close"`
+	High   float64 `json:"max"`
+	Low    float64 `json:"min"`
+	Volume float64 `json:"volume"`
+}
+
+// MarketInfo contains market symbol information.
+type MarketInfo struct {
+	Symbol      string
+	Description string
+	Exchange    string
+	Type        string
+	Currency    string
+	Timezone    string
+	Session     string
+	PriceScale  int
+	MinMove     int
+	HasIntraday bool
+	HasDaily    bool
+	HasWeekly   bool
+}
+
+// NewChartSession creates a new chart session.
+func NewChartSession(client ClientBridge) *ChartSession {
+	sessionID := GenSessionID("cs")
+
+	cs := &ChartSession{
+		id:             sessionID,
+		client:         client,
+		periods:        make(map[int64]*Period),
+		currentSeries:  0,
+		studyListeners: make(map[string][]func(interface{})),
+		callbacks:      make(map[string][]func(...interface{})),
+	}
+
+	// Send chart_create_session packet
+	cs.createSession()
+
+	return cs
+}
+
+// ID returns the session ID.
+func (cs *ChartSession) ID() string {
+	return cs.id
+}
+
+// Type returns the session type.
+func (cs *ChartSession) Type() string {
+	return "chart"
+}
+
+// OnData handles incoming packet data for this session.
+func (cs *ChartSession) OnData(packet protocol.Packet) error {
+	switch packet.Type {
+	case "symbol_resolved":
+		return cs.handleSymbolResolved(packet)
+	case "timescale_update":
+		return cs.handleTimescaleUpdate(packet)
+	case "du":
+		return cs.handleDataUpdate(packet)
+	case "symbol_error":
+		return cs.handleSymbolError(packet)
+	case "series_error":
+		return cs.handleSeriesError(packet)
+	case "critical_error":
+		return cs.handleCriticalError(packet)
+	default:
+		return nil
+	}
+}
+
+// OnDataBatch handles a batch of packets from the same WebSocket message.
+// This is crucial for detecting "du" + "timescale_update" sequences which
+// indicate a confirmed closed candle in TradingView protocol.
+func (cs *ChartSession) OnDataBatch(packets []protocol.Packet) error {
+	// Track if we have "timescale_update" or "du" in this batch
+	hasTimescaleUpdate := false
+	hasDataUpdate := false
+
+	// DEBUG: Log packet types in this batch
+	packetTypes := make([]string, len(packets))
+	for i, p := range packets {
+		packetTypes[i] = p.Type
+	}
+
+	// Log incoming batch for debugging
+	if cs.logger != nil {
+		cs.logger.Debug("processing packet batch",
+			slog.String("session_id", cs.id),
+			slog.Any("packet_types", packetTypes),
+			slog.Int("count", len(packets)))
+	}
+
+	// Process all packets first to update internal state
+	for _, packet := range packets {
+		switch packet.Type {
+		case "symbol_resolved":
+			cs.handleSymbolResolved(packet)
+		case "du":
+			hasDataUpdate = true
+			cs.handleDataUpdate(packet)
+		case "timescale_update":
+			hasTimescaleUpdate = true
+			cs.handleTimescaleUpdate(packet)
+		case "symbol_error":
+			cs.handleSymbolError(packet)
+		case "series_error":
+			cs.handleSeriesError(packet)
+		case "critical_error":
+			cs.handleCriticalError(packet)
+		}
+	}
+
+	// Emit logic:
+	// 1. If we have "timescale_update" with "du" → CONFIRMED CLOSED candle
+	// 2. If we have "timescale_update" without "du" → Initial data load
+	// 3. If we have "du" without "timescale_update" → Open candle, NO emit
+	if hasTimescaleUpdate {
+		periods := cs.GetPeriods()
+		if cs.logger != nil {
+			cs.logger.Debug("emitting update event",
+				slog.String("session_id", cs.id),
+				slog.Int("periods_count", len(periods)),
+				slog.Bool("has_du", hasDataUpdate))
+		}
+		cs.emit("update", periods)
+	} else if hasDataUpdate {
+		// No emit for open candles
+		if cs.logger != nil {
+			cs.logger.Debug("received du without timescale_update - skipping emit (open candle)",
+				slog.String("session_id", cs.id))
+		}
+	}
+
+	return nil
+}
+
+// Close closes the session.
+func (cs *ChartSession) Close() error {
+	return cs.Delete()
+}
+
+// createSession sends the chart_create_session packet.
+func (cs *ChartSession) createSession() error {
+	packet := protocol.Packet{
+		Type: "chart_create_session",
+		Data: []interface{}{cs.id, ""},
+	}
+	return cs.client.Send(packet)
+}
+
+// ResolveSymbol sends the resolve_symbol packet.
+func (cs *ChartSession) ResolveSymbol(symbol string, adjustment string, sessionStr string, currency string) error {
+	cs.mu.Lock()
+	cs.symbolID = fmt.Sprintf("symbol_%d", cs.currentSeries)
+	cs.mu.Unlock()
+
+	symbolJSON := map[string]interface{}{
+		"symbol":     symbol,
+		"adjustment": adjustment,
+	}
+	if sessionStr != "" {
+		symbolJSON["session"] = sessionStr
+	}
+	if currency != "" {
+		symbolJSON["currency"] = currency
+	}
+
+	jsonStr, err := json.Marshal(symbolJSON)
+	if err != nil {
+		return err
+	}
+
+	packet := protocol.Packet{
+		Type: "resolve_symbol",
+		Data: []interface{}{cs.id, cs.symbolID, "=" + string(jsonStr)},
+	}
+	return cs.client.Send(packet)
+}
+
+// CreateSeries sends the create_series packet.
+func (cs *ChartSession) CreateSeries(timeframe string, rangeCount int) error {
+	cs.mu.Lock()
+	cs.currentSeries++
+	seriesID := fmt.Sprintf("s%d", cs.currentSeries)
+	cs.mu.Unlock()
+
+	packet := protocol.Packet{
+		Type: "create_series",
+		Data: []interface{}{cs.id, "$prices", seriesID, cs.symbolID, timeframe, rangeCount, ""},
+	}
+	return cs.client.Send(packet)
+}
+
+// ModifySeries sends the modify_series packet to change timeframe.
+func (cs *ChartSession) ModifySeries(seriesID string, timeframe string, rangeCount int) error {
+	packet := protocol.Packet{
+		Type: "modify_series",
+		Data: []interface{}{cs.id, seriesID, "$prices", cs.symbolID, timeframe, rangeCount, ""},
+	}
+	return cs.client.Send(packet)
+}
+
+// RequestMoreData sends the request_more_data packet.
+func (cs *ChartSession) RequestMoreData(seriesID string, count int) error {
+	packet := protocol.Packet{
+		Type: "request_more_data",
+		Data: []interface{}{cs.id, seriesID, count},
+	}
+	return cs.client.Send(packet)
+}
+
+// SwitchTimezone sends the switch_timezone packet.
+func (cs *ChartSession) SwitchTimezone(timezone string) error {
+	packet := protocol.Packet{
+		Type: "switch_timezone",
+		Data: []interface{}{cs.id, timezone},
+	}
+	return cs.client.Send(packet)
+}
+
+// Delete deletes the session.
+func (cs *ChartSession) Delete() error {
+	packet := protocol.Packet{
+		Type: "chart_delete_session",
+		Data: []interface{}{cs.id},
+	}
+	return cs.client.Send(packet)
+}
+
+// GetPeriods returns all periods sorted by time descending.
+func (cs *ChartSession) GetPeriods() []*Period {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	periods := make([]*Period, 0, len(cs.periods))
+	for _, p := range cs.periods {
+		periods = append(periods, p)
+	}
+
+	sort.Slice(periods, func(i, j int) bool {
+		return periods[i].Time > periods[j].Time
+	})
+
+	return periods
+}
+
+// GetMarketInfo returns the market information.
+func (cs *ChartSession) GetMarketInfo() *MarketInfo {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return cs.infos
+}
+
+// On registers an event callback.
+func (cs *ChartSession) On(event string, callback func(...interface{})) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.callbacks[event] = append(cs.callbacks[event], callback)
+}
+
+// emit triggers event callbacks.
+func (cs *ChartSession) emit(event string, args ...interface{}) {
+	cs.mu.RLock()
+	callbacks := cs.callbacks[event]
+	cs.mu.RUnlock()
+
+	for _, callback := range callbacks {
+		callback(args...)
+	}
+}
+
+// handleSymbolResolved processes symbol_resolved packets.
+func (cs *ChartSession) handleSymbolResolved(packet protocol.Packet) error {
+	if len(packet.Data) < 2 {
+		return fmt.Errorf("invalid symbol_resolved packet")
+	}
+
+	// Extract market info from packet data
+	if dataMap, ok := packet.Data[1].(map[string]interface{}); ok {
+		cs.mu.Lock()
+		cs.infos = &MarketInfo{
+			Symbol:      getString(dataMap, "symbol"),
+			Description: getString(dataMap, "description"),
+			Exchange:    getString(dataMap, "exchange"),
+			Type:        getString(dataMap, "type"),
+			Currency:    getString(dataMap, "currency"),
+			Timezone:    getString(dataMap, "timezone"),
+			Session:     getString(dataMap, "session"),
+			PriceScale:  getInt(dataMap, "pricescale"),
+			MinMove:     getInt(dataMap, "minmov"),
+			HasIntraday: getBool(dataMap, "has_intraday"),
+			HasDaily:    getBool(dataMap, "has_daily"),
+			HasWeekly:   getBool(dataMap, "has_weekly_and_monthly"),
+		}
+		cs.mu.Unlock()
+
+		cs.emit("symbol_loaded", cs.infos)
+	}
+
+	return nil
+}
+
+// handleTimescaleUpdate processes timescale_update packets.
+// This indicates that a candle has been CLOSED/CONFIRMED when combined with "du" in the same message batch.
+func (cs *ChartSession) handleTimescaleUpdate(packet protocol.Packet) error {
+	if len(packet.Data) < 2 {
+		return nil
+	}
+
+	// Extract period data (usually empty {} in timescale_update)
+	if dataMap, ok := packet.Data[1].(map[string]interface{}); ok {
+		cs.parsePeriodData(dataMap)
+		// NOTE: DO NOT emit here! Emission is handled by OnDataBatch
+		// when both "du" + "timescale_update" are detected in the same batch
+	}
+
+	return nil
+}
+
+// handleDataUpdate processes du (data update) packets.
+// This is a REAL-TIME update. The candle is only confirmed closed when
+// "du" + "timescale_update" appear together in the same message batch.
+func (cs *ChartSession) handleDataUpdate(packet protocol.Packet) error {
+	if len(packet.Data) < 2 {
+		return nil
+	}
+
+	// Extract period data and store it
+	if dataMap, ok := packet.Data[1].(map[string]interface{}); ok {
+		cs.parsePeriodData(dataMap)
+		// NOTE: DO NOT emit here! Emission is handled by OnDataBatch
+		// when both "du" + "timescale_update" are detected in the same batch
+		// This ensures we only emit for CONFIRMED CLOSED candles
+	}
+
+	return nil
+}
+
+// parsePeriodData extracts OHLCV data from packet data.
+func (cs *ChartSession) parsePeriodData(dataMap map[string]interface{}) {
+	// Loop through all keys to find series data
+	// TradingView uses different keys:
+	// - "$prices" for initial/historical data (timescale_update)
+	// - "sds_1", "sds_2", etc. for real-time updates (du)
+	for key, value := range dataMap {
+		// Check if this key contains series data
+		if key == "$prices" || strings.HasPrefix(key, "sds_") {
+			if pricesData, ok := value.(map[string]interface{}); ok {
+				if s, ok := pricesData["s"].([]interface{}); ok && len(s) > 0 {
+					// TradingView sends data in format: {s: [{i: index, v: [time, open, high, low, close, volume]}, ...]}
+					cs.extractPeriodsFromArray(s)
+				}
+			}
+		}
+	}
+}
+
+// extractPeriodsFromArray extracts periods from TradingView's data structure.
+// TradingView format: [{i: index, v: [time, open, high, low, close, volume]}, ...]
+func (cs *ChartSession) extractPeriodsFromArray(data []interface{}) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	for _, item := range data {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Get the 'v' array: [time, open, high, low, close, volume]
+		vArray, ok := itemMap["v"].([]interface{})
+		if !ok || len(vArray) < 6 {
+			continue
+		}
+
+		// Extract values from array
+		timestamp := getFloat64FromInterface(vArray[0])
+		open := getFloat64FromInterface(vArray[1])
+		high := getFloat64FromInterface(vArray[2])
+		low := getFloat64FromInterface(vArray[3])
+		close := getFloat64FromInterface(vArray[4])
+		volume := getFloat64FromInterface(vArray[5])
+
+		period := &Period{
+			Time:   int64(timestamp),
+			Open:   open,
+			High:   high,
+			Low:    low,
+			Close:  close,
+			Volume: volume,
+		}
+		cs.periods[int64(timestamp)] = period
+	}
+}
+
+// handleSymbolError processes symbol_error packets.
+func (cs *ChartSession) handleSymbolError(packet protocol.Packet) error {
+	var errorMsg string
+	if len(packet.Data) > 1 {
+		errorMsg = fmt.Sprintf("%v", packet.Data[1])
+	} else {
+		errorMsg = fmt.Sprintf("%v", packet.Data)
+	}
+
+	cs.mu.RLock()
+	symbol := cs.symbolID
+	logger := cs.logger
+	ctx := cs.ctx
+	cs.mu.RUnlock()
+
+	var err error
+	if symbol != "" {
+		err = fmt.Errorf("invalid symbol '%s': %s", symbol, errorMsg)
+	} else {
+		err = fmt.Errorf("symbol error: %s", errorMsg)
+	}
+
+	cs.emit("error", err)
+
+	// Trigger reconnection if context and logger are available
+	if ctx != nil && logger != nil {
+		cs.setState(SessionStateReconnecting)
+		go func() {
+			if reconnectErr := cs.reconnectWithBackoff(ctx, logger); reconnectErr != nil {
+				logger.Error("reconnection failed",
+					slog.String("session_id", cs.sessionID),
+					slog.String("error", reconnectErr.Error()))
+			}
+		}()
+	}
+
+	return nil
+}
+
+// handleSeriesError processes series_error packets.
+func (cs *ChartSession) handleSeriesError(packet protocol.Packet) error {
+	var errorMsg string
+	if len(packet.Data) > 1 {
+		errorMsg = fmt.Sprintf("%v", packet.Data[1])
+	} else {
+		errorMsg = fmt.Sprintf("%v", packet.Data)
+	}
+
+	err := fmt.Errorf("series error (timeframe may be invalid): %s", errorMsg)
+	cs.emit("error", err)
+
+	// Trigger reconnection if context and logger are available
+	cs.mu.RLock()
+	logger := cs.logger
+	ctx := cs.ctx
+	cs.mu.RUnlock()
+
+	if ctx != nil && logger != nil {
+		cs.setState(SessionStateReconnecting)
+		go func() {
+			if reconnectErr := cs.reconnectWithBackoff(ctx, logger); reconnectErr != nil {
+				logger.Error("reconnection failed",
+					slog.String("session_id", cs.sessionID),
+					slog.String("error", reconnectErr.Error()))
+			}
+		}()
+	}
+
+	return nil
+}
+
+// handleCriticalError processes critical_error packets.
+func (cs *ChartSession) handleCriticalError(packet protocol.Packet) error {
+	var errorMsg string
+	if len(packet.Data) > 0 {
+		errorMsg = fmt.Sprintf("%v", packet.Data[0])
+	} else {
+		errorMsg = "unknown critical error"
+	}
+
+	err := fmt.Errorf("critical error: %s", errorMsg)
+	cs.emit("error", err)
+
+	// Trigger reconnection if context and logger are available
+	cs.mu.RLock()
+	logger := cs.logger
+	ctx := cs.ctx
+	cs.mu.RUnlock()
+
+	if ctx != nil && logger != nil {
+		cs.setState(SessionStateReconnecting)
+		go func() {
+			if reconnectErr := cs.reconnectWithBackoff(ctx, logger); reconnectErr != nil {
+				logger.Error("reconnection failed",
+					slog.String("session_id", cs.sessionID),
+					slog.String("error", reconnectErr.Error()))
+			}
+		}()
+	}
+
+	return nil
+}
+
+// Helper functions
+func getString(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func getInt(m map[string]interface{}, key string) int {
+	if v, ok := m[key].(float64); ok {
+		return int(v)
+	}
+	return 0
+}
+
+func getBool(m map[string]interface{}, key string) bool {
+	if v, ok := m[key].(bool); ok {
+		return v
+	}
+	return false
+}
+
+func getFloatArray(m map[string]interface{}, key string) []float64 {
+	if arr, ok := m[key].([]interface{}); ok {
+		result := make([]float64, len(arr))
+		for i, v := range arr {
+			if f, ok := v.(float64); ok {
+				result[i] = f
+			}
+		}
+		return result
+	}
+	return []float64{}
+}
+
+func getAtIndex(arr []float64, idx int) float64 {
+	if idx < len(arr) {
+		return arr[idx]
+	}
+	return 0
+}
+
+// getFloat64FromInterface safely extracts a float64 from an interface{} value
+func getFloat64FromInterface(v interface{}) float64 {
+	switch val := v.(type) {
+	case float64:
+		return val
+	case float32:
+		return float64(val)
+	case int:
+		return float64(val)
+	case int64:
+		return float64(val)
+	case int32:
+		return float64(val)
+	default:
+		return 0
+	}
+}
+
+// GetState returns the current session state.
+func (cs *ChartSession) GetState() string {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return string(cs.state)
+}
+
+// setState updates the session state.
+func (cs *ChartSession) setState(state SessionState) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.state = state
+}
+
+// GetRetryCount returns the current retry count.
+func (cs *ChartSession) GetRetryCount() int {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	if cs.reconnectionState != nil {
+		return cs.reconnectionState.RetryCount
+	}
+	return 0
+}
+
+// connect establishes connection for this session (used by reconnection logic).
+func (cs *ChartSession) connect(ctx context.Context) error {
+	// Create the session
+	if err := cs.createSession(); err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+
+	// Resolve symbol if we have it stored
+	if cs.symbol != "" {
+		if err := cs.ResolveSymbol(cs.symbol, "splits", "", ""); err != nil {
+			return fmt.Errorf("failed to resolve symbol: %w", err)
+		}
+	}
+
+	// Create series if we have timeframe stored
+	if cs.timeframe != "" {
+		if err := cs.CreateSeries(cs.timeframe, 300); err != nil {
+			return fmt.Errorf("failed to create series: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// ForceDisconnect simulates a disconnection for testing purposes.
+func (cs *ChartSession) ForceDisconnect() error {
+	cs.setState(SessionStateReconnecting)
+	return fmt.Errorf("simulated disconnection")
+}
+
+// SetContext sets the context and logger for the session (for reconnection support).
+func (cs *ChartSession) SetContext(ctx context.Context, logger *slog.Logger) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.ctx = ctx
+	cs.logger = logger
+	cs.sessionID = cs.id
+}
+
+// SetSubscription stores the symbol and timeframe for reconnection.
+func (cs *ChartSession) SetSubscription(symbol, timeframe string) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.symbol = symbol
+	cs.timeframe = timeframe
+}
