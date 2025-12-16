@@ -61,8 +61,8 @@ benchmark_results/
 docker-compose.override.yml
 
 .bmad/
-.claude/
 .gemini/
+.claude/
 .specify/
 specs/
 .vscode/

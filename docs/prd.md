@@ -1,1049 +1,753 @@
-# FTMO Trading System - Product Requirements Document
+---
+stepsCompleted: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+inputDocuments:
+  - docs/product-brief-multi-account-trading-system-2025-12-07.md
+  - docs/architecture.md
+workflowType: 'prd'
+lastStep: 11
+project_name: 'Multi-Account Trading System'
+user_name: 'BMad'
+date: '2025-12-07'
+---
+
+# Product Requirements Document - Multi-Account Trading System
 
 **Author:** BMad
-**Date:** 2025-11-25
-**Version:** 2.0 - Monorepo Architecture Update
-**Last Updated:** 2025-12-03
-
----
+**Date:** 2025-12-07
 
 ## Executive Summary
 
-An event-driven automated trading system engineered specifically for FTMO prop firm challenges, targeting high-frequency intraday trading on 1m/5m timeframes across GOLD, BTC, and EUR symbols. The system is architected as a **monorepo with 4 independent microservices**, leveraging a polyglot tech stack (Go, Rust, Python) optimized for each service's requirements, with Docker-managed infrastructure.
+An event-driven automated trading system designed for **multi-account, multi-prop-firm trading** with a **pluggable rule engine**. The system supports running multiple MT5 accounts simultaneously (up to 5), each with its own strategy and compliance rules - whether using built-in prop firm presets (FTMO, The5ers, WeMasterTrade) or fully custom user-defined YAML rules.
 
-**Core Services:**
-| Service | Language | Purpose |
-|---------|----------|---------|
-| tv-api | Go | TradingView WebSocket data collector |
-| mt5-bridge | Rust | MT5 ZeroMQ bridge (latency-critical) |
-| trading-engine | Python | Nautilus Trader core, strategies, FTMO compliance |
-| notification | Go | Telegram alerts and notifications |
+### Problem Statement
 
-**Core Problem Solved:** FTMO challenges require consistent profitability within strict risk constraints (5% max daily loss, 10% max total drawdown), but traders face three critical challenges: (1) compliance complexity where a single rule violation terminates the account, (2) backtest-reality gap where strategies fail in live trading despite backtest success, and (3) architectural limitations of traditional polling-based systems that can't handle the multiple independent subsystems needed (strategy logic, risk management, compliance monitoring, execution).
+1. **Single Account Limitation**: Existing trading systems typically support only one account, requiring multiple instances for multi-account trading
+2. **Rigid Compliance Rules**: FTMO-specific rules are often hardcoded, making it difficult to adapt for other prop firms or personal accounts
+3. **No Custom Rules**: Traders cannot define their own risk management rules beyond what the system provides
+4. **Shared Risk**: When one account has issues, it can affect others in the same system
 
-**Solution Approach:** A monorepo with independent microservices, each optimized for its specific task. The trading-engine leverages Nautilus Trader's production-grade event-driven framework with custom FTMO rule engine. Services communicate via ZeroMQ (low-latency) and Redis Pub/Sub (event distribution). All infrastructure is Docker-managed for reproducible deployment. Focus on reliability and consistency over speed (100-500ms latency sufficient for 1m/5m timeframes).
+### Target Users
+
+| User Type | Description | Needs |
+|-----------|-------------|-------|
+| **Prop Firm Traders** | Trade with FTMO, The5ers, WMT, etc. | Preset compliance rules, multi-account support |
+| **Personal Traders** | Trade with own capital | Custom risk rules, flexible configuration |
+| **Hybrid Traders** | Both prop firm and personal accounts | Mix of presets and custom rules |
 
 ### What Makes This Special
 
-**Real-time Automated FTMO Compliance** - Unlike generic trading bots that focus on strategy alpha, this system treats FTMO rule compliance as a first-class architectural concern. The declarative YAML-based rule engine validates constraints after every bar (not end-of-day), provides preventive order blocking when approaching limits, and maintains comprehensive audit logging. Zero violations through architecture, not hope.
-
-**Backtest-Reality Alignment** - Bridges the dangerous gap between backtest performance and live trading through realistic execution modeling (dynamic spreads, slippage simulation, latency delays) and walk-forward validation. The same codebase runs backtests and live trading (via Nautilus), eliminating divergence. Paper trading validation gates confirm model accuracy before risking capital.
-
-**Professional Event-Driven Architecture** - Leverages Nautilus Trader's production-grade event architecture rather than building from scratch. Natural fit for trading domain (markets ARE event-driven), enabling clean separation of concerns: strategies react to market events, risk management reacts to position events, compliance monitoring reacts to trade events. Extensible to multiple strategies, symbols, and future prop firms without core changes.
-
-**Pragmatic Infrastructure Leverage** - Integrates existing operational infrastructure (tv-api for TradingView data, ZeroMQ for MT5 execution, Redis/PostgreSQL for state) rather than rebuilding. Focuses development effort on the differentiating 20% (FTMO rules, realistic modeling, validation) while Nautilus handles 80% of trading infrastructure. 6-8 weeks to MVP versus 6+ months fully custom.
-
-**Polyglot Microservices Architecture** - Each service uses the optimal language for its requirements: Go for I/O-bound services (tv-api, notification), Rust for latency-critical messaging (mt5-bridge), and Python for trading logic (trading-engine). Services are completely independent with no shared code, enabling independent development, testing, and deployment.
-
----
+- **Multi-Account Support**: Run 2-5 accounts simultaneously with completely independent strategies and MT5 connections
+- **Pluggable Rule Engine**: Built-in prop firm presets + fully customizable YAML rules for any risk management scenario
+- **Risk Isolation**: Account-level risk management ensures failures don't cascade - Account A's breach doesn't affect Account B
+- **Polyglot Microservices**: Right language for each service - Go (I/O-bound), Rust (latency-critical), Python (trading logic with Nautilus Trader)
+- **Backtest-Reality Alignment**: Same codebase for backtesting and live trading ensures consistent behavior
 
 ## Project Classification
 
-**Technical Type:** developer_tool
-**Domain:** fintech
-**Complexity:** high
+**Technical Type:** Developer Tool (CLI-driven trading engine)
+**Domain:** Fintech (automated trading, prop firm compliance)
+**Complexity:** High
 
-This is classified as a **Developer Tool** in the **Fintech** domain with **High Complexity**.
-
-**Project Type Rationale:**
-While this is a trading system, it's fundamentally a framework/tool for automated trading - similar to how Nautilus Trader itself is a developer tool. The primary user is a technical developer building trading infrastructure, the deliverable is a reusable system with adapters/extensions, and success is measured by engineering quality and extensibility as much as trading performance.
-
-**Domain Complexity Rationale:**
-The fintech domain carries high complexity due to regulatory considerations, strict compliance requirements, risk management criticality, and financial consequences of errors. While this MVP targets prop firm trading (not retail brokerage), FTMO rules function as a compliance framework, and the system must handle: real-time risk monitoring, trade audit trails, multi-layer compliance validation, and integration with regulated brokers (MT5). Future expansion could involve KYC/AML for multi-user platforms, additional prop firm regulations, and potential regional trading requirements.
-
-### Domain Context
-
-**Fintech Domain - High Complexity Considerations:**
-
-The fintech domain introduces critical requirements that shape every aspect of this system:
-
-**Regulatory & Compliance Landscape:**
-- FTMO operates as a proprietary trading firm with specific challenge rules that function as contractual compliance requirements
-- While not directly regulated like retail brokerages, prop firms maintain strict operational standards
-- Integration with MT5 broker infrastructure requires adherence to broker API terms and rate limits
-- Future multi-user expansion would trigger additional requirements (data privacy, potentially financial services regulations)
-
-**Risk Management Criticality:**
-- Financial systems have zero tolerance for certain error classes (duplicate orders, incorrect position sizing, rule violations)
-- Real-time risk monitoring is not optional - it's a core functional requirement
-- Audit trails must be comprehensive and immutable for post-trade analysis
-- System failures during trading hours have immediate financial consequences
-
-**Data Integrity & Security:**
-- Trading data must be accurate, timestamped, and tamper-proof
-- API keys, broker credentials, and trading strategies constitute sensitive intellectual property
-- State consistency is critical (positions, account balance, P&L must always reconcile)
-- Data retention requirements for tax reporting and performance analysis
-
-**Integration Complexity:**
-- Multiple external systems with different reliability profiles (TradingView API, MT5 broker, ZeroMQ)
-- Each integration point is a potential failure mode requiring monitoring and fallback strategies
-- Broker-specific quirks and limitations must be handled gracefully
-- Market data feed interruptions must be detected and recovered from automatically
-
-These domain characteristics inform architectural decisions (event-driven for reliability, comprehensive logging for audit, multi-layer risk validation) and drive many functional and non-functional requirements throughout this PRD.
-
-### Reference Documents
-
-**Product Brief:** `docs/product-brief-FTMO-Trading-System-2025-12-03.md` - Updated vision with monorepo architecture, polyglot tech stack, and service definitions
-
-**Architecture Document:** `docs/architecture.md` - Comprehensive technical architecture including service details, inter-service communication, Docker configuration, and deployment
-
-**Research Documents:** None - Domain knowledge sufficient for MVP based on expert-level user familiarity with FTMO requirements and trading systems
-
-**Brownfield Documentation:** Existing tv-api service (Go) operational and will be moved to `/services/tv-api`
-
----
-
-## System Architecture Overview
-
-This section provides a high-level view of the system architecture. For detailed technical specifications, see `docs/architecture.md`.
-
-### Monorepo Structure
-
-```
-Sandboxed/
-├── services/                    # Independent microservices
-│   ├── tv-api/                  # Go - TradingView data collector
-│   ├── mt5-bridge/              # Rust - MT5 ZeroMQ bridge
-│   ├── trading-engine/          # Python - Nautilus trading core
-│   └── notification/            # Go - Telegram alerts
-├── infra/                       # Infrastructure configs
-│   ├── docker/                  # Docker Compose files
-│   ├── redis/                   # Redis configuration
-│   └── timescaledb/             # Database init scripts
-├── configs/                     # Environment configs
-│   ├── dev/                     # Development environment
-│   └── prod/                    # Production environment
-└── scripts/                     # Build/test utilities
-```
-
-### Service Communication
-
-| From | To | Protocol | Purpose |
-|------|-----|----------|---------|
-| tv-api | Redis | Redis Protocol | Publish OHLCV candles |
-| mt5-bridge | trading-engine | ZeroMQ PUB/SUB | Market data, orders |
-| trading-engine | notification | Redis Pub/Sub | Alerts |
-| notification | Telegram | HTTPS | User notifications |
-
-### Technology Stack
-
-| Component | Technology | Justification |
-|-----------|------------|---------------|
-| tv-api | Go 1.21+ | Existing service, excellent concurrency |
-| mt5-bridge | Rust 1.75+ | Zero-latency ZeroMQ, no GC pauses |
-| trading-engine | Python 3.11+ | Nautilus Trader requirement |
-| notification | Go 1.21+ | Lightweight, efficient I/O |
-| Infrastructure | Redis 7.2+, TimescaleDB PG16+, Docker | Proven, reliable stack |
-
----
+This is a high-complexity fintech project requiring:
+- **Prop Firm Rule Accuracy**: Zero tolerance for compliance violations that could fail trader challenges
+- **Real-time Performance**: Sub-second signal processing and order execution
+- **State Recovery**: Crash recovery must preserve positions and compliance state
+- **Audit Trail**: Complete logging for compliance verification and debugging
 
 ## Success Criteria
 
-Success for the FTMO Trading System is defined by **confidence through validation** rather than arbitrary metrics. This is a trading infrastructure project where success means eliminating unknowns and proving reliability before risking capital.
+### User Success
 
-**Technical Validation Success:**
-- Zero FTMO rule violations during 30+ days of paper trading (demonstrates compliance engine works flawlessly)
-- Paper trading results within 20% of backtest metrics (proves execution model is realistic)
-- System maintains 24-hour uptime without crashes during paper trading period (demonstrates reliability)
-- Walk-forward analysis shows consistency across multiple time periods (proves strategy robustness)
-- Data pipeline operates without gaps or quality issues (validates integration architecture)
+| Success Indicator | Measurement | Target |
+|-------------------|-------------|--------|
+| **Challenge Pass Rate** | Traders pass prop firm challenges without system-caused violations | 100% (zero false negatives) |
+| **Multi-Account Confidence** | Traders run 2-5 accounts simultaneously without manual intervention | Accounts operate independently 24/7 |
+| **Configuration Autonomy** | Traders customize rules via YAML without developer assistance | < 30 min to create custom ruleset |
+| **Risk Awareness** | Traders receive warnings before hitting limits | Alerts at 70%, 80%, 90% thresholds |
 
-**Trading Validation Success:**
-- Confidence gate passed: Developer willing to risk FTMO challenge fee ($155-$1,080) based on validation results
-- No critical unknowns or "hope this works" assumptions remaining
-- Clear understanding of failure modes, edge cases, and limitations
-- Slippage tracking confirms realistic execution model assumptions within 10%
-- Minimum 20 trades executed in paper trading to validate execution quality across different market conditions
+**User "Aha!" Moments:**
+- First time seeing 3 accounts running different strategies on different prop firms simultaneously
+- Receiving a "daily loss at 4.2%" warning and adjusting before breaching the 5% limit
+- Copying FTMO preset, modifying 2 rules, and deploying custom config in minutes
 
-**Engineering Success:**
-- Professional architecture that can be extended to multiple strategies, symbols, and prop firms
-- Clean separation of concerns (strategy logic, risk management, compliance, execution)
-- Comprehensive audit logging enables post-trade analysis and debugging
-- Integration adapters successfully bridge existing infrastructure (tv-api, MT5 ZeroMQ) to Nautilus framework
-- Codebase maintainable by single developer with clear extension points
+### Business Success
 
-**Learning Success (Secondary but Important):**
-- Deep understanding of Nautilus Trader framework and event-driven trading architecture
-- Validated approach to realistic backtesting that can be applied to future strategies
-- Reusable FTMO compliance engine that works for Phase 1, Phase 2, and live funded accounts
-- Architecture patterns learned applicable to broader trading system development
+| Timeframe | Success Metric | Target |
+|-----------|----------------|--------|
+| **MVP (3 months)** | Core multi-account system operational | 5 accounts running simultaneously |
+| **Growth (6 months)** | Rule engine fully operational | 3 prop firm presets + custom YAML support |
+| **Mature (12 months)** | Production stability | 99.9% uptime, zero compliance false negatives |
 
-**NOT Success Criteria for MVP:**
-- ❌ Specific profit targets or win rates (strategy alpha is iterative, not MVP gate)
-- ❌ Sub-millisecond latency achievements (not needed for 1m/5m timeframes)
-- ❌ Multiple strategy portfolio (MVP validates single strategy, portfolio is Phase 2)
-- ❌ Visual dashboard or elaborate monitoring UI (Telegram alerts sufficient for MVP)
+**Key Business Indicators:**
+- Accounts managed without compliance breaches caused by system
+- Time from configuration to live trading < 1 hour
+- Recovery from crash with zero position discrepancy
 
-**Business Context:**
-This is a personal infrastructure project, not a commercial product in MVP phase. Success means passing FTMO Phase 1 challenge and progressing to Phase 2, then funded account. Future business metrics (if evolving to multi-user platform) would include: number of traders using system, aggregate capital under management, and subscription revenue - but these are Phase 4 considerations, not MVP success criteria.
+### Technical Success
 
----
+| Metric | Target | Rationale |
+|--------|--------|-----------|
+| **Signal Latency** | 100-500ms per signal | Sufficient for swing/position trading on 1m+ timeframes |
+| **Rule Validation** | < 50ms per check | Real-time compliance without blocking trades |
+| **Memory Footprint** | < 400MB per account | Support 5 accounts on 2GB RAM allocation |
+| **State Recovery** | < 30 seconds | Crash recovery from Redis snapshot |
+| **Position Reconciliation** | 100% accuracy | MT5 as source of truth, zero orphan positions |
+
+### Measurable Outcomes
+
+1. **Zero False Negatives**: No trade executed that should have been blocked by rules
+2. **Account Isolation**: 100% - one account's failure never affects another
+3. **Rule Coverage**: 5+ rule types (drawdown, time, position, symbol, frequency)
+4. **Preset Accuracy**: FTMO, The5ers, WMT presets match official prop firm rules exactly
+5. **Audit Completeness**: Every rule check logged with timestamp, values, and decision
 
 ## Product Scope
 
 ### MVP - Minimum Viable Product
 
-The MVP scope is laser-focused on **proving the infrastructure works reliably** before risking capital. Every feature serves validation, compliance, or essential trading functionality.
+**Phase 1: Core Multi-Account (Target: Week 1-4)**
+- Account Manager with add/remove/start/stop lifecycle
+- Per-account MT5 connections via ZeroMQ bridge
+- Basic signal routing by symbol
+- Per-account state persistence in Redis
+- Crash recovery from snapshots
 
-**1. Data Integration Layer** ⭐ FOUNDATION
-- TradingView adapter: Redis/PostgreSQL → Nautilus Bar events (1m/5m OHLCV candles)
-- MT5 ZeroMQ adapter: Real-time bid-ask spreads → Nautilus QuoteTick events
-- Historical data loader for backtesting (2-3 years, GOLD/BTC/EUR)
-- Data quality validation (gap detection, timestamp synchronization, anomaly detection)
-
-**2. FTMO Rule Engine** ⭐ CRITICAL DIFFERENTIATOR
-- YAML-based declarative rule configuration (rules as data, not code)
-- Real-time validation after every bar (not end-of-day calculations)
-- Core rules: Max Daily Loss (5%), Max Total Drawdown (10%), Minimum Trading Days, Profit Target
-- Preventive order blocking when approaching limits (fail-safe design)
-- Multi-layer risk architecture (strategy-level, account-level, system-level validation)
-- Comprehensive audit logging (every rule check, every order decision recorded)
-
-**3. Strategy Framework** ⭐ VALIDATION VEHICLE
-- Nautilus Strategy base class implementation
-- Simple baseline strategy for infrastructure testing (e.g., moving average crossover with volatility filter)
-- Event-driven signal generation responding to bar close events
-- Position sizing logic respecting FTMO constraints
-- Support for 3 symbols: GOLD, BTC, EUR on 1m/5m timeframes
-
-**4. Realistic Backtesting Engine** ⭐ CONFIDENCE BUILDER
-- Nautilus BacktestEngine integration with custom execution model
-- Dynamic spread modeling (time-of-day and volatility dependent)
-- Slippage simulation (0.5-2.0× spread on market orders based on liquidity)
-- Latency delay simulation (200-800ms order-to-fill delay)
-- Walk-forward analysis framework (out-of-sample validation)
-- Validation report generator (Sharpe ratio, win rate, drawdown, trade frequency, red flags)
-
-**5. State Management & Persistence**
-- Nautilus Cache for real-time state (positions, orders, account balance)
-- Redis backup snapshots (every 5 minutes + on significant events like trade execution)
-- Crash recovery mechanism (restore from last valid snapshot)
-- PostgreSQL for historical trades, performance metrics, audit logs
-
-**6. Monitoring & Alerts** (Lightweight MVP)
-- Nautilus structured JSON logging (all events, decisions, errors)
-- Telegram bot integration for real-time alerts:
-  - Trade notifications (entry/exit with P&L and reason)
-  - FTMO limit warnings (approaching 70-80% of thresholds)
-  - System health alerts (connection drops, API errors, data gaps)
-  - Daily summary (trades executed, P&L, rule compliance status)
-
-**7. Execution Integration**
-- MT5 execution via existing ZeroMQ bridge
-- Order placement with confirmation tracking (acknowledgment within 2 seconds)
-- Slippage monitoring (actual vs. expected, tracked per symbol)
-- Execution quality metrics (fill rate, average slippage, latency distribution)
-
-**MVP Validation Milestones:**
-- ✅ Week 4: Data flowing end-to-end without gaps
-- ✅ Week 6: FTMO rules tested against historical violation scenarios (zero false negatives)
-- ✅ Week 8: Backtest completes with realistic execution model, walk-forward validation shows consistency
-- ✅ Week 12+: 30 days paper trading with results within 20% of backtest, zero rule violations
+**Phase 2: Rule Engine (Target: Week 5-8)**
+- Rule engine framework with pluggable architecture
+- FTMO preset (5% daily, 10% max drawdown, 10% profit target, min 4 days)
+- The5ers preset (4% daily, 6% max drawdown, scaling rules)
+- WeMasterTrade preset (5% daily, 10% max drawdown, trading hours)
+- Custom YAML rule loader
+- Core rule types: drawdown, time-based, position limits
 
 ### Growth Features (Post-MVP)
 
-**Phase 2: Refinement & Expansion (Weeks 9-16)**
-- Web-based monitoring dashboard (real-time P&L visualization, position tracking, FTMO limit gauges)
-- Multi-strategy framework (portfolio allocation, strategy correlation analysis, aggregate risk management)
-- Advanced risk features (news event detector for pause trading, volatility regime filter, dynamic position sizing based on market conditions)
-- Support for additional prop firms (FTUK, Funded Trader, etc.) - extend rule engine with new YAML configurations
-- Enhanced backtesting (Monte Carlo simulation for robustness testing, regime-specific performance analysis)
-
-**Phase 3: Advanced Capabilities (Months 6-12)**
-- Machine learning integration (regime detection, adaptive parameter tuning, reinforcement learning for position sizing)
-- Multi-broker support (IBKR, Oanda) with automatic failover
-- Advanced strategy features (multi-timeframe analysis, correlation-based filters, adaptive indicators)
-- Optimization tooling (genetic algorithms, Bayesian optimization, parameter sensitivity analysis)
-- Enhanced observability (Prometheus metrics, Grafana dashboards, distributed tracing)
-
-**Phase 4: Platform Evolution (12+ months)**
-- Multi-fund platform (manage multiple FTMO accounts simultaneously, aggregate reporting)
-- Community features (strategy marketplace, backtesting-as-a-service, performance leaderboards)
-- SaaS evolution (subscription model for other FTMO traders, managed hosting)
-- Advanced compliance (support for retail brokerage regulations, expanded audit features)
+**Phase 3: Advanced Features (Target: Week 9-12)**
+- Advanced rule types (frequency limits, symbol restrictions)
+- Per-account Telegram alerts with account identification
+- Account dashboard/status overview via Telegram bot
+- Rule violation history and compliance reporting
+- Warning thresholds (70%, 80%, 90% of limits)
 
 ### Vision (Future)
 
-**Long-term Vision: Professional Trading Infrastructure Platform**
+- Web dashboard for multi-account monitoring
+- Hot reload for non-critical configuration changes
+- Additional prop firm presets (MFF, True Forex Funds, etc.)
+- Strategy marketplace/sharing
+- Backtesting with multi-account simulation
+- Machine learning for optimal rule suggestions
 
-The ultimate vision extends beyond personal FTMO automation to a comprehensive trading infrastructure platform that empowers technical traders to build, validate, and deploy automated trading systems with professional-grade tools.
+## User Journeys
 
-**Platform Capabilities:**
-- Multi-prop-firm support (FTMO, FTUK, Funded Trader, MyForexFunds, etc.) with unified rule engine
-- Strategy ecosystem (marketplace for buying/selling validated strategies, community backtesting)
-- Advanced validation tools (Monte Carlo simulation, stress testing, regime analysis, correlation analysis)
-- Institutional-grade observability (distributed tracing, anomaly detection, predictive alerting)
-- Collaborative features (team-based strategy development, shared research, performance benchmarking)
+### Journey 1: Marcus Chen - The Multi-Prop-Firm Trader
 
-**Business Model Evolution:**
-- Phase 1-3: Personal infrastructure (no revenue, focus on capability)
-- Phase 4: SaaS for individual traders ($50-200/month subscription)
-- Phase 5+: Team/institutional tier ($500-2000/month for multiple accounts and strategies)
-- Potential: Strategy marketplace revenue sharing, backtesting API for third-party integrations
+Marcus is a 32-year-old professional trader who passed his first FTMO challenge six months ago. He's been profitable and recently qualified for challenges with The5ers and WeMasterTrade as well. His problem? He's running three separate MT5 instances on his Windows machine, each with different manual processes to track compliance. Last week, he almost breached FTMO's daily loss limit because he lost track of his aggregate positions across accounts.
 
-**Technical Vision:**
-- Microservices architecture (independent scaling of data, execution, risk, compliance services)
-- Cloud-native deployment (Kubernetes, auto-scaling, multi-region)
-- ML/AI integration (reinforcement learning for strategy optimization, NLP for news sentiment)
-- Real-time collaborative features (shared workspaces, live strategy collaboration)
+One evening, after a close call where he hit 4.8% daily loss on FTMO, Marcus discovers the Multi-Account Trading System. He spends an hour configuring his three accounts in a single `accounts.yaml` file, selecting the appropriate prop firm presets for each. The next morning, instead of logging into three separate MT5 terminals and manually checking each dashboard, he starts the trading engine with a single command.
 
-This vision guides architectural decisions even in MVP (event-driven design, clean separation of concerns, extensible rule engine) while maintaining pragmatic focus on immediate goals.
+The breakthrough comes during a volatile gold session. His MA Crossover strategy on the FTMO account triggers a buy signal, but the rule engine blocks it - he's already at 4.2% daily loss and the position size would push him over the limit. Marcus receives a Telegram alert: "🟡 FTMO-Gold: Trade blocked - would exceed 5% daily limit (current: 4.2%)". Meanwhile, his The5ers BTC account continues trading normally, completely isolated from the FTMO restriction.
 
----
+Three months later, Marcus has passed two more prop firm challenges and manages five accounts simultaneously. He hasn't had a single compliance breach caused by system oversight. His trading has become more confident because he trusts the system to protect him from himself.
+
+### Journey 2: Sarah Williams - The Custom Rules Trader
+
+Sarah is a 28-year-old personal trader who's been developing her own scalping strategy for EURUSD and GBPUSD. She doesn't trade with prop firms - she uses her own capital with ICMarkets. But she's disciplined and wants strict risk management: never more than 2% daily loss, maximum 2 open positions, and only trade during London/New York sessions.
+
+She hears about the Multi-Account Trading System from Marcus (her trading mentor) and realizes she can use the custom YAML rules feature. Sarah runs `copy-preset ftmo my_rules.yaml` to get a starting template, then modifies it in her text editor:
+
+```yaml
+name: "Sarah's Conservative Rules"
+rules:
+  - type: daily_loss_limit
+    threshold_percent: 2.0  # More conservative than FTMO's 5%
+  - type: max_open_positions
+    limit: 2
+  - type: trading_sessions
+    allowed: ["london", "new_york"]
+```
+
+The setup takes 20 minutes. The "aha!" moment comes when she realizes she can iterate on her rules - adding a `max_spread` filter to skip signals when spread exceeds 1.5 pips, then a `max_trades_per_day` limit of 5 to prevent overtrading during emotional sessions.
+
+Six months later, Sarah's equity curve is the smoothest it's ever been. She attributes it to the rule engine preventing her from making impulsive trades during Asian session (when she used to lose money from boredom trading).
+
+### Journey 3: Alex Rivera - The Crisis Recovery
+
+Alex is running four accounts - two FTMO, one The5ers, one personal. It's Thursday afternoon when his VPS crashes unexpectedly during a high-volatility news event. He has open positions on three accounts.
+
+When the VPS comes back online 3 minutes later, Alex's heart is racing. He starts the trading engine and watches the logs. The crash recovery sequence begins: Redis snapshots are loaded for each account, MT5 connections are re-established, and position reconciliation runs. The system detects his open positions match what's recorded in the snapshots.
+
+The Telegram bot sends: "🔵 System recovered. 4 accounts online. 3 open positions reconciled. 0 discrepancies."
+
+Alex breathes. The rule engine resumes monitoring, and his daily P&L tracking continues from where it left off. No duplicate orders were placed during the crash. No positions were orphaned. The audit log shows exactly what happened during the 3-minute outage.
+
+This experience convinces Alex to recommend the system to his trading community Discord. The crash recovery feature alone is worth the setup effort.
+
+### Journey 4: DevOps Dave - The System Administrator
+
+Dave is a DevOps engineer who manages trading infrastructure for a small prop trading team. He's responsible for deploying, monitoring, and maintaining the Multi-Account Trading System for 3 traders, each running 2-3 accounts.
+
+His morning starts with checking the Telegram bot status overview: all 8 accounts show "active", no overnight rule violations, system health shows all services green. He reviews the audit logs in TimescaleDB for any anomalies - nothing unusual.
+
+When a new trader joins the team, Dave creates their account configurations, adds them to the Docker Compose environment, and deploys. The separation of concerns is clean: traders manage their strategy parameters and rule customizations, Dave manages infrastructure and monitoring.
+
+The critical moment comes when FTMO updates their rules (reducing daily loss limit from 5% to 4% for a new challenge phase). Dave updates the `ftmo.yaml` preset, runs the validation tests, and deploys during market close. All FTMO accounts automatically pick up the new rules on restart. No trader intervention required.
+
+### Journey 5: Emergency Stop - The Market Flash Crash
+
+It's a Monday morning and gold gaps down 3% on unexpected news. Multiple accounts are in drawdown territory. The lead trader, Marcus, sees the chaos unfolding and types `/stop_all` in Telegram.
+
+Within 500ms:
+- All signal processing stops
+- All pending orders are cancelled
+- All accounts are set to "paused" state
+- Existing positions remain open (manual close if needed)
+
+Telegram responds: "🔴 EMERGENCY STOP: 5 accounts paused, 3 pending orders cancelled, 7 open positions preserved."
+
+Marcus and the team assess the situation. Thirty minutes later, volatility subsides. Marcus types `/resume_all` and confirms. The system resumes normal operation, and the rule engine continues protecting each account's compliance limits.
+
+This scenario validates that the system prioritizes trader safety over automation convenience.
+
+### Journey Requirements Summary
+
+| Journey | Capabilities Revealed |
+|---------|----------------------|
+| **Marcus (Multi-Prop)** | Multi-account management, preset rules, signal routing, per-account alerts, risk isolation |
+| **Sarah (Custom Rules)** | YAML rule configuration, copy-preset workflow, custom rule types, iterative refinement |
+| **Alex (Crisis Recovery)** | Crash recovery, Redis snapshots, position reconciliation, audit logging, state persistence |
+| **Dave (DevOps)** | Docker deployment, centralized monitoring, preset updates, multi-user management |
+| **Emergency Stop** | Telegram commands, emergency stop, account pausing, position preservation |
 
 ## Domain-Specific Requirements
 
-**Fintech High-Complexity Domain Considerations:**
+### Fintech Compliance & Regulatory Overview
 
-As a fintech trading system, this product must address domain-specific requirements that go beyond typical software development:
+The Multi-Account Trading System operates in the automated trading / prop firm compliance domain. While not directly handling client funds or requiring broker licensing (traders use their own MT5 broker accounts), the system has critical compliance implications:
 
-### Compliance & Regulatory Requirements
+1. **Prop Firm Rule Accuracy**: Incorrect rule implementation could cause traders to fail challenges, resulting in financial loss
+2. **Trade Execution Reliability**: System failures during live trading could result in unintended positions or missed exits
+3. **Data Integrity**: Audit trails must be complete and tamper-evident for compliance verification
+4. **Risk Management**: The system is a risk management tool - failures have direct financial consequences
 
-**FTMO Rule Compliance (Core):**
-- System must enforce FTMO challenge rules with zero tolerance: 5% max daily loss, 10% max total drawdown, minimum trading days, profit targets
-- Real-time rule validation (not end-of-day) to prevent violations before they occur
-- Conservative buffer zones (warn at 70-80% of limits, block orders before 100%)
-- Immutable audit trail of all rule checks, violations approached, and preventive actions taken
-- Rule configuration as data (YAML) to support future prop firms without code changes
+### Key Domain Concerns
 
-**Broker Integration Compliance:**
-- Adherence to MT5 API rate limits and usage terms
-- Proper handling of broker-specific order types and constraints
-- Graceful degradation when broker API is unavailable
-- Compliance with broker data feed terms of service
+| Concern | Applicability | Approach |
+|---------|---------------|----------|
+| **Regional Compliance** | Low - traders responsible for their broker compliance | System agnostic to broker regulations |
+| **Security Standards** | Medium - credential management, API security | Env-based secrets, no plaintext passwords |
+| **Audit Requirements** | High - complete trade and rule check history | TimescaleDB audit logs, immutable records |
+| **Fraud Prevention** | Low - single-user system, no external access | Internal use only, no fraud vector |
+| **Data Protection** | Medium - trading credentials and performance data | Local storage, user-controlled deployment |
 
-**Future Expansion Considerations:**
-- If evolving to multi-user platform: data privacy requirements, credential isolation, PII protection
-- If expanding to additional markets/brokers: regional trading regulations, market-specific rules
-- Tax reporting considerations: comprehensive trade logs, P&L calculations, historical data retention
+### Compliance Requirements
 
-### Risk Management Requirements
+#### Prop Firm Rule Compliance
 
-**Multi-Layer Risk Validation:**
-- Strategy-level risk: Position sizing respects FTMO constraints per trade
-- Account-level risk: Aggregate exposure across all strategies monitored in real-time
-- System-level risk: Emergency stop mechanisms, connection loss detection, failsafe defaults
+| Requirement | Implementation | Verification |
+|-------------|----------------|--------------|
+| **FTMO Rules** | Built-in preset matching official FTMO documentation | Manual verification against FTMO dashboard |
+| **The5ers Rules** | Built-in preset matching official The5ers documentation | Manual verification against The5ers dashboard |
+| **WeMasterTrade Rules** | Built-in preset matching official WMT documentation | Manual verification against WMT dashboard |
+| **Rule Update Process** | Version-controlled presets, documented changes | Changelog per preset update |
 
-**Financial Error Prevention:**
-- Duplicate order prevention (idempotency checks)
-- Position reconciliation (system state matches broker state)
-- Balance verification (P&L calculations match broker reported balance)
-- Anomaly detection (orders outside expected size/price ranges flagged)
+#### Audit Trail Requirements
 
-**Operational Risk Management:**
-- Crash recovery without state loss or duplicate orders
-- Connection monitoring with automatic reconnection
-- Data feed health checks (gap detection, stale data detection)
-- Fail-safe defaults (if uncertain, don't trade)
+| Audit Item | Storage | Retention |
+|------------|---------|-----------|
+| **Rule Checks** | TimescaleDB `audit_logs` table | 90 days minimum |
+| **Trade Executions** | TimescaleDB `trades` table | Indefinite |
+| **Rule Violations** | TimescaleDB `rule_violations` table | Indefinite |
+| **Account Snapshots** | Redis (hot) + TimescaleDB (cold) | 7 days (cold) |
+| **System Events** | Structured JSON logs | 30 days |
 
-### Data Integrity & Audit Requirements
+### Industry Standards & Best Practices
 
-**Tamper-Proof Audit Trail:**
-- Every trade decision logged with timestamp, reasoning, market conditions
-- All FTMO rule checks recorded (pass/fail, current values, thresholds)
-- System events tracked (startups, shutdowns, errors, reconnections)
-- Audit log immutable and append-only (no deletion or modification)
+| Standard | Relevance | Implementation |
+|----------|-----------|----------------|
+| **Position Reconciliation** | Critical - MT5 as source of truth | Compare snapshot vs MT5 on recovery |
+| **Fail-Safe Design** | Critical - system should fail closed | Block trades when uncertain, not allow |
+| **Idempotent Operations** | Critical - no duplicate orders | Order ID tracking, confirmation required |
+| **Graceful Degradation** | Important - partial operation vs total failure | Account isolation, per-service health |
 
-**Data Quality Assurance:**
-- Historical data validation before backtest (completeness, accuracy, anomaly detection)
-- Real-time data quality checks (timestamp consistency, price sanity checks, gap detection)
-- Cross-validation between data sources (TradingView vs. MT5 spread comparison)
-- Data provenance tracking (source, timestamp, transformations applied)
+### Required Expertise & Validation
 
-**State Consistency:**
-- Positions, orders, and account balance always reconcilable
-- Periodic state snapshots for disaster recovery
-- State validation on startup (detect inconsistencies from crashes)
-- Synchronization verification between Nautilus cache and broker state
+| Expertise Area | Need | Source |
+|----------------|------|--------|
+| **Prop Firm Rules** | Exact rule documentation for each supported firm | Official prop firm websites, challenge documentation |
+| **MT5 Integration** | ZeroMQ bridge implementation, order execution | MT5 documentation, existing tv-api patterns |
+| **Risk Calculation** | Drawdown calculation methods, P&L tracking | Industry-standard formulas, prop firm definitions |
+| **Trading Sessions** | Session time definitions (London, NY, Tokyo, Sydney) | Standard forex market hours |
 
-### Security Requirements
+### Implementation Considerations
 
-**Credential & Secret Management:**
-- Secure storage of API keys (TradingView, MT5, Telegram, broker credentials)
-- No secrets in code or version control
-- Environment variable or secure vault-based configuration
-- Credential rotation support without system downtime
+1. **Rule Accuracy is Non-Negotiable**: A single false negative (allowing a trade that should be blocked) could fail a trader's challenge. The rule engine must be conservative - when in doubt, block.
 
-**Intellectual Property Protection:**
-- Trading strategies and parameters not exposed in logs or public APIs
-- Access control if future multi-user platform
-- Secure communication channels for all external integrations
+2. **Prop Firm Rule Updates**: Prop firms occasionally update their rules. The system needs:
+   - Version-controlled presets
+   - Clear update process
+   - Notification mechanism for preset changes
 
-### Integration Reliability Requirements
+3. **Testing Strategy**:
+   - Unit tests for each rule type with edge cases
+   - Integration tests with realistic market scenarios
+   - Manual verification against prop firm dashboards before release
 
-**External System Dependencies:**
-- **TradingView API**: Historical data source, must handle rate limits, retry transient failures
-- **MT5 ZeroMQ**: Real-time spreads and execution, must detect connection loss and reconnect
-- **Broker MT5 Terminal**: Execution endpoint, must handle broker downtime gracefully
-- **Redis**: State persistence, must have backup/recovery strategy
-- **PostgreSQL**: Historical data, must handle connection loss without data loss
-
-**Graceful Degradation:**
-- If TradingView data unavailable: Use cached historical data or pause backtesting
-- If MT5 spreads unavailable: Use static spread estimates or pause live trading
-- If broker execution unavailable: Queue orders or pause trading with immediate alert
-- If Telegram unavailable: Log locally and retry alerts
-
-**Health Monitoring:**
-- Connection status for each external system monitored continuously
-- Latency tracking for critical paths (data ingestion, order execution)
-- Data freshness checks (alert if data older than threshold)
-- Heartbeat mechanisms for long-running processes
-
----
+4. **Liability Disclaimer**: System should clearly document:
+   - User responsibility for verifying rule accuracy
+   - No guarantee of challenge pass
+   - User must validate preset rules against current prop firm documentation
 
 ## Innovation & Novel Patterns
 
-This system introduces several innovative approaches that differentiate it from traditional trading bots and generic automation tools:
+### Detected Innovation Areas
 
-### Innovation #1: Compliance-First Architecture
+| Innovation | Description | Novelty Level |
+|------------|-------------|---------------|
+| **Pluggable Rule Engine** | Combining built-in prop firm presets with fully customizable YAML rules in a single framework | High - most trading systems have hardcoded or no compliance rules |
+| **Multi-Account Risk Isolation** | Complete isolation of risk between accounts - one breach doesn't affect others | Medium-High - existing multi-account tools typically share risk state |
+| **Polyglot Trading Architecture** | Go (I/O), Rust (latency-critical), Python (trading logic) - right language per service | Medium - novel for trading systems, proven pattern in web services |
+| **Copy-and-Modify Presets** | `copy-preset ftmo my_rules.yaml` workflow for rule customization | Medium - makes compliance rules accessible to non-developers |
 
-**Novel Approach:** Treating FTMO rule compliance as a first-class architectural concern rather than an afterthought validation layer.
+### Market Context & Competitive Landscape
 
-**What Makes It Unique:**
-- Traditional trading systems focus on strategy alpha with risk management bolted on
-- This system inverts the priority: compliance engine sits at the architectural core, strategies operate within compliance boundaries
-- Declarative rule engine (YAML-based) makes compliance logic explicit, auditable, and extensible
-- Real-time validation after every bar (not EOD) with preventive order blocking
+**Current Market Solutions:**
 
-**Validation Approach:**
-- Historical violation scenario testing: Replay trades that should have triggered rules, verify zero false negatives
-- Conservative buffer testing: Verify system stops trading at 70-80% thresholds, not at 100%
-- Multi-day paper trading: Confirm zero violations over 30+ days across varying market conditions
-- Edge case testing: Rapid drawdown scenarios, gap fills, rollover events
+| Solution Type | Limitation | Our Approach |
+|---------------|------------|--------------|
+| **MT5 Native** | Single account, manual compliance tracking | Multi-account with automated rule engine |
+| **Prop Firm Dashboards** | View-only, no automation, no custom rules | Proactive blocking, custom rules, alerts |
+| **Trading Bots** | Strategy-focused, no compliance, single account | Compliance-first, multi-account, strategy-agnostic |
+| **Risk Management Tools** | Generic, not prop-firm-aware | Prop firm presets, specific rule types |
 
-**Fallback Strategy:**
-If real-time validation proves too complex or has performance issues:
-- Implement dual validation: Real-time (fast, approximate) + periodic (detailed, accurate)
-- Add manual confirmation step before live trading if automated validation can't reach 100% confidence
-- Start with more conservative thresholds (60-70% instead of 70-80%) until proven reliable
+**Gap Being Addressed:**
+No existing solution combines:
+1. Multi-account management (2-5 accounts simultaneously)
+2. Prop firm-specific compliance presets
+3. Fully customizable rule engine (YAML)
+4. Per-account risk isolation
+5. Unified monitoring via Telegram
 
-### Innovation #2: Backtest-Live Convergence Through Realistic Execution Modeling
+### Validation Approach
 
-**Novel Approach:** Eliminating the dangerous "backtest-reality gap" through comprehensive execution realism baked into backtesting framework.
+| Innovation | Validation Method | Success Criteria |
+|------------|-------------------|------------------|
+| **Pluggable Rule Engine** | Unit tests per rule type, integration tests with market scenarios | 100% of FTMO/5ers/WMT rules pass verification against official docs |
+| **Risk Isolation** | Chaos testing - force breach on Account A, verify Account B unaffected | Zero cross-account impact in all test scenarios |
+| **Polyglot Architecture** | Latency benchmarks per service, memory profiling | Bridge < 1ms, engine < 50ms rule check, < 400MB per account |
+| **Preset Workflow** | User testing - can trader create custom rules in < 30 min? | 90% of test users succeed without developer help |
 
-**What Makes It Unique:**
-- Most retail systems use naive execution models (fill at close price, static spread)
-- This system models dynamic spreads (time-of-day, volatility-dependent), realistic slippage (0.5-2.0× spread based on order size), and latency delays (200-800ms)
-- Same codebase runs backtests and live trading (Nautilus feature), eliminating divergence from code differences
-- Walk-forward validation proves out-of-sample performance, not just in-sample overfitting
+### Risk Mitigation
 
-**Validation Approach:**
-- Paper trading is the ultimate validation: Results within 20% of backtest proves model accuracy
-- Slippage tracking: Compare actual vs. modeled slippage, iterate spread model if divergence > 10%
-- Latency measurement: Measure real order-to-fill latency, validate simulation assumptions
-- Continuous calibration: Update spread/slippage models monthly based on live execution data
+| Innovation Risk | Mitigation Strategy | Fallback |
+|-----------------|---------------------|----------|
+| **Rule Engine Complexity** | Start with core 5 rule types, add incrementally | Manual rule checking if engine fails |
+| **Multi-Account Performance** | Benchmark at 5 accounts, optimize bottlenecks | Reduce to 3 accounts if memory constrained |
+| **Polyglot Maintenance** | Clear service boundaries, independent deployment | Consolidate to Python-only if team expertise limited |
+| **Preset Accuracy** | Version control, changelog, manual verification | User override, custom rules always available |
 
-**Fallback Strategy:**
-If backtest-live convergence doesn't achieve within 20%:
-- Increase paper trading duration (60-90 days) to get more representative sample
-- Conservative bias: If backtest is better than live, assume live performance and work backward to improve strategy
-- Incremental strategy deployment: Start with smallest position sizes, scale up only after proven live performance
-- Focus on robustness over optimization: Prefer strategies that perform consistently in both backtest and live rather than chasing backtest performance
+## Developer Tool Specific Requirements
 
-### Innovation #3: Event-Driven Trading Infrastructure for Retail
+### Project-Type Overview
 
-**Novel Approach:** Bringing institutional-grade event-driven architecture patterns to retail/prop trading through Nautilus Trader framework.
+The Multi-Account Trading System is a **CLI-driven developer tool** for traders who are comfortable with:
+- YAML configuration files
+- Command-line interfaces
+- Docker deployment
+- Environment variable management
 
-**What Makes It Unique:**
-- Retail trading systems typically use polling loops, monolithic designs, or fragile state management
-- This system leverages production-grade event bus, type-safe messaging, and clean separation of concerns
-- Natural fit for trading domain: Markets ARE event-driven (bar close, quote update, fill confirmation)
-- Extensibility by design: Add new strategies, symbols, or compliance rules without core changes
+This is not a consumer product with GUI wizards - it's a power-user tool that prioritizes flexibility and control over ease of use.
 
-**Why This Matters:**
-- Scalability: Can handle multiple strategies on multiple symbols concurrently without threading complexity
-- Reliability: Event-driven systems are easier to test, debug, and reason about (deterministic event replay)
-- Maintainability: Clear contracts between components (strategy reacts to bars, risk reacts to orders, compliance reacts to trades)
-- Professional learning: Architecture patterns applicable to broader trading infrastructure development
+### Technical Architecture Considerations
 
-**No Fallback Needed:**
-This is an architectural decision made upfront by choosing Nautilus Trader. The learning curve is the risk, not the approach validity.
+#### Language & Runtime Matrix
 
-### Innovation #4: Pragmatic Hybrid Infrastructure Strategy
+| Service | Language | Runtime | Package Manager |
+|---------|----------|---------|-----------------|
+| **tv-api** | Go 1.21+ | Native binary | go mod |
+| **mt5-bridge** | Rust 1.75+ | Native binary | cargo |
+| **trading-engine** | Python 3.11+ | Python interpreter | uv |
+| **notification** | Go 1.21+ | Native binary | go mod |
 
-**Novel Approach:** Leveraging existing operational infrastructure (tv-api, MT5 ZeroMQ, Redis/PostgreSQL) through adapters rather than rebuilding everything.
+#### Installation Methods
 
-**What Makes It Unique:**
-- "Not invented here" syndrome plagues many developer projects - tendency to rebuild everything
-- This system pragmatically integrates proven components, focusing development effort on differentiating 20% (FTMO rules, realistic modeling, validation)
-- Adapter pattern isolates integration complexity, making it swappable if needed
-- Achieves 6-8 week MVP vs. 6+ months fully custom by standing on existing infrastructure
+| Method | Target User | Prerequisites |
+|--------|-------------|---------------|
+| **Docker Compose** (Primary) | All users | Docker 24+, Docker Compose 2.x |
+| **Local Development** | Contributors | Go, Rust, Python, uv installed |
+| **VPS Deployment** | Production | Ubuntu 22.04+, Docker, SSH access |
 
-**Why This Matters:**
-- Faster validation: Working system in weeks, not months
-- Lower risk: Existing components already proven in production use
-- Focus on differentiation: Development time spent on FTMO compliance engine, not rebuilding data pipelines
-- Extensibility: If TradingView adapter has issues, swap for Nautilus-native adapter without changing core system
+#### CLI Command Surface
 
-**Validation Approach:**
-- Integration tests in Week 2-3: Data flows end-to-end, no gaps, no quality issues
-- Fallback plan: If adapters prove problematic, Nautilus has native data providers (IQFeed, Interactive Brokers)
-- Clear abstraction boundaries: Integration code isolated from strategy/risk/compliance logic
+**Trading Engine CLI:**
+```bash
+# Account management
+trading-engine accounts list
+trading-engine accounts add --config account.yaml
+trading-engine accounts remove <account_id>
+trading-engine accounts start <account_id>
+trading-engine accounts stop <account_id>
+trading-engine accounts status [account_id]
 
----
+# Rule management
+trading-engine rules list-presets
+trading-engine rules copy-preset <preset> <output.yaml>
+trading-engine rules validate <rules.yaml>
 
-## developer_tool Specific Requirements
+# Engine control
+trading-engine start
+trading-engine stop
+trading-engine status
+trading-engine logs [--follow] [--account <id>]
+```
 
-As a **Developer Tool** project type, this system has unique requirements focused on extensibility, developer experience, and framework quality:
+**Docker Compose Commands:**
+```bash
+# Infrastructure
+make infra-up          # Start Redis + TimescaleDB
+make infra-down        # Stop infrastructure
 
-### System Architecture & Design
+# Services
+make build             # Build all service images
+make up                # Start all services
+make down              # Stop all services
+make logs              # View logs
+make restart           # Restart all services
 
-**Framework-Quality Code:**
-- Clear separation of concerns (data layer, strategy layer, risk layer, execution layer, compliance layer)
-- Well-defined interfaces and contracts between components
-- Type hints and documentation for all public APIs
-- Consistent error handling and logging patterns
-- Unit testable components with dependency injection where appropriate
+# Development
+make test              # Run all tests
+make lint              # Run linters
+make build-<service>   # Build specific service
+```
 
-**Extensibility Points:**
-- **New Strategies**: Inherit from base Strategy class, implement signal generation, plug in without core changes
-- **New Symbols**: Add symbol configuration to YAML, data adapters automatically support
-- **New Prop Firms**: Add new rule YAML file, rule engine automatically enforces
-- **New Data Sources**: Implement adapter interface, swap providers without changing downstream code
-- **New Execution Venues**: Implement execution adapter interface, support multiple brokers
+### Configuration File Specifications
 
-**Configuration as Code:**
-- YAML-based configuration for rules, strategies, symbols, risk parameters
-- Environment variables for secrets and deployment-specific settings
-- Code controls behavior, configuration controls specifics
-- Version control for configuration changes with clear migration paths
+#### accounts.yaml Structure
 
-### Developer Experience
+```yaml
+accounts:
+  - id: string           # Unique account identifier (required)
+    name: string         # Human-readable name (required)
+    type: enum           # "prop_firm" | "custom" | "demo" (required)
+    prop_firm: string    # "ftmo" | "the5ers" | "wmt" (if type=prop_firm)
+    rules_file: string   # Path to custom YAML (if type=custom)
+    mt5:
+      server: string     # MT5 server name (required)
+      login: integer     # MT5 login number (required)
+      password_env: string  # Env var name for password (required)
+    strategy: string     # Strategy name (required)
+    strategy_params: object  # Strategy-specific parameters
+    signal_filter:
+      symbols: string[]  # Allowed symbols
+      sessions: string[] # Allowed sessions
+      max_spread_pips: number  # Max spread filter
+    status: enum         # "active" | "paused" | "stopped"
+```
 
-**Project Setup & Onboarding:**
-- Clear README with setup instructions, prerequisites, and architecture overview
-- Automated environment setup (Poetry/pip-tools for dependencies, Docker Compose for services)
-- Example configurations for common use cases (different strategies, different prop firms)
-- Troubleshooting guide for common integration issues
+#### Custom Rules YAML Structure
 
-**Development Workflow:**
-- Local development mode with mock data sources for fast iteration
-- Hot reload for strategy changes without full system restart
-- Comprehensive logging for debugging (structured JSON, multiple log levels)
-- CLI commands for common operations (backtest, paper trade, analyze logs)
+```yaml
+name: string            # Rule set name (required)
+version: string         # Version identifier
+description: string     # Human-readable description
+copied_from: string     # Reference preset (if copied)
 
-**Testing & Validation:**
-- Unit tests for core logic (rule engine, position sizing, risk calculations)
-- Integration tests for data adapters (verify data flows end-to-end)
-- Backtesting framework serves as integration test (strategy + data + execution + risk)
-- Historical scenario replay for regression testing (verify rule engine behavior)
+rules:
+  - type: enum          # Rule type (required)
+    # Type-specific parameters vary per rule type
+    action: enum        # "block_trading" | "skip_signal" | "warn" | "notify"
+    warning_at: number[] # Percentage thresholds for warnings
+```
 
-### Documentation & Learning
+### Documentation Requirements
 
-**Code Documentation:**
-- Docstrings for all classes and public methods (Google style or numpy style)
-- Inline comments for complex logic or non-obvious decisions
-- Type hints for IDE support and self-documenting interfaces
-- Architecture Decision Records (ADR) for key design choices
+| Document | Purpose | Location |
+|----------|---------|----------|
+| **README.md** | Quick start, overview | Project root |
+| **INSTALL.md** | Detailed installation | docs/ |
+| **CONFIGURATION.md** | All config options | docs/ |
+| **RULES.md** | Rule types reference | docs/ |
+| **PRESETS.md** | Prop firm preset docs | docs/ |
+| **API.md** | Internal API reference | docs/ |
+| **TROUBLESHOOTING.md** | Common issues | docs/ |
 
-**System Documentation:**
-- Architecture overview: Component diagram, data flow, event flow
-- Integration guide: How to add new data sources, execution venues, strategies
-- FTMO rule engine: How declarative rules work, how to add new prop firms
-- Troubleshooting guide: Common issues, debugging techniques, FAQ
+### Code Examples to Include
 
-**Learning Resources:**
-- Example strategies with detailed comments explaining event-driven patterns
-- Backtesting tutorial showing how to evaluate and iterate on strategies
-- Walk-forward analysis guide explaining out-of-sample validation
-- Realistic execution modeling explanation with spread/slippage research
+1. **Basic 3-Account Setup** - FTMO + The5ers + Personal
+2. **Custom Rules Creation** - Copy preset and modify
+3. **Docker Deployment** - Full production setup
+4. **Telegram Bot Setup** - Notification configuration
+5. **Strategy Integration** - Adding custom strategy
+6. **Backup & Recovery** - State persistence
 
-### Package & Distribution
+### Implementation Considerations
 
-**MVP: Single-User Installation**
-- Git repository with clear installation instructions
-- Environment setup scripts (Python venv, dependency installation, service startup)
-- Docker Compose for infrastructure services (Redis, PostgreSQL)
-- Configuration templates with sensible defaults
+#### Developer Experience Priorities
 
-**Future: Multi-User Distribution (Phase 4+)**
-- PyPI package for easy installation (`pip install ftmo-trading-system`)
-- Pre-built Docker images for one-command deployment
-- Web-based installer/configurator for non-technical users
-- Managed hosting option (SaaS deployment)
+1. **Clear Error Messages**: Every failure should explain what went wrong and how to fix it
+2. **Validation on Load**: Config files validated before engine starts, not at runtime
+3. **Dry Run Mode**: `trading-engine start --dry-run` to validate without executing
+4. **Verbose Logging**: `--verbose` flag for debugging
+5. **Configuration Dump**: `trading-engine config dump` to show resolved configuration
 
-### Integration & API Requirements
+#### Backward Compatibility
 
-**Data Adapter Interface:**
-- Standardized adapter contract: `get_bars()`, `get_quotes()`, `subscribe_live()`
-- Support for both historical (backtest) and live (streaming) data modes
-- Error handling contract: Transient errors (retry), permanent errors (fail-fast)
-- Data quality validation built into adapter layer
+- Config file format versioned in frontmatter
+- Migration scripts for breaking changes
+- Deprecation warnings before removal
 
-**Execution Adapter Interface:**
-- Standardized execution contract: `submit_order()`, `cancel_order()`, `get_positions()`
-- Order confirmation tracking and timeout handling
-- Slippage monitoring and execution quality metrics
-- Graceful degradation when execution venue unavailable
+## Project Scoping & Phased Development
 
-**Strategy Interface:**
-- Event-driven contract: `on_bar()`, `on_quote()`, `on_order_filled()`
-- Strategy lifecycle: `on_start()`, `on_stop()`, `on_resume()`
-- Position management helpers: `open_position()`, `close_position()`, `size_position()`
-- Market data access: Access to historical bars, current positions, account state
+### MVP Strategy & Philosophy
 
-**Compliance Rule Interface:**
-- Declarative YAML schema for rule definition
-- Rule evaluation contract: `check_compliance(event)` returns pass/fail + metadata
-- Multi-layer rules: Strategy-level, account-level, system-level
-- Rule action contract: Warn, block, emergency stop
+**MVP Approach:** Problem-Solving MVP - Solve the core multi-account compliance problem with minimal but reliable features.
 
----
+**Rationale:**
+- Traders need the compliance protection immediately - a partial solution is better than manual tracking
+- Rule engine accuracy is non-negotiable; better to have fewer rule types that work perfectly
+- Multi-account isolation is the unique value proposition - must work from Day 1
+
+**Resource Requirements:**
+- 1 senior developer with Go/Rust/Python experience
+- Existing tv-api service as foundation
+- 2-3 month development timeline for Phase 1
+
+### MVP Feature Set (Phase 1)
+
+**Core User Journeys Supported:**
+1. ✅ Marcus (Multi-Prop) - Run 3+ accounts simultaneously with preset rules
+2. ✅ Alex (Crisis Recovery) - Crash recovery with position reconciliation
+3. ⚠️ Sarah (Custom Rules) - Basic custom rules (limited rule types)
+4. ❌ Dave (DevOps) - Deferred to Phase 2 (single-user first)
+5. ✅ Emergency Stop - Critical safety feature
+
+**Must-Have Capabilities (Phase 1):**
+
+| Capability | Rationale | Complexity |
+|------------|-----------|------------|
+| Account Manager | Core feature - add/remove/start/stop accounts | Medium |
+| Per-Account MT5 Connections | Required for multi-account | High |
+| FTMO Preset | Most common prop firm | Medium |
+| Daily Loss Limit Rule | Most critical compliance rule | Low |
+| Max Drawdown Rule | Second most critical rule | Low |
+| Basic Signal Routing | Route by symbol filter | Medium |
+| Redis State Snapshots | Required for crash recovery | Medium |
+| Position Reconciliation | Safety-critical | High |
+| Emergency Stop (Telegram) | Safety-critical | Low |
+
+**Explicitly Deferred from MVP:**
+- The5ers and WMT presets (Phase 2)
+- Custom YAML rule loader (Phase 2)
+- Advanced rule types (frequency, sessions) (Phase 2)
+- Account dashboard overview (Phase 2)
+- Multi-user support (Phase 3)
+
+### Post-MVP Features
+
+**Phase 2: Rule Engine Completion (Month 3-4)**
+
+| Feature | User Journey | Priority |
+|---------|--------------|----------|
+| The5ers Preset | Marcus, hybrid traders | High |
+| WeMasterTrade Preset | Marcus, hybrid traders | High |
+| Custom YAML Loader | Sarah (Custom Rules) | High |
+| Trading Hours Rule | Sarah, all users | Medium |
+| Max Positions Rule | Sarah, all users | Medium |
+| Trading Sessions Rule | Sarah, all users | Medium |
+| Per-Account Telegram Alerts | All users | Medium |
+| Rule Violation History | All users | Low |
+
+**Phase 3: Advanced Features (Month 5-6)**
+
+| Feature | User Journey | Priority |
+|---------|--------------|----------|
+| Account Status Dashboard | Dave (DevOps) | Medium |
+| Warning Thresholds (70/80/90%) | All users | Medium |
+| Symbol Restriction Rules | Sarah | Low |
+| Frequency Limit Rules | Sarah | Low |
+| Hot Reload (non-critical config) | Dave | Low |
+| Compliance Reporting | Dave | Low |
+
+### Risk Mitigation Strategy
+
+**Technical Risks:**
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| MT5 connection limits | High | Test with 5 accounts early; implement connection pooling if needed |
+| Rule engine performance | Medium | Benchmark rule validation; optimize only if >50ms |
+| Polyglot complexity | Medium | Clear service boundaries; comprehensive documentation |
+| Crash recovery accuracy | High | Extensive testing; MT5 as source of truth |
+
+**Market Risks:**
+
+| Risk | Mitigation |
+|------|------------|
+| Prop firms change rules | Version-controlled presets; easy update process |
+| Users don't adopt CLI tool | Clear documentation; example configurations |
+| Competition emerges | Focus on rule accuracy and multi-account isolation |
+
+**Resource Risks:**
+
+| Risk | Contingency |
+|------|-------------|
+| Solo developer unavailable | Document everything; modular architecture |
+| Development takes longer | Reduce Phase 1 to FTMO-only; defer other presets |
+| Budget constraints | Docker-only deployment; skip VPS-specific features |
 
 ## Functional Requirements
 
-These functional requirements define the complete capability contract for the FTMO Trading System. Every capability listed here must be implemented for MVP success. FRs are organized by capability area and numbered sequentially.
-
-### Data Integration & Management
-
-**FR1:** tv-api service (Go) can ingest historical OHLCV candle data from TradingView WebSocket for GOLD, BTC, and EUR symbols on 1m and 5m timeframes, publishing to Redis and storing in TimescaleDB
-
-**FR2:** mt5-bridge service (Rust) can receive real-time bid-ask spread updates from MT5 EA via ZeroMQ REQ/REP and publish to trading-engine via ZeroMQ PUB/SUB
-
-**FR3:** trading-engine service (Python) can load 2-3 years of historical data from TimescaleDB for backtesting purposes with automatic handling of date ranges and symbol mapping
-
-**FR4:** trading-engine can validate data quality automatically, detecting gaps, timestamp inconsistencies, impossible prices, and other anomalies
-
-**FR5:** notification service (Go) can alert when data feed freshness exceeds threshold (stale data detection) or when connection to data sources is lost
-
-**FR6:** trading-engine can cross-validate data from multiple sources (compare TradingView candles with MT5 quotes for sanity checks)
-
-**FR7:** All services can handle data source unavailability gracefully (use cached data for backtest, pause live trading with alert via notification service)
-
-### FTMO Compliance & Rule Engine
-
-**FR8:** System can load FTMO compliance rules from declarative YAML configuration files without code changes
-
-**FR9:** System can enforce maximum daily loss rule (default 5%, configurable) by tracking intraday P&L in real-time
-
-**FR10:** System can enforce maximum total drawdown rule (default 10%, configurable) by tracking peak-to-trough account balance
-
-**FR11:** System can track minimum trading days requirement and progress toward profit targets
-
-**FR12:** System can validate compliance rules after every bar close (not end-of-day) for immediate violation detection
-
-**FR13:** System can implement preventive order blocking when approaching risk limits (warn at 70-80%, block orders before 100%)
-
-**FR14:** System can apply multi-layer risk validation: strategy-level, account-level, and system-level checks before order submission
-
-**FR15:** System can maintain immutable audit trail of all compliance checks including timestamps, rule evaluations, threshold values, and pass/fail results
-
-**FR16:** System can support multiple prop firm rule configurations (extensible to FTUK, Funded Trader, etc. through new YAML files)
-
-**FR17:** System can provide emergency stop mechanism that immediately halts all trading when triggered manually or by critical violation
-
-### Strategy Execution & Trading Logic
-
-**FR18:** System can execute trading strategies that inherit from Nautilus Strategy base class with event-driven architecture
-
-**FR19:** System can generate trading signals in response to bar close events (end of 1m or 5m period)
-
-**FR20:** System can calculate position sizes that respect FTMO constraints (daily loss limit, total drawdown limit, maximum position size)
-
-**FR21:** System can manage positions for multiple symbols concurrently (GOLD, BTC, EUR) without interference
-
-**FR22:** System can execute market orders through MT5 broker via ZeroMQ with order confirmation tracking
-
-**FR23:** System can support baseline strategy for infrastructure validation (e.g., moving average crossover with volatility filter)
-
-**FR24:** System can provide strategy lifecycle hooks (on_start, on_stop, on_resume, on_bar, on_quote, on_order_filled)
-
-**FR25:** System can allow strategies to access current positions, account balance, and historical bar data
-
-**FR26:** System can log every trade decision with reasoning, market conditions, and signal parameters for post-trade analysis
-
-### Backtesting & Validation
-
-**FR27:** System can run backtests using Nautilus BacktestEngine with 2-3 years of historical data
-
-**FR28:** System can apply realistic execution model during backtesting including dynamic spreads, slippage, and latency delays
-
-**FR29:** System can model dynamic spreads based on time-of-day and volatility (not static spread assumptions)
-
-**FR30:** System can simulate realistic slippage (0.5-2.0× spread on market orders) based on order size and liquidity
-
-**FR31:** System can simulate order execution latency (200-800ms delay between order submission and fill)
-
-**FR32:** System can perform walk-forward analysis with multiple out-of-sample periods to validate strategy robustness
-
-**FR33:** System can generate validation reports including Sharpe ratio, win rate, maximum drawdown, trade frequency, and red flag indicators
-
-**FR34:** System can detect and alert on red flag metrics indicating overfitting or unrealistic backtest assumptions
-
-**FR35:** System can use identical codebase for backtesting and live trading (no divergence between backtest logic and live execution)
-
-### State Management & Persistence
-
-**FR36:** System can maintain real-time state (positions, orders, account balance) in Nautilus Cache for fast access
-
-**FR37:** System can create periodic state snapshots to Redis (every 5 minutes + on significant events like trades)
-
-**FR38:** System can recover from crashes by restoring state from most recent valid snapshot without duplicate orders or state loss
-
-**FR39:** System can verify state consistency on startup, detecting and alerting on inconsistencies from previous crashes
-
-**FR40:** System can reconcile internal state with broker-reported state (positions, balance) and alert on discrepancies
-
-**FR41:** System can persist historical trade data to PostgreSQL including entry/exit prices, P&L, timestamps, and strategy metadata
-
-**FR42:** System can persist performance metrics and audit logs to PostgreSQL for long-term analysis and tax reporting
-
-**FR43:** System can maintain append-only audit logs that cannot be modified or deleted (tamper-proof)
-
-### Risk Management & Safety
-
-**FR44:** System can prevent duplicate order submission through idempotency checks
-
-**FR45:** System can detect and alert on position reconciliation failures (system position != broker position)
-
-**FR46:** System can validate account balance calculations match broker-reported balance
-
-**FR47:** System can detect anomalies in order parameters (size/price outside expected ranges) and block suspicious orders
-
-**FR48:** System can detect connection loss to critical services (broker, data feeds) and pause trading with immediate alert
-
-**FR49:** System can implement fail-safe defaults (when uncertain about state or connectivity, do not trade)
-
-**FR50:** System can automatically reconnect to data feeds and execution venues after transient connection failures
-
-**FR51:** System can track aggregate exposure across all active strategies to prevent over-leveraging
-
-### Monitoring, Alerts & Observability
-
-**FR52:** All services can generate structured JSON logs for all events, decisions, errors, and state changes
-
-**FR53:** notification service (Go) can send Telegram alerts for trade executions including entry/exit, P&L, and trade reasoning (received via Redis Pub/Sub from trading-engine)
-
-**FR54:** notification service can send Telegram alerts when approaching FTMO risk limits (70-80% thresholds)
-
-**FR55:** notification service can send Telegram alerts for system health issues (connection drops, API errors, data gaps, crashes) from all services
-
-**FR56:** notification service can send daily summary reports via Telegram including trades executed, P&L, rule compliance status
-
-**FR57:** All services can publish health status to Redis, notification service can track and alert on data feed health (connection status, latency, freshness)
-
-**FR58:** trading-engine can monitor execution quality metrics (fill rate, average slippage, latency distribution) and publish alerts via notification service on degradation
-
-**FR59:** All services can log all external API calls and responses for debugging and audit purposes
-
-### Execution & Broker Integration
-
-**FR60:** trading-engine can submit market orders to MT5 broker via mt5-bridge service (Rust) using ZeroMQ REQ/REP pattern
-
-**FR61:** mt5-bridge can track order confirmation and forward to trading-engine, alerting via notification service on order timeouts (acknowledgment within 2 seconds expected)
-
-**FR62:** trading-engine can measure actual slippage on filled orders and compare against expected slippage model
-
-**FR63:** trading-engine can track execution latency (order submission to fill confirmation) per symbol, with metrics stored in TimescaleDB
-
-**FR64:** mt5-bridge can handle broker API errors gracefully (rate limits, temporary unavailability) with retry logic and fallback
-
-**FR65:** mt5-bridge can queue orders during temporary broker unavailability or pause trading with alert via notification service if unavailability persists
-
-### Paper Trading & Live Trading Modes
-
-**FR66:** System can operate in paper trading mode using real market data but simulated execution
-
-**FR67:** System can track paper trading performance metrics and compare against backtest results
-
-**FR68:** System can switch between paper trading and live trading modes through configuration without code changes
-
-**FR69:** System can clearly indicate current trading mode in logs and alerts to prevent confusion
-
-**FR70:** System can maintain separate state and performance tracking for paper vs. live trading
-
-### Configuration & Deployment
-
-**FR71:** System can load all configuration from YAML files (strategies, symbols, rules, risk parameters)
-
-**FR72:** System can load secrets and credentials from environment variables (not hardcoded or in version control)
-
-**FR73:** System can validate configuration on startup and fail fast with clear error messages if misconfigured
-
-**FR74:** System can run in local development mode with mock data sources for fast iteration
-
-**FR75:** System can be deployed via Docker Compose including all 4 services and infrastructure (Redis, TimescaleDB)
-
-**FR76:** System can support VPS deployment with automated startup and health checks
-
-**FR76a:** Each service (tv-api, mt5-bridge, trading-engine, notification) can be built and deployed independently
-
-**FR76b:** System provides unified Makefile commands for building, testing, and deploying all services
-
-**FR76c:** System supports environment-specific configuration via `/configs/dev/` and `/configs/prod/` directories
-
-**FR76d:** Docker Compose configuration includes health checks for all services and infrastructure components
-
-### Extensibility & Developer Experience
-
-**FR77:** System can support adding new trading strategies without modifying core system code (plugin architecture)
-
-**FR78:** System can support adding new symbols by updating configuration without code changes
-
-**FR79:** System can support adding new prop firm rule sets through new YAML files without code changes
-
-**FR80:** System can support swapping data sources by implementing adapter interface without changing downstream code
-
-**FR81:** System can support adding new execution venues through adapter interface
-
-**FR82:** System can provide CLI commands for common operations (run backtest, start paper trading, analyze performance)
-
-**FR83:** System can hot reload strategy configurations without full system restart during development
-
-**FR84:** System can generate configuration templates with sensible defaults for quick setup
-
-**FR84a:** System can support adding new services by creating new folder in `/services` directory following established patterns
-
-**FR84b:** Each service has its own README.md documenting build, run, and test procedures
-
-**FR84c:** Services communicate through well-defined protocols (ZeroMQ, Redis Pub/Sub) with documented message formats
-
-### Testing & Validation Framework
-
-**FR85:** System can replay historical scenarios for regression testing of compliance rule engine
-
-**FR86:** System can execute unit tests for core logic (rule validation, position sizing, risk calculations)
-
-**FR87:** System can execute integration tests validating data flow end-to-end (source → Nautilus → strategy)
-
-**FR88:** System can use backtesting framework as integration test to validate complete system behavior
-
-**FR89:** System can validate zero false negatives in compliance rule enforcement through historical violation replay
-
-### Documentation & Learning
-
-**FR90:** System can provide example strategies with detailed documentation explaining event-driven patterns
-
-**FR91:** System can generate architecture documentation showing component relationships and data flows
-
-**FR92:** System can include troubleshooting guides for common integration issues and debugging techniques
-
-**FR93:** System can maintain architecture decision records (ADR) documenting key design choices
-
----
+### Account Management
+
+- **FR1**: Trader can add a new trading account by providing MT5 credentials and account configuration
+- **FR2**: Trader can remove an existing trading account from the system
+- **FR3**: Trader can start an individual account to begin trading operations
+- **FR4**: Trader can stop an individual account to pause trading operations
+- **FR5**: Trader can view the status of all configured accounts (active, paused, stopped, error)
+- **FR6**: Trader can configure each account with a specific trading strategy and parameters
+- **FR7**: Trader can assign a prop firm preset or custom rule set to each account
+- **FR8**: System can manage up to 5 simultaneous trading accounts
+
+### Rule Engine
+
+- **FR9**: System can load and apply built-in prop firm rule presets (FTMO, The5ers, WeMasterTrade)
+- **FR10**: Trader can create custom rules by copying a preset and modifying it
+- **FR11**: System can validate rule configurations before applying them
+- **FR12**: System can evaluate rules in real-time (every bar) for each account independently
+- **FR13**: System can block trade execution when a rule would be violated
+- **FR14**: System can track daily P&L for each account against daily loss limits
+- **FR15**: System can track total drawdown for each account against max drawdown limits
+- **FR16**: System can enforce trading hours restrictions per account
+- **FR17**: System can enforce position size limits per account
+- **FR18**: System can log every rule check with timestamp, values, and decision
+
+### Signal Routing
+
+- **FR19**: System can receive trading signals from strategies
+- **FR20**: System can route signals to appropriate accounts based on symbol filter
+- **FR21**: System can filter signals based on account-specific criteria (spread, session)
+- **FR22**: Trader can configure which symbols each account is allowed to trade
+
+### Trade Execution
+
+- **FR23**: System can send order commands to MT5 via ZeroMQ bridge
+- **FR24**: System can receive order execution confirmations from MT5
+- **FR25**: System can track order status (pending, filled, rejected, cancelled)
+- **FR26**: System can record trade execution details (entry price, slippage, fill time)
+- **FR27**: System can maintain independent MT5 connections per account
+
+### Risk Isolation
+
+- **FR28**: System can isolate risk state between accounts (one account's breach doesn't affect others)
+- **FR29**: System can continue operating unaffected accounts when one account is paused or stopped
+- **FR30**: System can track per-account equity, balance, and drawdown independently
+
+### State Management & Recovery
+
+- **FR31**: System can persist account state to Redis every 5 seconds
+- **FR32**: System can recover account state from Redis snapshot after crash
+- **FR33**: System can reconcile positions with MT5 after recovery
+- **FR34**: System can detect and log discrepancies between snapshot and MT5 positions
+- **FR35**: System can resume trading operations after successful recovery
+
+### Notifications & Alerts
+
+- **FR36**: Trader can receive Telegram notifications for trade executions
+- **FR37**: Trader can receive Telegram warnings when approaching rule limits
+- **FR38**: Trader can receive Telegram alerts when rules are violated
+- **FR39**: Trader can view account status overview via Telegram bot
+- **FR40**: Trader can trigger emergency stop for all accounts via Telegram command
+- **FR41**: Trader can pause/resume individual accounts via Telegram commands
+
+### Audit & Compliance
+
+- **FR42**: System can maintain complete audit trail of all rule checks in TimescaleDB
+- **FR43**: System can record all trade executions with full context per account
+- **FR44**: System can track rule violations with violation details and context
+- **FR45**: System can store daily account snapshots for compliance verification
+
+### Configuration Management
+
+- **FR46**: Trader can configure accounts via YAML configuration file
+- **FR47**: Trader can configure custom rules via YAML rule files
+- **FR48**: System can validate configuration files before engine start
+- **FR49**: Trader can view resolved configuration via CLI command
+
+### System Operations
+
+- **FR50**: Trader can start the trading engine via CLI command
+- **FR51**: Trader can stop the trading engine gracefully via CLI command
+- **FR52**: Trader can view engine status and health via CLI command
+- **FR53**: Trader can view logs filtered by account via CLI command
+- **FR54**: System can perform graceful shutdown preserving all state
 
 ## Non-Functional Requirements
 
 ### Performance
 
-**Latency & Response Time:**
-- Order submission to broker acknowledgment: Target 100-500ms (sufficient for 1m/5m timeframes)
-- FTMO compliance rule validation: Complete within 100ms per rule check to enable real-time validation
-- Data ingestion pipeline: Process incoming bars/quotes with < 50ms delay to maintain data freshness
-- Strategy signal generation: Complete within single bar period (60s for 1m, 300s for 5m) with margin for processing
-- State snapshot creation: Complete Redis snapshot in < 1 second to minimize impact on trading operations
+| Requirement | Target | Rationale |
+|-------------|--------|-----------|
+| **NFR1**: Signal processing latency | < 500ms end-to-end | Sufficient for swing/position trading on 1m+ timeframes |
+| **NFR2**: Rule validation time | < 50ms per rule check | Must not block trade execution flow |
+| **NFR3**: State snapshot frequency | Every 5 seconds | Balance between data safety and I/O overhead |
+| **NFR4**: Crash recovery time | < 30 seconds | Minimize exposure during market hours |
+| **NFR5**: Telegram notification delivery | < 2 seconds | Near real-time awareness for trader |
+| **NFR6**: MT5 order execution round-trip | < 1 second | Broker-dependent but system shouldn't add delay |
 
-**Throughput:**
-- Data pipeline: Handle concurrent data streams for 3 symbols × 2 timeframes = 6 simultaneous feeds
-- Parallel processing: Support multiple strategies operating independently on different symbols without performance degradation
-- Event processing: Handle burst events during high volatility (100+ events/second) without queue backlog
-- Logging: Write structured logs at 1000+ events/second without blocking main trading logic
+### Reliability
 
-**Resource Efficiency:**
-- Memory: Operate within 2GB RAM for MVP single-strategy deployment (scales with strategy count)
-- CPU: Maintain < 50% CPU utilization during normal trading to leave headroom for volatility spikes
-- Storage: PostgreSQL historical data < 10GB for 3 years × 3 symbols (compressed, indexed)
-- Network: Minimize data transfer with local caching, acceptable on typical VPS bandwidth (100 Mbps)
-
-**Performance Priorities (Ranked):**
-1. Reliability & consistency (zero missed signals, zero crashes) > raw speed
-2. Fast risk response (compliance validation < 100ms)
-3. Execution quality (minimize slippage) > execution speed
-4. Data pipeline efficiency (non-blocking indicator calculations)
-5. Parallel strategy processing
+| Requirement | Target | Rationale |
+|-------------|--------|-----------|
+| **NFR7**: System uptime per account | 99.9% during market hours | Trading cannot happen if system is down |
+| **NFR8**: Zero false negatives | 100% rule accuracy | A missed violation could fail a prop firm challenge |
+| **NFR9**: Position reconciliation accuracy | 100% match with MT5 | MT5 is source of truth for positions |
+| **NFR10**: Graceful degradation | Per-account isolation | One account failure must not cascade |
+| **NFR11**: Data persistence | Zero trade data loss | Complete audit trail required |
 
 ### Security
 
-**Authentication & Authorization:**
-- All API credentials (TradingView, MT5, Telegram, broker) stored securely, never in code or version control
-- Environment variables or secure vault (e.g., AWS Secrets Manager, HashiCorp Vault) for production deployment
-- No credentials logged or exposed in error messages or debug output
-
-**Data Protection:**
-- Trading strategies and parameters treated as intellectual property, not exposed in logs or external APIs
-- Audit logs contain trading decisions but not proprietary strategy logic
-- Database connections use encrypted channels (SSL/TLS)
-- Telegram bot communication over HTTPS
-
-**Secrets Management:**
-- Support credential rotation without system downtime (reload configuration without restart)
-- Separate credentials for paper trading vs. live trading environments
-- API keys have minimum required permissions (principle of least privilege)
-
-**Future Multi-User Considerations (Phase 4+):**
-- User credential isolation (each user's API keys stored separately)
-- Role-based access control (admin, trader, viewer roles)
-- Data privacy compliance (GDPR if European users, appropriate data retention policies)
-
-### Reliability & Availability
-
-**Uptime:**
-- Target 99.5% uptime during market hours (allows ~3.6 hours downtime per month for maintenance)
-- Planned maintenance during market close windows when possible
-- VPS deployment for production (99.9% infrastructure uptime)
-
-**Crash Recovery:**
-- System recovers from crashes automatically with state restoration from Redis snapshots
-- No duplicate orders on restart (idempotency enforced)
-- State validation on startup detects inconsistencies and alerts for manual verification if needed
-- Maximum state loss: 5 minutes (time since last snapshot)
-
-**Connection Resilience:**
-- Automatic reconnection to data feeds after transient failures (retry with exponential backoff)
-- Automatic reconnection to broker after connection drops
-- Graceful degradation: Pause trading if critical connections unavailable > 60 seconds with immediate alert
-- Heartbeat monitoring for all external connections (detect silent failures within 30 seconds)
-
-**Data Integrity:**
-- Audit logs append-only, immutable (no deletion or modification)
-- State snapshots atomic (complete or not at all, no partial states)
-- Database transactions for trade records (ACID compliance)
-- Periodic reconciliation between system state and broker state (every 15 minutes during trading)
-
-**Error Handling:**
-- Fail-safe defaults: When uncertain, do not trade (prefer safety over opportunity)
-- All errors logged with full context (stack trace, system state, market conditions)
-- Critical errors trigger immediate Telegram alerts with actionable information
-- Non-critical errors logged for post-analysis without blocking operations
+| Requirement | Implementation |
+|-------------|----------------|
+| **NFR12**: Credential storage | MT5 passwords stored in environment variables, never in config files |
+| **NFR13**: Telegram bot token | Environment variable, not committed to repository |
+| **NFR14**: Database credentials | Environment variables with restricted access |
+| **NFR15**: Network isolation | All services on internal Docker network, minimal port exposure |
+| **NFR16**: Audit log integrity | Append-only logs in TimescaleDB, no delete permissions |
 
 ### Scalability
 
-**MVP Scope (Limited Scalability Requirements):**
-- 3 symbols (GOLD, BTC, EUR) on 2 timeframes (1m, 5m) = manageable with single instance
-- 1 strategy in MVP, designed to support 3-5 strategies in Phase 2
-- Single trading account (one FTMO challenge at a time)
+| Requirement | Target | Rationale |
+|-------------|--------|-----------|
+| **NFR17**: Account capacity | 5 simultaneous accounts | Design limit per original brief |
+| **NFR18**: Memory per account | < 400MB | Total system footprint ~2GB for 5 accounts |
+| **NFR19**: Redis connection pooling | Shared pool across accounts | Efficient resource utilization |
+| **NFR20**: Horizontal scaling | Not required | Single-node deployment sufficient for MVP |
 
-**Design for Future Scaling (Phase 2+):**
-- Event-driven architecture naturally supports horizontal scaling (add more strategies without interference)
-- Stateless strategy design enables running multiple strategy instances in parallel
-- Database schema designed for multiple accounts/strategies (indexed by account_id, strategy_id)
-- Redis can cluster for higher throughput if needed (MVP uses single instance)
+### Maintainability
 
-**Scalability Priorities:**
-- MVP: Prove single-strategy reliability, not scale
-- Phase 2: Support 5-10 concurrent strategies on single VPS
-- Phase 3: Multi-account support (manage multiple FTMO challenges simultaneously)
-- Phase 4: Multi-user platform (requires microservices architecture, beyond MVP scope)
+| Requirement | Implementation |
+|-------------|----------------|
+| **NFR21**: Service independence | No shared code between services | Independent deployment and versioning |
+| **NFR22**: Configuration validation | All configs validated before engine start | Fail fast on misconfiguration |
+| **NFR23**: Structured logging | JSON-formatted logs with correlation IDs | Easy debugging and log aggregation |
+| **NFR24**: Error messages | Actionable error messages with suggested fixes | Developer-friendly troubleshooting |
+| **NFR25**: Documentation | README, installation guide, configuration reference | Self-service onboarding |
 
-### Maintainability & Supportability
+### Integration
 
-**Code Quality:**
-- Type hints throughout codebase (Python 3.10+ type annotations)
-- Docstrings for all public classes and methods (Google or numpy style)
-- Inline comments for complex logic or non-obvious implementation decisions
-- Consistent code style (enforced by linters: black, pylint, mypy)
+| Requirement | Target | Rationale |
+|-------------|--------|-----------|
+| **NFR26**: MT5 ZeroMQ protocol | Compatible with standard MT5 EA ZeroMQ | Leverage existing MT5 ecosystem |
+| **NFR27**: Redis protocol | Redis 7.2+ compatible | Standard Redis commands and pub/sub |
+| **NFR28**: PostgreSQL protocol | PostgreSQL 16+ / TimescaleDB | Standard SQL with time-series extensions |
+| **NFR29**: Telegram Bot API | Official Telegram Bot API | Standard bot commands and messaging |
 
-**Testability:**
-- Unit test coverage > 70% for core logic (rule engine, position sizing, risk validation)
-- Integration tests for all adapters (data, execution)
-- Backtesting framework serves as end-to-end integration test
-- Historical scenario replay for regression testing
+### Observability
 
-**Observability:**
-- Structured JSON logging with consistent field names and formats
-- Log levels appropriately used (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-- All significant events logged: trades, rule checks, errors, state changes, external API calls
-- Logs include context: timestamp, module, function, market conditions, system state
+| Requirement | Implementation |
+|-------------|----------------|
+| **NFR30**: Health endpoints | Each service exposes health check | Container orchestration integration |
+| **NFR31**: Service heartbeats | 30-second heartbeat to Redis | Detect service failures quickly |
+| **NFR32**: Account health tracking | Per-account connection status in Redis | Quick identification of account issues |
+| **NFR33**: Audit trail queryability | TimescaleDB indexes on account, timestamp, rule | Efficient compliance queries |
 
-**Debugging Support:**
-- Comprehensive logs enable post-incident analysis without reproducing issues
-- Event replay capability for debugging strategy logic
-- Performance profiling hooks (can enable detailed timing in development mode)
-- Health check endpoints for monitoring system status
-
-**Configuration Management:**
-- All configuration in version control (YAML files)
-- Configuration changes documented (git commit messages explain why)
-- Backward compatibility for configuration schema (migrations documented)
-- Validation on startup catches configuration errors early
-
-### Deployment & Operations
-
-**Deployment Targets:**
-- **Development**: Local machine with Docker Compose for services (Redis, PostgreSQL)
-- **Production MVP**: Single VPS (Digital Ocean, AWS EC2, Linode) with Docker Compose
-- **Future**: Kubernetes for multi-instance deployment (Phase 4)
-
-**Deployment Automation:**
-- Docker Compose configuration includes all required services with correct network configuration
-- Environment setup script automates dependency installation (Python packages, Docker, etc.)
-- Configuration templates with sensible defaults (minimal manual configuration required)
-- Health checks verify successful deployment (all services running, connections established)
-
-**Operational Requirements:**
-- Monitoring dashboard not required for MVP (Telegram alerts sufficient)
-- Log aggregation not required for MVP (local logs sufficient, consider Grafana/Loki in Phase 2)
-- Backup strategy: Redis snapshots every 5 minutes, PostgreSQL nightly backups
-- Disaster recovery: Restore from latest Redis snapshot + PostgreSQL backup, manual state reconciliation if needed
-
-**Operational Cost:**
-- VPS: $50-100/month for production deployment (8GB RAM, 4 CPU cores, 100GB SSD)
-- Data feeds: Existing TradingView subscription, MT5 broker data included
-- Infrastructure services: Self-hosted Redis/PostgreSQL (no external service costs)
-- Total operational cost: $50-100/month
-
-### Usability & Developer Experience
-
-**Developer Onboarding:**
-- New developer can setup development environment in < 30 minutes following README
-- Example strategy provided demonstrates all key patterns (event handling, position management, risk integration)
-- Troubleshooting guide addresses common setup issues (connection problems, configuration errors)
-
-**Configuration & Setup:**
-- Configuration YAML files human-readable and well-commented
-- Validation provides clear error messages (e.g., "Invalid symbol 'BTCUSD': Expected format 'BTC', available symbols: ['GOLD', 'BTC', 'EUR']")
-- Environment variables documented with examples (.env.example template provided)
-
-**Debugging & Iteration:**
-- Local development mode with mock data enables fast iteration without external dependencies
-- Hot reload for strategy changes (no full restart needed during development)
-- Backtest iterations complete in minutes (not hours), enabling rapid strategy experimentation
-- Logs human-readable with appropriate verbosity (INFO level for high-level flow, DEBUG for detailed trace)
-
-**CLI Usability:**
-- CLI commands intuitive and consistent (e.g., `ftmo-system backtest --strategy=ma_cross --period=2023`)
-- Help text available for all commands (`--help` flag)
-- Progress indicators for long-running operations (backtest progress bar)
-- Output formatted for readability (tables, colors, clear sections)
-
-### Compliance & Audit
-
-**Audit Trail Requirements:**
-- Every trade logged with: strategy name, symbol, direction, size, entry/exit price, P&L, timestamp, reasoning
-- Every compliance check logged with: rule name, current value, threshold, pass/fail, timestamp
-- System events logged: startups, shutdowns, errors, reconnections, configuration changes
-- Audit log format: Structured JSON for easy parsing and analysis
-
-**Retention Requirements:**
-- Trade history: Retain indefinitely (required for tax reporting and performance analysis)
-- Audit logs: Retain for 2 years minimum (sufficient for FTMO challenge duration + analysis)
-- Performance metrics: Retain indefinitely (long-term strategy evaluation)
-- System logs: Retain for 90 days (debugging recent issues), archive older logs
-
-**Tamper-Proofing:**
-- Audit logs append-only (no modification or deletion operations)
-- File permissions restrict write access to system process only
-- Consider cryptographic hashing for critical audit entries if regulatory requirements increase (Phase 4)
-
-**Reporting:**
-- Daily summary reports: Trades, P&L, rule compliance status, system health
-- Monthly performance reports: Strategy metrics, execution quality, compliance track record
-- On-demand reports: Backtest results, walk-forward analysis, trade-by-trade breakdown
-- Export formats: CSV for spreadsheet analysis, JSON for programmatic access
-
----
-
-_This PRD v2.0 captures the comprehensive requirements for the FTMO Trading System - a professional monorepo with 4 independent microservices (tv-api, mt5-bridge, trading-engine, notification) built for reliability, validation, and FTMO compliance. With 100+ functional requirements organized into 13 capability areas and comprehensive non-functional requirements covering performance, security, reliability, and maintainability, this document serves as the complete contract for architecture and epic breakdown._
-
-_Architecture: See `docs/architecture.md` for detailed technical specifications._
-
-_**Project Classification:** Developer Tool in the Fintech domain with High Complexity_
-
-_**What Makes It Special:** Real-time automated FTMO compliance through first-class architectural design, backtest-reality alignment through realistic execution modeling, professional event-driven architecture for retail/prop trading, and pragmatic infrastructure leverage through adapter-based integration._
-
-_**Key Success Metrics:** Zero FTMO violations over 30+ days paper trading, paper results within 20% of backtest, 24-hour uptime without crashes, confidence gate passed to risk FTMO challenge fee._
-
-_Created through YOLO-mode workflow execution analyzing Product Brief for FTMO Trading System._
