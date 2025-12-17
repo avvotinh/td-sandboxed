@@ -1,10 +1,12 @@
-# HFT Data Lakehouse - Git Ignore Configuration
+# Sandboxed Trading System - Git Ignore Configuration
 # NFR6: Prevent secrets from being committed
 
 # Environment files (contains secrets)
 .env
 .env.local
 .env.*.local
+configs/**/.env
+configs/**/.env.local
 
 # Docker volumes and data
 data/

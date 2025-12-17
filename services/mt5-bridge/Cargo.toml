@@ -1,0 +1,9 @@
+[package]
+name = "mt5-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "MT5 Bridge service for ZeroMQ communication with MetaTrader 5"
+authors = ["Sandboxed Team"]
+
+[dependencies]
+# Dependencies added in Story 1.7

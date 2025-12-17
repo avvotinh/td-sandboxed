@@ -1,0 +1,20 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+*.iml
+
+# Cargo.lock is optional for libraries, required for applications
+# Keeping it for reproducible builds
+# Cargo.lock
+
+# Environment
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db

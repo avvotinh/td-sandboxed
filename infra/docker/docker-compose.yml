@@ -1,20 +1,14 @@
-version: '3.8'
-
 services:
-  # Redis - Hot storage for latest ticks (NFR1: <20ms latency)
+  # Redis - Hot storage for latest ticks and real-time data
   redis:
     image: redis:7-alpine
-    container_name: hft-redis
+    container_name: trading-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: >
-      redis-server 
-      --appendonly yes
-      --appendfsync everysec
-      --maxmemory 2gb
-      --maxmemory-policy allkeys-lru
+      - ../redis/redis.conf:/usr/local/etc/redis/redis.conf:ro,z
+    command: redis-server /usr/local/etc/redis/redis.conf
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -22,81 +16,30 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - hft-network
+      - trading-net
 
-  # TimescaleDB - Short-term hot storage for time-series data
+  # TimescaleDB - Time-series data storage (PostgreSQL 16+)
   timescaledb:
     image: timescale/timescaledb:latest-pg16
-    container_name: hft-timescaledb
+    container_name: trading-timescaledb
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-hft_lakehouse}
-      POSTGRES_USER: ${POSTGRES_USER:-hftuser}
+      POSTGRES_DB: ${POSTGRES_DB:-trading}
+      POSTGRES_USER: ${POSTGRES_USER:-trading}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5432:5432"
     volumes:
       - timescale_data:/var/lib/postgresql/data
+      - ../timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql:ro,z
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hftuser} -d ${POSTGRES_DB:-hft_lakehouse}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trading} -d ${POSTGRES_DB:-trading}"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
     networks:
-      - hft-network
+      - trading-net
     shm_size: 256mb
-
-  # Ingestion Client - TradingView WebSocket data collector
-  ingestion-client:
-    build:
-      context: ./tv-api
-      dockerfile: Dockerfile
-    container_name: hft-ingestion-client
-    environment:
-      # TradingView credentials
-      SESSION_ID: ${SESSION_ID}
-      SESSION_SIGN: ${SESSION_SIGN}
-      
-      # Storage connections
-      REDIS_URL: redis:6379
-      TIMESCALE_URL: postgres://${POSTGRES_USER:-hftuser}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB:-hft_lakehouse}?sslmode=disable
-      
-      # Logging
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      LOG_FORMAT: ${LOG_FORMAT:-json}
-      
-      # Performance tuning
-      BATCH_SIZE: ${BATCH_SIZE:-100}
-      FLUSH_INTERVAL: ${FLUSH_INTERVAL:-1s}
-    volumes:
-      - ./tv-api/config.yaml:/app/config.yaml:ro
-    depends_on:
-      redis:
-        condition: service_healthy
-      timescaledb:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - hft-network
-
-  # Benchmark Tool - Performance testing (Story 1.5)
-  benchmark:
-    build:
-      context: ./scripts/benchmark
-      dockerfile: Dockerfile
-    container_name: hft-benchmark
-    environment:
-      REDIS_URL: redis:6379
-      TIMESCALE_URL: postgres://${POSTGRES_USER:-hftuser}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB:-hft_lakehouse}?sslmode=disable
-      ITERATIONS: ${BENCHMARK_ITERATIONS:-1000}
-    depends_on:
-      - redis
-      - timescaledb
-    networks:
-      - hft-network
-    profiles:
-      - tools
 
 volumes:
   redis_data:
@@ -105,7 +48,7 @@ volumes:
     driver: local
 
 networks:
-  hft-network:
+  trading-net:
     driver: bridge
     ipam:
       config:
