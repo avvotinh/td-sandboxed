@@ -1,3 +1,13 @@
+# Sandboxed Trading System - Infrastructure Stack
+# Docker Compose Variable Precedence (highest to lowest):
+# 1. Shell environment variables (export VAR=value)
+# 2. Values in compose.yml environment: section
+#
+# Usage: export POSTGRES_PASSWORD=yourpassword && docker compose up -d
+# Or source configs/dev/.env before running docker compose
+#
+# Each service only receives the environment variables it needs (principle of least privilege)
+
 services:
   # Redis - Hot storage for latest ticks and real-time data
   redis:
@@ -25,7 +35,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-trading}
       POSTGRES_USER: ${POSTGRES_USER:-trading}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
     ports:
       - "5432:5432"
     volumes:
