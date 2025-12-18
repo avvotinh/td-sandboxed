@@ -1420,7 +1420,7 @@ cp configs/.env.example configs/dev/.env
 # Edit configs/dev/.env with your credentials
 
 # Start infrastructure
-make infra-up  # or: docker-compose -f infra/docker/docker-compose.yml up -d redis timescaledb
+make infra-up  # or: docker compose -f infra/docker/docker-compose.yml up -d redis timescaledb
 
 # Build and start services
 make build     # Build all service images
@@ -1446,10 +1446,10 @@ cp configs/.env.example configs/prod/.env
 # Configure production credentials
 
 # Start with base compose (production settings via .env)
-docker-compose -f infra/docker/docker-compose.yml up -d
+docker compose -f infra/docker/docker-compose.yml up -d
 
 # Or with production overrides (when docker-compose.prod.yml exists)
-# docker-compose -f infra/docker/docker-compose.yml \
+# docker compose -f infra/docker/docker-compose.yml \
 #                -f infra/docker/docker-compose.prod.yml \
 #                up -d
 ```
@@ -1461,30 +1461,42 @@ docker-compose -f infra/docker/docker-compose.yml up -d
 ```makefile
 # Makefile (root level)
 
-.PHONY: all build up down logs test lint
+.PHONY: all build up down logs test lint clean help \
+        infra-up infra-down infra-logs infra-status \
+        build-tv-api build-mt5-bridge build-trading-engine build-notification \
+        test-tv-api test-mt5-bridge test-trading-engine test-notification \
+        lint-tv-api lint-mt5-bridge lint-trading-engine lint-notification \
+        restart
+
+# Variables
+COMPOSE_FILE := infra/docker/docker-compose.yml
+DOCKER_COMPOSE := docker compose -f $(COMPOSE_FILE)
 
 # Infrastructure
 infra-up:
-	docker-compose -f infra/docker/docker-compose.yml up -d redis timescaledb
+	$(DOCKER_COMPOSE) up -d redis timescaledb
 
 infra-down:
-	docker-compose -f infra/docker/docker-compose.yml down
+	$(DOCKER_COMPOSE) down
 
 # Build all services
 build:
-	docker-compose -f infra/docker/docker-compose.yml build
+	$(DOCKER_COMPOSE) build
 
 # Start all services
 up:
-	docker-compose -f infra/docker/docker-compose.yml up -d
+	$(DOCKER_COMPOSE) up -d
 
 # Stop all services
 down:
-	docker-compose -f infra/docker/docker-compose.yml down
+	$(DOCKER_COMPOSE) down
 
 # View logs
 logs:
-	docker-compose -f infra/docker/docker-compose.yml logs -f
+	$(DOCKER_COMPOSE) logs -f
+
+# Restart all services
+restart: down up
 
 # Individual service commands
 build-tv-api:
