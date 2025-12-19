@@ -1,5 +1,6 @@
 # Go binaries
 bin/
+bot
 *.exe
 *.exe~
 *.dll

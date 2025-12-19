@@ -45,7 +45,7 @@ development_status:
   1-5-makefile-build-commands: done
   1-6-trading-engine-service-scaffold: done
   1-7-mt5-bridge-service-scaffold: done
-  1-8-notification-service-scaffold: backlog
+  1-8-notification-service-scaffold: done
   1-9-docker-compose-full-stack: backlog
   epic-1-retrospective: optional
 
