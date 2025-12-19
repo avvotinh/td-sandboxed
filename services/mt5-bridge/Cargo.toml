@@ -4,6 +4,34 @@ version = "0.1.0"
 edition = "2021"
 description = "MT5 Bridge service for ZeroMQ communication with MetaTrader 5"
 authors = ["Sandboxed Team"]
+rust-version = "1.83"
 
 [dependencies]
-# Dependencies added in Story 1.7
+# Async runtime
+tokio = { version = "1.40", features = ["full", "signal"] }
+
+# ZeroMQ - native Rust implementation
+zeromq = { version = "0.4", default-features = true }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging/tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tokio = { version = "1.40", features = ["rt", "macros"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

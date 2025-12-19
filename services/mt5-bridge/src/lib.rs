@@ -1,8 +1,14 @@
 //! MT5 Bridge Library
 //!
-//! Core library for MT5 bridge functionality.
-//! Full implementation in Story 1.7.
+//! Provides ZeroMQ bridge functionality for MT5 communication.
 
-pub mod bridge {
-    // Bridge module placeholder
-}
+pub mod config;
+pub mod error;
+pub mod handlers;
+pub mod models;
+pub mod protocol;
+pub mod zmq_server;
+
+pub use config::Config;
+pub use error::BridgeError;
+pub use zmq_server::ZmqServer;
