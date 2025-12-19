@@ -51,10 +51,98 @@ services:
       - trading-net
     shm_size: 256mb
 
+  # ================== APPLICATION SERVICES ==================
+
+  # TV-API - TradingView data collector (Go)
+  tv-api:
+    build:
+      context: ../../services/tv-api
+      dockerfile: Dockerfile
+    container_name: trading-tv-api
+    environment:
+      REDIS_URL: redis:6379
+      TIMESCALE_URL: postgres://${POSTGRES_USER:-trading}:${POSTGRES_PASSWORD:-devpassword}@timescaledb:5432/${POSTGRES_DB:-trading}
+      SESSION_ID: ${SESSION_ID:-}
+      SESSION_SIGN: ${SESSION_SIGN:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - trading-net
+    restart: unless-stopped
+
+  # MT5-Bridge - MetaTrader 5 ZeroMQ bridge (Rust)
+  mt5-bridge:
+    build:
+      context: ../../services/mt5-bridge
+      dockerfile: Dockerfile
+    container_name: trading-mt5-bridge
+    ports:
+      - "5555:5555"  # REQ/REP with MT5 EA
+      - "5556:5556"  # PUB tick data
+      - "5557:5557"  # SUB order commands
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      ZMQ_REQ_PORT: 5555
+      ZMQ_PUB_PORT: 5556
+      ZMQ_SUB_PORT: 5557
+    networks:
+      - trading-net
+    restart: unless-stopped
+
+  # Trading-Engine - NautilusTrader-based engine (Python)
+  trading-engine:
+    build:
+      context: ../../services/trading-engine
+      dockerfile: Dockerfile
+    container_name: trading-engine
+    environment:
+      REDIS_URL: redis://redis:6379
+      TIMESCALE_URL: postgres://${POSTGRES_USER:-trading}:${POSTGRES_PASSWORD:-devpassword}@timescaledb:5432/${POSTGRES_DB:-trading}
+      ZMQ_BRIDGE_HOST: mt5-bridge
+      ZMQ_PUB_PORT: 5556
+      ZMQ_SUB_PORT: 5557
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      mt5-bridge:
+        condition: service_started
+    volumes:
+      - engine_data:/app/data
+    networks:
+      - trading-net
+    restart: unless-stopped
+
+  # Notification - Telegram notification bot (Go)
+  notification:
+    build:
+      context: ../../services/notification
+      dockerfile: Dockerfile
+    container_name: trading-notification
+    environment:
+      REDIS_URL: redis:6379
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      NOTIFICATION_LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - trading-net
+    restart: unless-stopped
+
 volumes:
   redis_data:
     driver: local
   timescale_data:
+    driver: local
+  engine_data:
     driver: local
 
 networks:
