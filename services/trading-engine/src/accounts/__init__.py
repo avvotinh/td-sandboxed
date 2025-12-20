@@ -11,8 +11,11 @@ Exports:
 - AccountType: Account type enumeration (prop_firm, personal, demo)
 - MT5Config: MT5 connection configuration
 - SignalFilter: Signal filtering configuration
+- AccountState: Account lifecycle state enumeration
+- AccountManager: Account lifecycle manager
 """
 
+from .account_manager import AccountManager
 from .models import (
     AccountConfig,
     AccountsConfig,
@@ -20,10 +23,13 @@ from .models import (
     MT5Config,
     SignalFilter,
 )
+from .state import AccountState
 
 __all__ = [
     "AccountConfig",
     "AccountsConfig",
+    "AccountManager",
+    "AccountState",
     "AccountType",
     "MT5Config",
     "SignalFilter",

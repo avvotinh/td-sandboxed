@@ -6,6 +6,33 @@
 # IMPORTANT: MT5 passwords are resolved from environment variables.
 # Never store passwords directly in this file!
 #
+# ============================================================================
+# CLI ACCOUNT MANAGEMENT COMMANDS
+# ============================================================================
+# Start an account (from stopped or new state):
+#   trading-engine accounts start <account_id>
+#   Example: trading-engine accounts start ftmo-gold-001
+#
+# Stop an account (positions remain open):
+#   trading-engine accounts stop <account_id> [--force]
+#   Example: trading-engine accounts stop ftmo-gold-001 --force
+#
+# Pause an account temporarily:
+#   trading-engine accounts pause <account_id>
+#   Example: trading-engine accounts pause ftmo-gold-001
+#
+# Resume a paused account:
+#   trading-engine accounts resume <account_id>
+#   Example: trading-engine accounts resume ftmo-gold-001
+#
+# Show all account statuses:
+#   trading-engine accounts status
+#
+# Show specific account status:
+#   trading-engine accounts status <account_id>
+#   Example: trading-engine accounts status ftmo-gold-001
+#
+#
 # Environment Variable Naming Convention:
 #   <FIRM_NAME>_PASS_<ACCOUNT_ID>
 #   Examples:

@@ -4,6 +4,12 @@ This module handles:
 - Redis state snapshots
 - Position reconciliation
 - Crash recovery state
+- Account status persistence
 
-Full implementation in Epic 5+.
+Exports:
+- RedisStateManager: Async Redis state persistence
 """
+
+from .redis_state import RedisStateManager
+
+__all__ = ["RedisStateManager"]
