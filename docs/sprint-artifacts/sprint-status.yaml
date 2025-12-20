@@ -1,4 +1,4 @@
-# generated: 2025-12-17
+# generated: 2025-12-20 (Epic 2 contexted with NautilusTrader research via Context7)
 # project: Sandboxed
 # project_key: sandboxed
 # tracking_system: file-system
@@ -29,7 +29,7 @@
 # - SM typically drafts next story after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', SM reviews, then Dev moves to 'done'
 
-generated: 2025-12-17
+generated: 2025-12-20
 project: Sandboxed
 project_key: sandboxed
 tracking_system: file-system
@@ -46,12 +46,12 @@ development_status:
   1-6-trading-engine-service-scaffold: done
   1-7-mt5-bridge-service-scaffold: done
   1-8-notification-service-scaffold: done
-  1-9-docker-compose-full-stack: review
+  1-9-docker-compose-full-stack: done
   epic-1-retrospective: optional
 
   # Epic 2: Single Account Trading Core (10 stories)
-  epic-2: backlog
-  2-1-account-model-and-configuration: backlog
+  epic-2: contexted
+  2-1-account-model-and-configuration: done
   2-2-account-lifecycle-management-start-stop: backlog
   2-3-mt5-bridge-zeromq-server: backlog
   2-4-trading-engine-zeromq-adapter: backlog

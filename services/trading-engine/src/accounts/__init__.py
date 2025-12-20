@@ -5,5 +5,26 @@ This module handles:
 - Signal routing per account
 - Account state persistence
 
-Full implementation in Epic 2+.
+Exports:
+- AccountConfig: Single trading account configuration
+- AccountsConfig: Collection of account configurations
+- AccountType: Account type enumeration (prop_firm, personal, demo)
+- MT5Config: MT5 connection configuration
+- SignalFilter: Signal filtering configuration
 """
+
+from .models import (
+    AccountConfig,
+    AccountsConfig,
+    AccountType,
+    MT5Config,
+    SignalFilter,
+)
+
+__all__ = [
+    "AccountConfig",
+    "AccountsConfig",
+    "AccountType",
+    "MT5Config",
+    "SignalFilter",
+]

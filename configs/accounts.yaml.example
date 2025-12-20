@@ -1,0 +1,199 @@
+# Trading Accounts Configuration
+# ================================
+# This file defines all trading accounts managed by the trading engine.
+# Copy this file to accounts.yaml and configure your accounts.
+#
+# IMPORTANT: MT5 passwords are resolved from environment variables.
+# Never store passwords directly in this file!
+#
+# Environment Variable Naming Convention:
+#   <FIRM_NAME>_PASS_<ACCOUNT_ID>
+#   Examples:
+#     - FTMO_PASS_001 for FTMO account 001
+#     - THE5ERS_PASS_001 for The5ers account 001
+#     - PERSONAL_PASS for personal account
+
+accounts:
+  # ============================================================================
+  # PROP FIRM ACCOUNT EXAMPLE
+  # ============================================================================
+  # Prop firm accounts require either:
+  #   - prop_firm: Name of a supported prop firm preset (e.g., "ftmo")
+  #   - rules_file: Path to a custom rules configuration file
+  #
+  # The prop_firm preset applies the firm's specific compliance rules:
+  #   - Daily loss limits
+  #   - Maximum drawdown limits
+  #   - Position size restrictions
+  #   - Trading session restrictions
+  #
+  - id: ftmo-gold-001
+    name: "FTMO Gold Challenge"
+    type: prop_firm
+
+    # Compliance rules source (choose one):
+    prop_firm: ftmo          # Use FTMO's preset rules
+    # rules_file: "configs/rules/custom-ftmo.yaml"  # OR use custom rules
+
+    # MT5 Connection Configuration
+    mt5:
+      server: "FTMO-Server"           # MT5 broker server name
+      login: 12345678                 # MT5 account login number
+      password_env: "FTMO_PASS_001"   # Environment variable containing password
+
+    # Strategy Configuration
+    strategy: ma_crossover           # Strategy name to execute
+    strategy_params:                 # Strategy-specific parameters
+      fast_period: 20
+      slow_period: 50
+      timeframe: "H1"
+
+    # Signal Filtering (optional)
+    signal_filter:
+      symbols:                       # Only process signals for these symbols
+        - "EURUSD"
+        - "GBPUSD"
+        - "USDJPY"
+      sessions:                      # Only trade during these sessions
+        - "london"
+        - "new_york"
+      max_spread_pips: 2.0           # Skip signals with spread above this
+
+    # Account Status
+    # Options: active, paused, stopped
+    status: active
+
+  # ============================================================================
+  # THE5ERS ACCOUNT EXAMPLE (commented out - uncomment to use)
+  # ============================================================================
+  # - id: the5ers-swing-001
+  #   name: "The5ers Swing Trading"
+  #   type: prop_firm
+  #   prop_firm: the5ers
+  #
+  #   mt5:
+  #     server: "The5ers-Server"
+  #     login: 87654321
+  #     password_env: "THE5ERS_PASS_001"
+  #
+  #   strategy: breakout_strategy
+  #   strategy_params:
+  #     breakout_periods: 20
+  #     atr_multiplier: 1.5
+  #
+  #   signal_filter:
+  #     symbols:
+  #       - "XAUUSD"
+  #       - "EURUSD"
+  #
+  #   status: active
+
+  # ============================================================================
+  # PERSONAL ACCOUNT EXAMPLE (commented out - uncomment to use)
+  # ============================================================================
+  # Personal accounts also require a rules source for risk management.
+  # You can use a prop_firm preset or define custom rules.
+  #
+  # - id: personal-main
+  #   name: "Personal Trading Account"
+  #   type: personal
+  #
+  #   # Use custom rules file for personal risk management
+  #   rules_file: "configs/rules/personal-rules.yaml"
+  #
+  #   mt5:
+  #     server: "MyBroker-Live"
+  #     login: 11111111
+  #     password_env: "PERSONAL_PASS"
+  #
+  #   strategy: trend_following
+  #   strategy_params:
+  #     entry_threshold: 0.002
+  #     trailing_stop: true
+  #
+  #   # No symbol filter = trade all available symbols
+  #   signal_filter:
+  #     max_spread_pips: 3.0
+  #
+  #   status: active
+
+  # ============================================================================
+  # DEMO ACCOUNT EXAMPLE
+  # ============================================================================
+  # Demo accounts don't require compliance rules (prop_firm or rules_file).
+  # Use demo accounts for testing strategies without real money risk.
+  #
+  - id: demo-testing
+    name: "Strategy Testing Demo"
+    type: demo
+
+    mt5:
+      server: "Demo-Server"
+      login: 99999999
+      password_env: "DEMO_PASS"
+
+    strategy: experimental_strategy
+    strategy_params:
+      experimental_param: 100
+
+    # Default signal_filter (empty) = no filtering
+    # Default status = "active"
+
+  # ============================================================================
+  # PAUSED ACCOUNT EXAMPLE (commented out - uncomment to use)
+  # ============================================================================
+  # Paused accounts are loaded but won't process signals.
+  # Use this to temporarily disable an account without removing its config.
+  #
+  # - id: ftmo-paused-001
+  #   name: "FTMO Account (Paused)"
+  #   type: prop_firm
+  #   prop_firm: ftmo
+  #
+  #   mt5:
+  #     server: "FTMO-Server"
+  #     login: 55555555
+  #     password_env: "FTMO_PASS_002"
+  #
+  #   strategy: ma_crossover
+  #   strategy_params:
+  #     fast_period: 10
+  #     slow_period: 30
+  #
+  #   status: paused  # Account won't process signals
+
+# ============================================================================
+# CONFIGURATION REFERENCE
+# ============================================================================
+#
+# Account Fields:
+#   id: (required) Unique identifier (alphanumeric, dashes, underscores)
+#   name: (required) Human-readable account name
+#   type: (required) One of: prop_firm, personal, demo
+#   prop_firm: (conditional) Preset name for prop firm rules
+#   rules_file: (conditional) Path to custom rules YAML
+#   mt5: (required) MT5 connection configuration
+#   strategy: (required) Strategy name to execute
+#   strategy_params: (optional) Strategy-specific parameters, default: {}
+#   signal_filter: (optional) Signal filtering rules
+#   status: (optional) Account status, default: "active"
+#
+# MT5 Configuration:
+#   server: (required) MT5 broker server name
+#   login: (required) MT5 account number (positive integer)
+#   password_env: (required) Environment variable name for password
+#                 Must be UPPERCASE with underscores only
+#
+# Signal Filter:
+#   symbols: (optional) List of allowed symbols, default: [] (all allowed)
+#   sessions: (optional) List of allowed sessions, default: [] (all allowed)
+#   max_spread_pips: (optional) Maximum spread filter, default: null (no limit)
+#
+# Status Values:
+#   active: Account is fully operational
+#   paused: Account is loaded but won't process signals
+#   stopped: Account is disabled
+#
+# Rules Requirement:
+#   - prop_firm and personal accounts MUST specify either prop_firm or rules_file
+#   - demo accounts don't require rules (for testing without restrictions)

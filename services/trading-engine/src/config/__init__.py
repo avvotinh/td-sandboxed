@@ -2,8 +2,15 @@
 
 This module handles:
 - Environment-based configuration (pydantic-settings)
-- Account configuration
+- Account configuration loading and validation
 - Trading parameters
 
-Full implementation in Epic 2+.
+Exports:
+- ConfigLoader: YAML configuration loader with validation
+- ConfigSyntaxError: User-friendly YAML syntax error wrapper
+- ConfigValidationError: User-friendly validation error wrapper
 """
+
+from .loader import ConfigLoader, ConfigSyntaxError, ConfigValidationError
+
+__all__ = ["ConfigLoader", "ConfigSyntaxError", "ConfigValidationError"]
