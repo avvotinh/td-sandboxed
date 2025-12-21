@@ -1,9 +1,20 @@
 """Adapters module - External integrations.
 
 This module handles:
-- Redis adapter for market data and state
 - ZeroMQ adapter for MT5 bridge communication
-- Database adapter for TimescaleDB
-
-Full implementation in Epic 2+.
+- Redis adapter for market data and state (planned)
+- Database adapter for TimescaleDB (planned)
 """
+
+from .zmq_adapter import ZmqAdapter, ZmqConfig
+from .zmq_models import Order, OrderResult, OrderSide, OrderStatus, Tick
+
+__all__ = [
+    "ZmqAdapter",
+    "ZmqConfig",
+    "Tick",
+    "Order",
+    "OrderResult",
+    "OrderSide",
+    "OrderStatus",
+]

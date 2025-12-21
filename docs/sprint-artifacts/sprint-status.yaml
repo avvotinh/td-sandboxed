@@ -53,8 +53,8 @@ development_status:
   epic-2: contexted
   2-1-account-model-and-configuration: done
   2-2-account-lifecycle-management-start-stop: done
-  2-3-mt5-bridge-zeromq-server: in-progress
-  2-4-trading-engine-zeromq-adapter: backlog
+  2-3-mt5-bridge-zeromq-server: done
+  2-4-trading-engine-zeromq-adapter: done
   2-5-order-execution-flow: backlog
   2-6-redis-market-data-subscription: backlog
   2-7-basic-strategy-framework: backlog
