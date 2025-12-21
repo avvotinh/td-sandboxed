@@ -11,16 +11,11 @@ use tracing_subscriber::EnvFilter;
 async fn main() -> anyhow::Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env().add_directive(Level::INFO.into()),
-        )
+        .with_env_filter(EnvFilter::from_default_env().add_directive(Level::INFO.into()))
         .json()
         .init();
 
-    info!(
-        version = env!("CARGO_PKG_VERSION"),
-        "MT5 Bridge starting"
-    );
+    info!(version = env!("CARGO_PKG_VERSION"), "MT5 Bridge starting");
 
     // Load configuration
     let config = Config::load()?;
@@ -32,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Create and run server
-    let server = ZmqServer::new(config)?;
+    let mut server = ZmqServer::new(config).await?;
 
     // Handle shutdown signals (SIGINT and SIGTERM)
     let shutdown = async {

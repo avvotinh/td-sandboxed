@@ -5,6 +5,15 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Heartbeat message from MT5 EA.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Heartbeat {
+    /// Account identifier
+    pub account_id: String,
+    /// Timestamp in ISO 8601 format
+    pub timestamp: String,
+}
+
 /// Message type identifier.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

@@ -3,7 +3,9 @@
 use serde::Deserialize;
 use thiserror::Error;
 
+/// Configuration errors (reserved for future validation).
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum ConfigError {
     #[error("Environment variable {0} not set")]
     MissingEnv(String),
@@ -53,8 +55,7 @@ impl Config {
             zmq_sub_port: std::env::var("ZMQ_SUB_PORT")
                 .unwrap_or_else(|_| "5557".to_string())
                 .parse()?,
-            bind_address: std::env::var("BIND_ADDRESS")
-                .unwrap_or_else(|_| "0.0.0.0".to_string()),
+            bind_address: std::env::var("BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0".to_string()),
         };
         Ok(config)
     }
