@@ -56,7 +56,7 @@ development_status:
   2-3-mt5-bridge-zeromq-server: done
   2-4-trading-engine-zeromq-adapter: done
   2-5-order-execution-flow: done
-  2-6-redis-market-data-subscription: backlog
+  2-6-redis-market-data-subscription: done
   2-7-basic-strategy-framework: backlog
   2-8-ma-crossover-strategy-implementation: backlog
   2-9-signal-filtering-by-symbol: backlog
