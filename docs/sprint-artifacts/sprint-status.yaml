@@ -59,7 +59,7 @@ development_status:
   2-6-redis-market-data-subscription: done
   2-7-basic-strategy-framework: done
   2-8-ma-crossover-strategy-implementation: done
-  2-9-signal-filtering-by-symbol: backlog
+  2-9-signal-filtering-by-symbol: review
   2-10-cli-engine-commands: backlog
   epic-2-retrospective: optional
 

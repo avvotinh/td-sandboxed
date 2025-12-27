@@ -2,6 +2,30 @@
 
 This module provides routing of market data (bars, ticks) from adapters
 to account strategies based on signal filtering rules.
+
+Integration Pattern with RedisAdapter:
+--------------------------------------
+The StrategyDataRouter is designed to integrate with RedisAdapter via callbacks:
+
+    # Setup router with accounts
+    router = StrategyDataRouter(accounts)
+
+    # Connect to RedisAdapter for bar routing
+    redis_adapter.set_bar_callback(router.route_bar)
+
+    # Or for async contexts
+    redis_adapter.set_bar_callback(router.route_bar_async)
+
+Signal Filtering:
+-----------------
+- Bars/ticks are filtered based on account.signal_filter.symbols
+- Empty symbols list allows all symbols (permissive by default)
+- Symbol matching is case-insensitive (e.g., "xauusd" matches "XAUUSD")
+- Filtered signals are logged at DEBUG level for troubleshooting
+
+See also:
+- src/adapters/redis_adapter.py for callback integration
+- src/accounts/models.py for SignalFilter configuration
 """
 
 from __future__ import annotations
@@ -20,6 +44,7 @@ logger = logging.getLogger(__name__)
 class HasStrategy(Protocol):
     """Protocol for objects with a strategy and signal filter."""
 
+    id: str
     strategy_instance: BaseStrategy | None
     strategy: str
     status: str
@@ -147,10 +172,20 @@ class StrategyDataRouter:
         if not allowed_symbols:
             return True  # Empty = allow all
 
-        # Normalize and compare
+        # Normalize and compare (case-insensitive)
         symbol_upper = symbol.upper()
         allowed_upper = [s.upper() for s in allowed_symbols]
-        return symbol_upper in allowed_upper
+
+        if symbol_upper not in allowed_upper:
+            logger.debug(
+                "Filtered data for %s - not in account %s filter (allowed: %s)",
+                symbol,
+                getattr(account, 'id', 'unknown'),
+                allowed_symbols,
+            )
+            return False
+
+        return True
 
     def get_bar_callback(self) -> Callable[[Bar], None]:
         """Get sync callback for bar routing.
