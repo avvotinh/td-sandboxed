@@ -14,6 +14,7 @@ class TestSignalType:
         assert SignalType.BUY.value == "BUY"
         assert SignalType.SELL.value == "SELL"
         assert SignalType.CLOSE.value == "CLOSE"
+        assert SignalType.NONE.value == "NONE"
 
     def test_is_entry_for_buy(self):
         """BUY should be an entry signal."""
@@ -29,6 +30,12 @@ class TestSignalType:
         """CLOSE should be an exit signal."""
         assert SignalType.CLOSE.is_exit() is True
         assert SignalType.CLOSE.is_entry() is False
+
+    def test_is_none_for_none(self):
+        """NONE should be a no-action signal."""
+        assert SignalType.NONE.is_none() is True
+        assert SignalType.NONE.is_entry() is False
+        assert SignalType.NONE.is_exit() is False
 
 
 class TestSignal:
@@ -71,6 +78,19 @@ class TestSignal:
         assert signal.is_close is True
         assert signal.is_buy is False
         assert signal.is_sell is False
+
+    def test_create_none_signal(self):
+        """Should create a valid NONE signal (no action)."""
+        signal = Signal(
+            signal_type=SignalType.NONE,
+            symbol="XAUUSD",
+            strategy_name="test_strategy",
+        )
+        assert signal.signal_type == SignalType.NONE
+        assert signal.is_none is True
+        assert signal.is_buy is False
+        assert signal.is_sell is False
+        assert signal.is_close is False
 
     def test_timestamp_auto_generated(self):
         """Timestamp should be auto-generated."""
