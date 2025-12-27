@@ -39,6 +39,7 @@ from src.strategies.account_binding import (
 from src.strategies.base_strategy import BaseStrategy
 from src.strategies.config import BaseStrategyConfig
 from src.strategies.data_router import StrategyDataRouter
+from src.strategies.ma_crossover import MACrossoverConfig, MACrossoverStrategy
 from src.strategies.position_sizer import PositionSizer, PositionSizerConfig
 from src.strategies.registry import StrategyRegistry, register_strategy
 
@@ -46,6 +47,8 @@ __all__ = [
     "BaseStrategy",
     "BaseStrategyConfig",
     "BoundAccount",
+    "MACrossoverConfig",
+    "MACrossoverStrategy",
     "PositionSizer",
     "PositionSizerConfig",
     "StrategyDataRouter",
