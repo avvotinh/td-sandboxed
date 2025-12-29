@@ -2,10 +2,12 @@
 
 This module handles:
 - ZeroMQ adapter for MT5 bridge communication
+- MT5 Connection Manager for per-account connections
 - Redis adapter for market data subscription
 - Database adapter for TimescaleDB (planned)
 """
 
+from .mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
 from .redis_adapter import MaxReconnectAttemptsError, RedisAdapter
 from .redis_config import RedisConfig
 from .redis_models import Bar
@@ -26,4 +28,7 @@ __all__ = [
     "OrderResult",
     "OrderSide",
     "OrderStatus",
+    # MT5 Connection Manager
+    "MT5ConnectionManager",
+    "ConnectionHealth",
 ]

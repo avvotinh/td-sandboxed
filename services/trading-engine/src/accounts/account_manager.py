@@ -9,6 +9,7 @@ from .models import AccountConfig, AccountsConfig
 from .state import AccountState
 
 if TYPE_CHECKING:
+    from ..adapters.mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
     from ..state.redis_state import RedisStateManager
     from .signal_router import SignalRouter
 
@@ -57,6 +58,7 @@ class AccountManager:
         self._error_counts: dict[str, int] = {}  # Track error count per account
         self._accounts_lock = asyncio.Lock()  # Protect account mutations
         self._signal_router: "SignalRouter | None" = None  # Optional signal router
+        self._mt5_connection_manager: "MT5ConnectionManager | None" = None  # Per-account connections
 
     def load_accounts(self, config: AccountsConfig) -> None:
         """Load account configurations for validation.
@@ -94,13 +96,51 @@ class AccountManager:
         """
         return self._signal_router
 
+    def set_mt5_connection_manager(self, manager: "MT5ConnectionManager") -> None:
+        """Register an MT5ConnectionManager for per-account connections.
+
+        When registered, connection lifecycle is managed automatically:
+        - start_connection() called when account transitions to "active"
+        - stop_connection() called when account transitions to "stopped"
+
+        Args:
+            manager: MT5ConnectionManager instance to register.
+        """
+        self._mt5_connection_manager = manager
+
+    def get_mt5_connection_manager(self) -> "MT5ConnectionManager | None":
+        """Get the registered MT5ConnectionManager.
+
+        Returns:
+            The registered MT5ConnectionManager or None if not registered.
+        """
+        return self._mt5_connection_manager
+
+    def get_connection_health(self, account_id: str) -> "ConnectionHealth | None":
+        """Get MT5 connection health for an account.
+
+        Args:
+            account_id: Account to get connection health for.
+
+        Returns:
+            ConnectionHealth if MT5ConnectionManager is registered, None otherwise.
+        """
+        if self._mt5_connection_manager is None:
+            return None
+        return self._mt5_connection_manager.get_health(account_id)
+
     async def start_all_accounts(self) -> None:
         """Start all accounts with status 'active' concurrently.
 
         Each account runs in its own asyncio.Task with isolated error handling.
+        If MT5ConnectionManager is registered, also starts per-account MT5 connections.
 
         Note: AccountConfig.status is a string field with pattern validation.
         """
+        # Start MT5 connections first if manager is registered
+        if self._mt5_connection_manager is not None:
+            await self._mt5_connection_manager.start_all_connections()
+
         for account_id, account in self._accounts.items():
             if account.status == "active":
                 await self._spawn_account_task(account_id)
@@ -237,6 +277,7 @@ class AccountManager:
         """Stop a trading account - cancel task and update status.
 
         This method is safe to call even if the account task isn't running.
+        Also stops the MT5 connection if MT5ConnectionManager is registered.
 
         Args:
             account_id: Account ID to stop.
@@ -261,6 +302,10 @@ class AccountManager:
                 logger.warning(f"Account {account_id} task did not stop within timeout")
             finally:
                 self._tasks.pop(account_id, None)
+
+        # Stop MT5 connection if manager is registered
+        if self._mt5_connection_manager is not None:
+            await self._mt5_connection_manager.stop_connection(account_id)
 
         current = await self.get_account_status(account_id)
 
@@ -375,6 +420,7 @@ class AccountManager:
 
         This operation is atomic - the account is added and started (if active)
         within a single lock acquisition to prevent race conditions.
+        Also starts the MT5 connection if MT5ConnectionManager is registered.
 
         Args:
             account_id: Account ID to add.
@@ -405,6 +451,10 @@ class AccountManager:
 
             # Start if status is active (within lock for atomicity)
             if new_account.status == "active":
+                # Start MT5 connection if manager is registered
+                if self._mt5_connection_manager is not None:
+                    await self._mt5_connection_manager.start_connection(account_id)
+
                 await self._spawn_account_task(account_id)
 
             logger.info(f"Hot-loaded account {account_id}")
@@ -414,10 +464,15 @@ class AccountManager:
 
         This is the preferred method for stopping the AccountManager.
         It:
-        1. Stops all account tasks gracefully
-        2. Closes the Redis connection
+        1. Stops all MT5 connections gracefully (if registered)
+        2. Stops all account tasks gracefully
+        3. Closes the Redis connection
         """
         logger.info("Shutting down all account tasks...")
+
+        # Stop all MT5 connections first
+        if self._mt5_connection_manager is not None:
+            await self._mt5_connection_manager.stop_all_connections()
 
         # Cancel all tasks
         for account_id, task in list(self._tasks.items()):

@@ -37,11 +37,17 @@ class MT5Config(BaseModel):
         server: MT5 broker server name
         login: MT5 account login number (must be positive)
         password_env: Environment variable name containing the MT5 password
+        zmq_host: ZeroMQ bridge host for this account
+        zmq_tick_port: Port for tick subscription (SUB socket)
+        zmq_order_port: Port for order publication (PUB socket)
     """
 
     server: str = Field(..., description="MT5 server name")
     login: int = Field(..., gt=0, description="MT5 login number")
     password_env: str = Field(..., description="Environment variable name for password")
+    zmq_host: str = Field(default="localhost", description="ZeroMQ bridge host")
+    zmq_tick_port: int = Field(default=5556, ge=1024, le=65535, description="Port for tick subscription")
+    zmq_order_port: int = Field(default=5557, ge=1024, le=65535, description="Port for order publication")
 
     @field_validator("password_env")
     @classmethod

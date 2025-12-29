@@ -51,19 +51,23 @@ class ZmqConfig(BaseModel):
         bridge_host: Hostname of mt5-bridge service
         tick_port: Port to SUB for ticks (mt5-bridge PUB)
         order_port: Port to PUB for orders (mt5-bridge SUB connects)
+        bind_address: Address to bind PUB socket (default 127.0.0.1 for security)
         recv_timeout_ms: Receive timeout in milliseconds
         send_timeout_ms: Send timeout in milliseconds
         reconnect_ivl_ms: Initial reconnect interval
         reconnect_ivl_max_ms: Maximum reconnect interval
+        account_id: Account identifier for routing (optional, for per-account connections)
     """
 
     bridge_host: str = "localhost"
     tick_port: int = 5556  # Port we SUB to for ticks (mt5-bridge PUB)
     order_port: int = 5557  # Port we PUB on for orders (mt5-bridge SUB connects)
+    bind_address: str = "127.0.0.1"  # Bind to localhost by default for security
     recv_timeout_ms: int = 1000
     send_timeout_ms: int = 5000
     reconnect_ivl_ms: int = 1000
     reconnect_ivl_max_ms: int = 30000
+    account_id: str | None = None  # For per-account connection tracking
 
 
 @dataclass
@@ -152,7 +156,7 @@ class ZmqAdapter:
             self._pub_socket.setsockopt(zmq.SNDTIMEO, self.config.send_timeout_ms)
             self._pub_socket.setsockopt(zmq.LINGER, 1000)
 
-            pub_endpoint = f"tcp://0.0.0.0:{self.config.order_port}"
+            pub_endpoint = f"tcp://{self.config.bind_address}:{self.config.order_port}"
             self._pub_socket.bind(pub_endpoint)
 
             logger.info("PUB socket bound to %s", pub_endpoint)
