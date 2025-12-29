@@ -7,6 +7,13 @@
 # Never store passwords directly in this file!
 #
 # ============================================================================
+# MULTI-ACCOUNT LIMITS
+# ============================================================================
+# Maximum accounts: 5 (configurable in src/accounts/models.py)
+# Supported prop firms: ftmo, the5ers, wmt (case-insensitive)
+# Account IDs must be unique across all accounts
+#
+# ============================================================================
 # CLI ACCOUNT MANAGEMENT COMMANDS
 # ============================================================================
 # Start an account (from stopped or new state):
@@ -91,58 +98,63 @@ accounts:
     status: active
 
   # ============================================================================
-  # THE5ERS ACCOUNT EXAMPLE (commented out - uncomment to use)
+  # THE5ERS ACCOUNT EXAMPLE
   # ============================================================================
-  # - id: the5ers-swing-001
-  #   name: "The5ers Swing Trading"
-  #   type: prop_firm
-  #   prop_firm: the5ers
+  # Another prop firm with different preset rules
   #
-  #   mt5:
-  #     server: "The5ers-Server"
-  #     login: 87654321
-  #     password_env: "THE5ERS_PASS_001"
-  #
-  #   strategy: breakout_strategy
-  #   strategy_params:
-  #     breakout_periods: 20
-  #     atr_multiplier: 1.5
-  #
-  #   signal_filter:
-  #     symbols:
-  #       - "XAUUSD"
-  #       - "EURUSD"
-  #
-  #   status: active
+  - id: the5ers-swing-001
+    name: "The5ers Swing Trading"
+    type: prop_firm
+    prop_firm: the5ers            # Note: Case-insensitive ("THE5ERS", "The5ers" also work)
+
+    mt5:
+      server: "The5ers-Server"
+      login: 87654321
+      password_env: "THE5ERS_PASS_001"
+
+    strategy: breakout_strategy
+    strategy_params:
+      breakout_periods: 20
+      atr_multiplier: 1.5
+
+    signal_filter:
+      symbols:
+        - "XAUUSD"
+        - "EURUSD"
+
+    status: active
 
   # ============================================================================
-  # PERSONAL ACCOUNT EXAMPLE (commented out - uncomment to use)
+  # PERSONAL ACCOUNT WITH CUSTOM RULES EXAMPLE
   # ============================================================================
-  # Personal accounts also require a rules source for risk management.
-  # You can use a prop_firm preset or define custom rules.
+  # Personal accounts require either prop_firm preset or custom rules_file.
+  # This example shows using a custom rules file for personalized risk management.
   #
-  # - id: personal-main
-  #   name: "Personal Trading Account"
-  #   type: personal
-  #
-  #   # Use custom rules file for personal risk management
-  #   rules_file: "configs/rules/personal-rules.yaml"
-  #
-  #   mt5:
-  #     server: "MyBroker-Live"
-  #     login: 11111111
-  #     password_env: "PERSONAL_PASS"
-  #
-  #   strategy: trend_following
-  #   strategy_params:
-  #     entry_threshold: 0.002
-  #     trailing_stop: true
-  #
-  #   # No symbol filter = trade all available symbols
-  #   signal_filter:
-  #     max_spread_pips: 3.0
-  #
-  #   status: active
+  - id: personal-scalper
+    name: "Personal Scalping Account"
+    type: personal
+
+    # Use custom rules file (bypasses prop_firm validation)
+    # Path is relative to the project root
+    rules_file: "configs/custom_rules/conservative.yaml"
+
+    mt5:
+      server: "ICMarkets-MT5"
+      login: 11111111
+      password_env: "PERSONAL_MT5_PASS"
+
+    strategy: scalper
+    strategy_params:
+      entry_threshold: 0.002
+      trailing_stop: true
+
+    signal_filter:
+      symbols:
+        - "EURUSD"
+        - "GBPUSD"
+      max_spread_pips: 1.5
+
+    status: active
 
   # ============================================================================
   # DEMO ACCOUNT EXAMPLE
@@ -193,6 +205,16 @@ accounts:
 # CONFIGURATION REFERENCE
 # ============================================================================
 #
+# Multi-Account Limits:
+#   Maximum accounts: 5 (raises "Maximum 5 accounts supported" if exceeded)
+#   All account IDs must be unique (raises "Duplicate account ID: {id}" if not)
+#
+# Supported Prop Firms (case-insensitive):
+#   - ftmo
+#   - the5ers
+#   - wmt
+#   Invalid prop_firm raises "Unknown prop firm preset: {prop_firm}"
+#
 # Account Fields:
 #   id: (required) Unique identifier (alphanumeric, dashes, underscores)
 #   name: (required) Human-readable account name
@@ -224,3 +246,4 @@ accounts:
 # Rules Requirement:
 #   - prop_firm and personal accounts MUST specify either prop_firm or rules_file
 #   - demo accounts don't require rules (for testing without restrictions)
+#   - personal accounts with rules_file bypass prop_firm preset validation

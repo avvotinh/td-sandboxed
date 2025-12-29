@@ -3,8 +3,10 @@
 This module provides:
 - ConfigLoader: Loads and validates account configurations from YAML
 - ConfigValidationError: User-friendly validation error wrapper
+- warn_missing_password_env: Utility to warn about missing MT5 password env vars
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import Union
@@ -12,7 +14,9 @@ from typing import Union
 import yaml
 from pydantic import ValidationError
 
-from ..accounts.models import AccountsConfig
+from ..accounts.models import AccountConfig, AccountsConfig
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigSyntaxError(Exception):
@@ -132,9 +136,19 @@ class ConfigLoader:
             raise ValueError(f"Config file is empty: {self.config_path}")
 
         try:
-            return AccountsConfig.model_validate(raw_config)
+            config = AccountsConfig.model_validate(raw_config)
         except ValidationError as e:
             raise ConfigValidationError(e) from e
+
+        # Log successful load summary
+        logger.info(f"Loaded {len(config.accounts)} accounts successfully")
+        for acc in config.accounts:
+            logger.debug(f"  - {acc.id}: {acc.name} ({acc.type.value})")
+
+        # Warn about missing password environment variables (non-blocking)
+        warn_missing_password_env(config.accounts)
+
+        return config
 
     def resolve_password(self, password_env: str) -> str:
         """Resolve MT5 password from environment variable.
@@ -152,3 +166,21 @@ class ConfigLoader:
         if not password:
             raise ValueError(f"Environment variable not set: {password_env}")
         return password
+
+
+def warn_missing_password_env(accounts: list[AccountConfig]) -> None:
+    """Warn about missing MT5 password environment variables (non-blocking).
+
+    This function checks if the environment variables referenced by each account's
+    MT5 configuration are set. If not, it logs a warning. This is a non-blocking
+    check - the configuration will still load, but MT5 connection will fail at runtime.
+
+    Args:
+        accounts: List of account configurations to check
+    """
+    for acc in accounts:
+        if not os.getenv(acc.mt5.password_env):
+            logger.warning(
+                f"Account '{acc.id}': Environment variable '{acc.mt5.password_env}' "
+                "is not set. MT5 connection will fail at runtime."
+            )

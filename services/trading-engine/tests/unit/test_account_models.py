@@ -14,13 +14,15 @@ import pytest
 from pydantic import ValidationError
 
 from src.accounts.models import (
+    MAX_ACCOUNTS,
+    VALID_PROP_FIRMS,
     AccountConfig,
     AccountsConfig,
     AccountType,
     MT5Config,
     SignalFilter,
 )
-from src.config.loader import ConfigLoader, ConfigSyntaxError, ConfigValidationError
+from src.config.loader import ConfigLoader, ConfigSyntaxError, ConfigValidationError, warn_missing_password_env
 
 
 class TestMT5Config:
@@ -373,7 +375,7 @@ class TestAccountsConfig:
         assert len(config.accounts) == 2
 
     def test_duplicate_account_ids_rejected(self):
-        """Test that duplicate account IDs are rejected."""
+        """Test that duplicate account IDs are rejected with AC3-compliant error format."""
         with pytest.raises(ValidationError) as exc_info:
             AccountsConfig(
                 accounts=[
@@ -393,7 +395,8 @@ class TestAccountsConfig:
                     ),
                 ]
             )
-        assert "unique" in str(exc_info.value).lower() or "ids" in str(exc_info.value).lower()
+        # AC3: Error message must be "Duplicate account ID: {id}"
+        assert "Duplicate account ID: same-id" in str(exc_info.value)
 
 
 class TestConfigLoader:
@@ -590,3 +593,540 @@ accounts:
             account_types = {acc.type for acc in config.accounts}
             assert AccountType.PROP_FIRM in account_types
             assert AccountType.DEMO in account_types
+
+
+# =============================================================================
+# MULTI-ACCOUNT CONFIGURATION TESTS (Story 3.1)
+# =============================================================================
+
+
+def _create_demo_account(account_id: str) -> AccountConfig:
+    """Create a minimal demo account for testing.
+
+    Args:
+        account_id: Unique identifier for the account.
+
+    Returns:
+        A demo AccountConfig instance.
+    """
+    return AccountConfig(
+        id=account_id,
+        name=f"Demo {account_id}",
+        type=AccountType.DEMO,
+        mt5=MT5Config(server="Demo-Server", login=1, password_env="DEMO_PASS"),
+        strategy="test",
+    )
+
+
+def _create_prop_firm_account(account_id: str, prop_firm: str = "ftmo") -> AccountConfig:
+    """Create a prop firm account for testing.
+
+    Args:
+        account_id: Unique identifier for the account.
+        prop_firm: Prop firm preset name. Defaults to "ftmo".
+
+    Returns:
+        A prop firm AccountConfig instance.
+    """
+    return AccountConfig(
+        id=account_id,
+        name=f"Prop {account_id}",
+        type=AccountType.PROP_FIRM,
+        prop_firm=prop_firm,
+        mt5=MT5Config(server="FTMO-Server", login=12345, password_env="FTMO_PASS"),
+        strategy="ma_crossover",
+    )
+
+
+def _create_personal_account(account_id: str, rules_file: str = "rules.yaml") -> AccountConfig:
+    """Create a personal account with custom rules for testing.
+
+    Args:
+        account_id: Unique identifier for the account.
+        rules_file: Path to custom rules file. Defaults to "rules.yaml".
+
+    Returns:
+        A personal AccountConfig instance with custom rules.
+    """
+    return AccountConfig(
+        id=account_id,
+        name=f"Personal {account_id}",
+        type=AccountType.PERSONAL,
+        rules_file=rules_file,
+        mt5=MT5Config(server="Personal-Server", login=99999, password_env="PERSONAL_PASS"),
+        strategy="scalper",
+    )
+
+
+class TestMaxAccountsValidation:
+    """Tests for maximum accounts validation (AC2)."""
+
+    def test_constants_defined(self):
+        """Verify MAX_ACCOUNTS and VALID_PROP_FIRMS constants are defined."""
+        assert MAX_ACCOUNTS == 5
+        assert VALID_PROP_FIRMS == frozenset({"ftmo", "the5ers", "wmt"})
+
+    def test_zero_accounts_allowed(self):
+        """Boundary: zero accounts should be valid (well under max)."""
+        config = AccountsConfig(accounts=[])
+        assert len(config.accounts) == 0
+
+    def test_exactly_five_accounts_allowed(self):
+        """Boundary: exactly 5 accounts (the limit) must pass (AC2)."""
+        accounts = [_create_demo_account(f"demo-{i}") for i in range(5)]
+        config = AccountsConfig(accounts=accounts)
+        assert len(config.accounts) == 5
+
+    def test_four_accounts_allowed(self):
+        """Test 4 accounts is well under the limit."""
+        accounts = [_create_demo_account(f"demo-{i}") for i in range(4)]
+        config = AccountsConfig(accounts=accounts)
+        assert len(config.accounts) == 4
+
+    def test_three_accounts_allowed(self):
+        """Test 3 accounts is well under the limit."""
+        accounts = [_create_demo_account(f"demo-{i}") for i in range(3)]
+        config = AccountsConfig(accounts=accounts)
+        assert len(config.accounts) == 3
+
+    def test_two_accounts_allowed(self):
+        """Test 2 accounts loads correctly."""
+        accounts = [_create_demo_account(f"demo-{i}") for i in range(2)]
+        config = AccountsConfig(accounts=accounts)
+        assert len(config.accounts) == 2
+
+    def test_max_accounts_exceeded_six(self):
+        """6 accounts must fail with specific error message (AC2)."""
+        accounts = [_create_demo_account(f"demo-{i}") for i in range(6)]
+        with pytest.raises(ValidationError) as exc_info:
+            AccountsConfig(accounts=accounts)
+        # AC2: Error must be "Maximum 5 accounts supported"
+        assert "Maximum 5 accounts supported" in str(exc_info.value)
+
+    def test_max_accounts_exceeded_seven(self):
+        """7 accounts must also fail."""
+        accounts = [_create_demo_account(f"demo-{i}") for i in range(7)]
+        with pytest.raises(ValidationError) as exc_info:
+            AccountsConfig(accounts=accounts)
+        assert "Maximum 5 accounts supported" in str(exc_info.value)
+
+    def test_max_accounts_error_includes_helpful_suggestion(self):
+        """Error message should suggest how to fix the issue."""
+        accounts = [_create_demo_account(f"demo-{i}") for i in range(8)]
+        with pytest.raises(ValidationError) as exc_info:
+            AccountsConfig(accounts=accounts)
+        error_msg = str(exc_info.value)
+        assert "Got 8 accounts" in error_msg
+        assert "Remove 3 account(s)" in error_msg
+
+
+class TestDuplicateIdValidation:
+    """Tests for duplicate account ID validation (AC3)."""
+
+    def test_duplicate_account_id_error_format(self):
+        """Error message must match AC3: 'Duplicate account ID: {id}'"""
+        with pytest.raises(ValidationError) as exc_info:
+            AccountsConfig(
+                accounts=[
+                    _create_demo_account("dup-001"),
+                    _create_demo_account("dup-001"),
+                ]
+            )
+        assert "Duplicate account ID: dup-001" in str(exc_info.value)
+
+    def test_first_duplicate_reported(self):
+        """When multiple duplicates exist, the first one encountered is reported."""
+        with pytest.raises(ValidationError) as exc_info:
+            AccountsConfig(
+                accounts=[
+                    _create_demo_account("first"),
+                    _create_demo_account("first"),
+                    _create_demo_account("second"),
+                    _create_demo_account("second"),
+                ]
+            )
+        # Should report the first duplicate found
+        assert "Duplicate account ID: first" in str(exc_info.value)
+
+    def test_unique_ids_allowed(self):
+        """Accounts with unique IDs should load successfully."""
+        config = AccountsConfig(
+            accounts=[
+                _create_demo_account("account-a"),
+                _create_demo_account("account-b"),
+                _create_demo_account("account-c"),
+            ]
+        )
+        assert len(config.accounts) == 3
+
+
+class TestPropFirmValidation:
+    """Tests for prop firm preset validation (AC4)."""
+
+    def test_invalid_prop_firm_preset(self):
+        """Unknown prop firm must fail with helpful error (AC4)."""
+        with pytest.raises(ValidationError) as exc_info:
+            AccountConfig(
+                id="test-001",
+                name="Test Account",
+                type=AccountType.PROP_FIRM,
+                prop_firm="Invalid_Firm",
+                mt5=MT5Config(server="S", login=1, password_env="P"),
+                strategy="test",
+            )
+        error_msg = str(exc_info.value)
+        # AC4: Error must be "Unknown prop firm preset: {prop_firm}"
+        # Note: prop_firm is normalized to lowercase before validation
+        assert "Unknown prop firm preset: 'invalid_firm'" in error_msg
+        # Should list valid presets
+        assert "ftmo" in error_msg
+        assert "the5ers" in error_msg
+        assert "wmt" in error_msg
+
+    def test_prop_firm_case_insensitive_uppercase(self):
+        """FTMO (uppercase) should be normalized to lowercase."""
+        acc = _create_prop_firm_account("test-001", prop_firm="FTMO")
+        assert acc.prop_firm == "ftmo"
+
+    def test_prop_firm_case_insensitive_mixed(self):
+        """Ftmo (mixed case) should be normalized to lowercase."""
+        acc = _create_prop_firm_account("test-001", prop_firm="Ftmo")
+        assert acc.prop_firm == "ftmo"
+
+    def test_prop_firm_case_insensitive_lowercase(self):
+        """ftmo (lowercase) should work as-is."""
+        acc = _create_prop_firm_account("test-001", prop_firm="ftmo")
+        assert acc.prop_firm == "ftmo"
+
+    def test_all_valid_prop_firms(self):
+        """All valid prop firm presets should be accepted."""
+        for prop_firm in VALID_PROP_FIRMS:
+            acc = _create_prop_firm_account(f"test-{prop_firm}", prop_firm=prop_firm)
+            assert acc.prop_firm == prop_firm
+
+    def test_the5ers_case_variations(self):
+        """The5ers case variations should all work."""
+        for variant in ["the5ers", "THE5ERS", "The5ers"]:
+            acc = _create_prop_firm_account("test-001", prop_firm=variant)
+            assert acc.prop_firm == "the5ers"
+
+    def test_wmt_case_variations(self):
+        """WMT case variations should all work."""
+        for variant in ["wmt", "WMT", "Wmt"]:
+            acc = _create_prop_firm_account("test-001", prop_firm=variant)
+            assert acc.prop_firm == "wmt"
+
+
+class TestMT5ConfigValidation:
+    """Tests for MT5 configuration validation (AC5)."""
+
+    def test_missing_mt5_server(self):
+        """Missing MT5 server should fail validation (AC5)."""
+        with pytest.raises(ValidationError) as exc_info:
+            MT5Config(
+                # server missing
+                login=12345,
+                password_env="TEST_PASS",
+            )
+        assert "server" in str(exc_info.value).lower()
+
+    def test_missing_mt5_login(self):
+        """Missing MT5 login should fail validation (AC5)."""
+        with pytest.raises(ValidationError) as exc_info:
+            MT5Config(
+                server="Test-Server",
+                # login missing
+                password_env="TEST_PASS",
+            )
+        assert "login" in str(exc_info.value).lower()
+
+    def test_missing_mt5_password_env(self):
+        """Missing MT5 password_env should fail validation (AC5)."""
+        with pytest.raises(ValidationError) as exc_info:
+            MT5Config(
+                server="Test-Server",
+                login=12345,
+                # password_env missing
+            )
+        assert "password_env" in str(exc_info.value).lower()
+
+
+class TestMixedAccountTypes:
+    """Tests for loading mixed account types (AC1)."""
+
+    def test_load_mixed_account_types(self):
+        """prop_firm + custom + demo accounts load together (AC1)."""
+        accounts = [
+            _create_prop_firm_account("ftmo-001"),
+            _create_personal_account("personal-001"),
+            _create_demo_account("demo-001"),
+        ]
+        config = AccountsConfig(accounts=accounts)
+
+        types = {acc.type for acc in config.accounts}
+        assert types == {AccountType.PROP_FIRM, AccountType.PERSONAL, AccountType.DEMO}
+
+    def test_multiple_prop_firm_accounts(self):
+        """Multiple prop firm accounts with different firms should load."""
+        accounts = [
+            _create_prop_firm_account("ftmo-001", prop_firm="ftmo"),
+            _create_prop_firm_account("5ers-001", prop_firm="the5ers"),
+            _create_prop_firm_account("wmt-001", prop_firm="wmt"),
+        ]
+        config = AccountsConfig(accounts=accounts)
+        assert len(config.accounts) == 3
+
+        prop_firms = {acc.prop_firm for acc in config.accounts}
+        assert prop_firms == {"ftmo", "the5ers", "wmt"}
+
+    def test_mixed_five_accounts_at_limit(self):
+        """5 mixed accounts (the limit) should load successfully."""
+        accounts = [
+            _create_prop_firm_account("ftmo-001"),
+            _create_prop_firm_account("5ers-001", prop_firm="the5ers"),
+            _create_personal_account("personal-001"),
+            _create_demo_account("demo-001"),
+            _create_demo_account("demo-002"),
+        ]
+        config = AccountsConfig(accounts=accounts)
+        assert len(config.accounts) == 5
+
+
+class TestWarnMissingPasswordEnv:
+    """Tests for warn_missing_password_env utility function."""
+
+    def test_warns_when_env_not_set(self, caplog):
+        """Should log warning when password env var is not set."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            accounts = [_create_demo_account("test-001")]
+            # DEMO_PASS is not set in environment
+            with patch.dict(os.environ, {}, clear=True):
+                warn_missing_password_env(accounts)
+
+        assert "Account 'test-001'" in caplog.text
+        assert "DEMO_PASS" in caplog.text
+        assert "is not set" in caplog.text
+
+    def test_no_warning_when_env_is_set(self, caplog):
+        """Should not log warning when password env var is set."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            accounts = [_create_demo_account("test-001")]
+            with patch.dict(os.environ, {"DEMO_PASS": "secret123"}):
+                warn_missing_password_env(accounts)
+
+        assert "test-001" not in caplog.text
+
+    def test_warns_for_each_missing_env(self, caplog):
+        """Should warn for each account with missing env var."""
+        import logging
+
+        # Create accounts with different password env vars
+        accounts = [
+            AccountConfig(
+                id="acc-1",
+                name="Account 1",
+                type=AccountType.DEMO,
+                mt5=MT5Config(server="S", login=1, password_env="PASS_ONE"),
+                strategy="test",
+            ),
+            AccountConfig(
+                id="acc-2",
+                name="Account 2",
+                type=AccountType.DEMO,
+                mt5=MT5Config(server="S", login=2, password_env="PASS_TWO"),
+                strategy="test",
+            ),
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            with patch.dict(os.environ, {}, clear=True):
+                warn_missing_password_env(accounts)
+
+        assert "acc-1" in caplog.text
+        assert "PASS_ONE" in caplog.text
+        assert "acc-2" in caplog.text
+        assert "PASS_TWO" in caplog.text
+
+
+class TestConfigLoaderMultiAccount:
+    """Integration tests for ConfigLoader with multi-account configs."""
+
+    def test_load_five_accounts_from_yaml(self, tmp_path):
+        """Load 5 accounts (at limit) from YAML file."""
+        config_file = tmp_path / "accounts.yaml"
+        config_file.write_text(
+            """
+accounts:
+  - id: demo-1
+    name: Demo 1
+    type: demo
+    mt5: {server: S, login: 1, password_env: P}
+    strategy: test
+  - id: demo-2
+    name: Demo 2
+    type: demo
+    mt5: {server: S, login: 2, password_env: P}
+    strategy: test
+  - id: demo-3
+    name: Demo 3
+    type: demo
+    mt5: {server: S, login: 3, password_env: P}
+    strategy: test
+  - id: demo-4
+    name: Demo 4
+    type: demo
+    mt5: {server: S, login: 4, password_env: P}
+    strategy: test
+  - id: demo-5
+    name: Demo 5
+    type: demo
+    mt5: {server: S, login: 5, password_env: P}
+    strategy: test
+"""
+        )
+
+        loader = ConfigLoader(config_file)
+        config = loader.load()
+        assert len(config.accounts) == 5
+
+    def test_load_six_accounts_fails(self, tmp_path):
+        """Loading 6 accounts should fail with clear error."""
+        config_file = tmp_path / "accounts.yaml"
+        config_file.write_text(
+            """
+accounts:
+  - id: demo-1
+    name: Demo 1
+    type: demo
+    mt5: {server: S, login: 1, password_env: P}
+    strategy: test
+  - id: demo-2
+    name: Demo 2
+    type: demo
+    mt5: {server: S, login: 2, password_env: P}
+    strategy: test
+  - id: demo-3
+    name: Demo 3
+    type: demo
+    mt5: {server: S, login: 3, password_env: P}
+    strategy: test
+  - id: demo-4
+    name: Demo 4
+    type: demo
+    mt5: {server: S, login: 4, password_env: P}
+    strategy: test
+  - id: demo-5
+    name: Demo 5
+    type: demo
+    mt5: {server: S, login: 5, password_env: P}
+    strategy: test
+  - id: demo-6
+    name: Demo 6
+    type: demo
+    mt5: {server: S, login: 6, password_env: P}
+    strategy: test
+"""
+        )
+
+        loader = ConfigLoader(config_file)
+        with pytest.raises(ConfigValidationError) as exc_info:
+            loader.load()
+        assert "Maximum 5 accounts supported" in str(exc_info.value)
+
+    def test_load_duplicate_id_fails(self, tmp_path):
+        """Loading config with duplicate IDs should fail with clear error."""
+        config_file = tmp_path / "accounts.yaml"
+        config_file.write_text(
+            """
+accounts:
+  - id: same-id
+    name: Account A
+    type: demo
+    mt5: {server: S, login: 1, password_env: P}
+    strategy: test
+  - id: same-id
+    name: Account B
+    type: demo
+    mt5: {server: S, login: 2, password_env: P}
+    strategy: test
+"""
+        )
+
+        loader = ConfigLoader(config_file)
+        with pytest.raises(ConfigValidationError) as exc_info:
+            loader.load()
+        assert "Duplicate account ID: same-id" in str(exc_info.value)
+
+    def test_load_invalid_prop_firm_fails(self, tmp_path):
+        """Loading config with invalid prop_firm should fail with clear error."""
+        config_file = tmp_path / "accounts.yaml"
+        config_file.write_text(
+            """
+accounts:
+  - id: prop-001
+    name: Prop Account
+    type: prop_firm
+    prop_firm: nonexistent_firm
+    mt5: {server: S, login: 1, password_env: P}
+    strategy: test
+"""
+        )
+
+        loader = ConfigLoader(config_file)
+        with pytest.raises(ConfigValidationError) as exc_info:
+            loader.load()
+        assert "Unknown prop firm preset" in str(exc_info.value)
+
+    def test_load_mixed_account_types_from_yaml(self, tmp_path):
+        """Load mixed account types from YAML file."""
+        config_file = tmp_path / "accounts.yaml"
+        config_file.write_text(
+            """
+accounts:
+  - id: ftmo-001
+    name: FTMO Gold
+    type: prop_firm
+    prop_firm: FTMO
+    mt5:
+      server: FTMO-Server
+      login: 12345678
+      password_env: FTMO_PASS
+    strategy: ma_crossover
+
+  - id: personal-001
+    name: Personal Trading
+    type: personal
+    rules_file: configs/custom_rules.yaml
+    mt5:
+      server: Personal-Server
+      login: 87654321
+      password_env: PERSONAL_PASS
+    strategy: scalper
+
+  - id: demo-001
+    name: Demo Testing
+    type: demo
+    mt5:
+      server: Demo-Server
+      login: 99999999
+      password_env: DEMO_PASS
+    strategy: test
+"""
+        )
+
+        loader = ConfigLoader(config_file)
+        config = loader.load()
+
+        assert len(config.accounts) == 3
+
+        # Verify prop_firm was normalized to lowercase
+        ftmo_acc = next(a for a in config.accounts if a.id == "ftmo-001")
+        assert ftmo_acc.prop_firm == "ftmo"  # Normalized from "FTMO"
+
+        # Verify all types are present
+        types = {acc.type for acc in config.accounts}
+        assert types == {AccountType.PROP_FIRM, AccountType.PERSONAL, AccountType.DEMO}

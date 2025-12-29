@@ -14,6 +14,13 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# Multi-account configuration constants
+MAX_ACCOUNTS = 5
+"""Maximum number of trading accounts supported."""
+
+VALID_PROP_FIRMS = frozenset({"ftmo", "the5ers", "wmt"})
+"""Valid prop firm presets for compliance rules."""
+
 
 class AccountType(str, Enum):
     """Trading account type enumeration."""
@@ -101,6 +108,14 @@ class AccountConfig(BaseModel):
             raise ValueError("id must be alphanumeric with dashes/underscores only")
         return v
 
+    @field_validator("prop_firm", mode="before")
+    @classmethod
+    def normalize_prop_firm(cls, v: Optional[str]) -> Optional[str]:
+        """Normalize prop_firm to lowercase for case-insensitive matching."""
+        if v is not None:
+            return v.lower()
+        return v
+
     @model_validator(mode="after")
     def validate_rules_source(self) -> "AccountConfig":
         """Validate that non-demo accounts have a rules source.
@@ -119,6 +134,20 @@ class AccountConfig(BaseModel):
                 )
         return self
 
+    @model_validator(mode="after")
+    def validate_prop_firm_preset(self) -> "AccountConfig":
+        """Validate prop_firm preset against known prop firms.
+
+        If prop_firm is specified, validates it against VALID_PROP_FIRMS.
+        Note: prop_firm is already normalized to lowercase by field_validator.
+        """
+        if self.prop_firm and self.prop_firm not in VALID_PROP_FIRMS:
+            raise ValueError(
+                f"Unknown prop firm preset: '{self.prop_firm}'. "
+                f"Valid presets: {', '.join(sorted(VALID_PROP_FIRMS))}"
+            )
+        return self
+
 
 class AccountsConfig(BaseModel):
     """Root configuration containing all trading accounts.
@@ -131,10 +160,25 @@ class AccountsConfig(BaseModel):
 
     @field_validator("accounts")
     @classmethod
-    def validate_unique_ids(cls, v: list[AccountConfig]) -> list[AccountConfig]:
-        """Validate that all account IDs are unique."""
-        ids = [acc.id for acc in v]
-        if len(ids) != len(set(ids)):
-            duplicates = [id for id in ids if ids.count(id) > 1]
-            raise ValueError(f"Account IDs must be unique. Duplicates found: {set(duplicates)}")
+    def validate_accounts(cls, v: list[AccountConfig]) -> list[AccountConfig]:
+        """Validate account list constraints (max count, unique IDs).
+
+        Validation order:
+        1. Max accounts check (run FIRST - more common user error)
+        2. Unique ID check with AC3-compliant error format
+        """
+        # 1. Check max accounts FIRST (more common user error)
+        if len(v) > MAX_ACCOUNTS:
+            raise ValueError(
+                f"Maximum {MAX_ACCOUNTS} accounts supported. "
+                f"Got {len(v)} accounts. Remove {len(v) - MAX_ACCOUNTS} account(s)."
+            )
+
+        # 2. Check unique IDs with AC3-compliant error format
+        seen: set[str] = set()
+        for acc in v:
+            if acc.id in seen:
+                raise ValueError(f"Duplicate account ID: {acc.id}")
+            seen.add(acc.id)
+
         return v
