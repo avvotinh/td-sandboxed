@@ -2,8 +2,12 @@
 
 import json
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 import redis.asyncio as aioredis
+
+if TYPE_CHECKING:
+    from ..accounts.risk_state import RiskState
 
 
 class RedisStateManager:
@@ -16,6 +20,11 @@ class RedisStateManager:
     - Retrieving account status
     - Listing all account statuses
     """
+
+    # TTL constants for risk state keys
+    RISK_STATE_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
+    RISK_VIOLATION_TTL_SECONDS = 60 * 60 * 24 * 90  # 90 days
+    RISK_VIOLATION_MAX_ENTRIES = 1000  # Keep last N violations
 
     def __init__(self, redis_url: str = "redis://localhost:6379") -> None:
         """Initialize RedisStateManager.
@@ -181,3 +190,83 @@ class RedisStateManager:
         if self._client:
             await self._client.aclose()
             self._client = None
+
+    # Risk State Management Methods
+
+    async def save_risk_state(self, account_id: str, state: "RiskState") -> None:
+        """Save risk state to Redis hash with TTL.
+
+        Key pattern: risk:{account_id}:state
+        TTL: 7 days (auto-cleanup of stale data)
+
+        Args:
+            account_id: Account identifier
+            state: RiskState to persist
+        """
+        key = f"risk:{account_id}:state"
+        await self.client.hset(key, mapping=state.to_dict())
+        await self.client.expire(key, self.RISK_STATE_TTL_SECONDS)
+
+    async def get_risk_state(self, account_id: str) -> "RiskState | None":
+        """Get risk state from Redis.
+
+        Args:
+            account_id: Account identifier
+
+        Returns:
+            RiskState if found, None otherwise
+        """
+        from ..accounts.risk_state import RiskState
+
+        key = f"risk:{account_id}:state"
+        data = await self.client.hgetall(key)
+        if not data:
+            return None
+        return RiskState.from_dict(data)
+
+    async def reset_daily_risk_state(self, account_id: str) -> None:
+        """Reset daily metrics in risk state at midnight UTC.
+
+        Preserves peak_equity and total_drawdown, resets daily counters.
+
+        Args:
+            account_id: Account identifier
+        """
+        key = f"risk:{account_id}:state"
+        await self.client.hset(
+            key,
+            mapping={
+                "daily_pnl": "0",
+                "daily_pnl_percent": "0",
+                "last_updated": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    async def record_risk_violation(
+        self,
+        account_id: str,
+        rule_type: str,
+        current_value: str,
+        limit_value: str,
+    ) -> None:
+        """Record rule violation to Redis list for audit trail.
+
+        Key pattern: risk:{account_id}:violations
+        TTL: 90 days
+
+        Args:
+            account_id: Account that violated rule
+            rule_type: Type of rule violated (daily_loss, max_drawdown)
+            current_value: Current metric value at violation
+            limit_value: Limit that was exceeded
+        """
+        key = f"risk:{account_id}:violations"
+        violation = json.dumps({
+            "rule_type": rule_type,
+            "current_value": current_value,
+            "limit_value": limit_value,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        await self.client.lpush(key, violation)
+        await self.client.ltrim(key, 0, self.RISK_VIOLATION_MAX_ENTRIES - 1)
+        await self.client.expire(key, self.RISK_VIOLATION_TTL_SECONDS)

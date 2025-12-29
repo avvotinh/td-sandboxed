@@ -9,8 +9,12 @@ from .models import AccountConfig, AccountsConfig
 from .state import AccountState
 
 if TYPE_CHECKING:
+    from decimal import Decimal
+
     from ..adapters.mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
     from ..state.redis_state import RedisStateManager
+    from .risk_registry import RiskStateRegistry
+    from .risk_state import RiskState
     from .signal_router import SignalRouter
 
 logger = logging.getLogger(__name__)
@@ -59,6 +63,7 @@ class AccountManager:
         self._accounts_lock = asyncio.Lock()  # Protect account mutations
         self._signal_router: "SignalRouter | None" = None  # Optional signal router
         self._mt5_connection_manager: "MT5ConnectionManager | None" = None  # Per-account connections
+        self._risk_registry: "RiskStateRegistry | None" = None  # Per-account risk tracking
 
     def load_accounts(self, config: AccountsConfig) -> None:
         """Load account configurations for validation.
@@ -115,6 +120,39 @@ class AccountManager:
             The registered MT5ConnectionManager or None if not registered.
         """
         return self._mt5_connection_manager
+
+    def set_risk_registry(self, registry: "RiskStateRegistry") -> None:
+        """Register a RiskStateRegistry for per-account risk tracking.
+
+        When registered, risk state operations become available:
+        - get_risk_state() returns per-account risk metrics
+        - pause_for_rule_violation() pauses account with violation details
+
+        Args:
+            registry: RiskStateRegistry instance to register.
+        """
+        self._risk_registry = registry
+
+    def get_risk_registry(self) -> "RiskStateRegistry | None":
+        """Get the registered RiskStateRegistry.
+
+        Returns:
+            The registered RiskStateRegistry or None if not registered.
+        """
+        return self._risk_registry
+
+    def get_risk_state(self, account_id: str) -> "RiskState | None":
+        """Get risk state for an account.
+
+        Args:
+            account_id: Account to get risk state for.
+
+        Returns:
+            RiskState if risk registry is registered and account has state, None otherwise.
+        """
+        if self._risk_registry is None:
+            return None
+        return self._risk_registry.get_risk_state(account_id)
 
     def get_connection_health(self, account_id: str) -> "ConnectionHealth | None":
         """Get MT5 connection health for an account.
@@ -341,6 +379,39 @@ class AccountManager:
             )
 
         await self._redis.save_account_status(account_id, target.value)
+
+    async def pause_for_rule_violation(
+        self,
+        account_id: str,
+        rule_type: str,
+        value: "Decimal",
+        limit: "Decimal",
+    ) -> None:
+        """Pause account due to rule violation with detailed logging.
+
+        This pauses ONLY the specified account - other accounts continue trading.
+
+        Args:
+            account_id: Account ID to pause.
+            rule_type: Type of rule violated (e.g., "daily_loss", "max_drawdown").
+            value: Current metric value at violation.
+            limit: Limit that was exceeded.
+
+        Raises:
+            ValueError: If account not found or invalid state transition.
+        """
+        reason = (
+            f"Rule violation: {rule_type} at {float(value):.2f}% "
+            f"(limit: {float(limit):.2f}%)"
+        )
+
+        # Pause the account
+        await self.pause_account(account_id)
+
+        # Publish alert with violation details
+        await self._publish_alert(account_id, "risk", reason)
+
+        logger.warning(f"Account {account_id} paused for rule violation: {reason}")
 
     async def resume_account(self, account_id: str) -> None:
         """Resume a paused account (paused → active).

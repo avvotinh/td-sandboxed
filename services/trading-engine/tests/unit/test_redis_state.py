@@ -239,3 +239,130 @@ class TestRedisKeyPatterns:
             await redis_manager.save_account_status(account_id, "active")
             call_args = mock_redis_client.set.call_args[0]
             assert call_args[0] == expected_key, f"Failed for {account_id}"
+
+
+class TestRiskStateMethods:
+    """Tests for risk state management methods (Story 3.5)."""
+
+    @pytest.fixture
+    def mock_redis_client_with_hash(self):
+        """Create a mock Redis client with hash operations."""
+        client = MagicMock()
+        client.hset = AsyncMock()
+        client.hgetall = AsyncMock(return_value={})
+        client.expire = AsyncMock()
+        client.lpush = AsyncMock()
+        client.ltrim = AsyncMock()
+        return client
+
+    @pytest.mark.asyncio
+    async def test_save_risk_state(self, redis_manager, mock_redis_client_with_hash):
+        """Test saving risk state to Redis hash."""
+        from src.accounts.risk_state import RiskState
+
+        redis_manager._client = mock_redis_client_with_hash
+        state = RiskState(
+            daily_pnl="-1000",
+            current_equity="99000",
+        )
+
+        await redis_manager.save_risk_state("test-001", state)
+
+        # Verify hset called with correct key (positional arg)
+        call_args = mock_redis_client_with_hash.hset.call_args
+        assert call_args[0][0] == "risk:test-001:state"
+
+        # Verify TTL set to configured value
+        mock_redis_client_with_hash.expire.assert_called_once()
+        expire_args = mock_redis_client_with_hash.expire.call_args[0]
+        assert expire_args[0] == "risk:test-001:state"
+        assert expire_args[1] == redis_manager.RISK_STATE_TTL_SECONDS
+
+    @pytest.mark.asyncio
+    async def test_get_risk_state_found(self, redis_manager, mock_redis_client_with_hash):
+        """Test getting existing risk state."""
+        redis_manager._client = mock_redis_client_with_hash
+        mock_redis_client_with_hash.hgetall.return_value = {
+            "daily_pnl": "-1000",
+            "daily_pnl_percent": "-1.0",
+            "current_equity": "99000",
+            "peak_equity": "100000",
+            "total_drawdown_percent": "1.0",
+            "daily_starting_balance": "100000",
+            "last_updated": "2025-12-29T00:00:00+00:00",
+        }
+
+        state = await redis_manager.get_risk_state("test-001")
+
+        assert state is not None
+        from decimal import Decimal
+        assert state.daily_pnl == Decimal("-1000")
+        assert state.current_equity == Decimal("99000")
+        mock_redis_client_with_hash.hgetall.assert_called_once_with("risk:test-001:state")
+
+    @pytest.mark.asyncio
+    async def test_get_risk_state_not_found(self, redis_manager, mock_redis_client_with_hash):
+        """Test getting nonexistent risk state returns None."""
+        redis_manager._client = mock_redis_client_with_hash
+        mock_redis_client_with_hash.hgetall.return_value = {}
+
+        state = await redis_manager.get_risk_state("nonexistent")
+
+        assert state is None
+
+    @pytest.mark.asyncio
+    async def test_reset_daily_risk_state(self, redis_manager, mock_redis_client_with_hash):
+        """Test resetting daily risk metrics."""
+        redis_manager._client = mock_redis_client_with_hash
+
+        await redis_manager.reset_daily_risk_state("test-001")
+
+        # Verify hset called with reset values (key is positional, mapping is keyword)
+        call_args = mock_redis_client_with_hash.hset.call_args
+        assert call_args[0][0] == "risk:test-001:state"
+        mapping = call_args[1]["mapping"]
+        assert mapping["daily_pnl"] == "0"
+        assert mapping["daily_pnl_percent"] == "0"
+        assert "last_updated" in mapping
+
+    @pytest.mark.asyncio
+    async def test_record_risk_violation(self, redis_manager, mock_redis_client_with_hash):
+        """Test recording risk violation to Redis list."""
+        redis_manager._client = mock_redis_client_with_hash
+
+        await redis_manager.record_risk_violation(
+            "test-001",
+            "daily_loss",
+            "5.5",
+            "5.0",
+        )
+
+        # Verify lpush called
+        mock_redis_client_with_hash.lpush.assert_called_once()
+        call_args = mock_redis_client_with_hash.lpush.call_args[0]
+        assert call_args[0] == "risk:test-001:violations"
+
+        # Verify ltrim keeps last N entries
+        mock_redis_client_with_hash.ltrim.assert_called_once_with(
+            "risk:test-001:violations", 0, redis_manager.RISK_VIOLATION_MAX_ENTRIES - 1
+        )
+
+        # Verify TTL set to configured value
+        mock_redis_client_with_hash.expire.assert_called_once()
+        expire_args = mock_redis_client_with_hash.expire.call_args[0]
+        assert expire_args[1] == redis_manager.RISK_VIOLATION_TTL_SECONDS
+
+    @pytest.mark.asyncio
+    async def test_risk_state_key_pattern(self, redis_manager, mock_redis_client_with_hash):
+        """Test risk state keys follow pattern risk:{account_id}:state."""
+        from src.accounts.risk_state import RiskState
+
+        redis_manager._client = mock_redis_client_with_hash
+
+        test_accounts = ["ftmo-001", "5ers-btc", "personal"]
+        for account_id in test_accounts:
+            mock_redis_client_with_hash.hset.reset_mock()
+            await redis_manager.save_risk_state(account_id, RiskState())
+
+            call_args = mock_redis_client_with_hash.hset.call_args
+            assert call_args[0][0] == f"risk:{account_id}:state"

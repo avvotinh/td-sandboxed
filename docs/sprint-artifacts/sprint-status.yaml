@@ -69,7 +69,7 @@ development_status:
   3-2-account-manager-multi-account-orchestration: done
   3-3-signal-router-multi-account-distribution: done
   3-4-per-account-mt5-connections: done
-  3-5-per-account-risk-isolation: backlog
+  3-5-per-account-risk-isolation: done
   3-6-per-account-equity-and-balance-tracking: backlog
   3-7-account-rule-assignment: backlog
   epic-3-retrospective: optional
