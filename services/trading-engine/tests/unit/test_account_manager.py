@@ -1,5 +1,7 @@
 """Tests for AccountManager class."""
 
+import asyncio
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -20,6 +22,11 @@ def mock_redis():
     redis.save_account_status = AsyncMock()
     redis.get_account_status = AsyncMock(return_value=None)
     redis.close = AsyncMock()
+    # Add multi-account orchestration mocks
+    redis.update_account_health = AsyncMock()
+    redis.clear_account_health = AsyncMock()
+    redis.save_account_last_error = AsyncMock()
+    redis.publish_alert = AsyncMock()
     return redis
 
 
@@ -380,3 +387,314 @@ class TestAccountManagerClose:
         await account_manager.close()
 
         mock_redis.close.assert_called_once()
+
+
+# ============================================================================
+# Multi-Account Orchestration Tests (Story 3.2)
+# ============================================================================
+
+
+def create_config_with_n_accounts(n: int) -> AccountsConfig:
+    """Create AccountsConfig with n test accounts."""
+    accounts = []
+    for i in range(1, n + 1):
+        accounts.append(
+            AccountConfig(
+                id=f"test-account-{i:03d}",
+                name=f"Test Account {i}",
+                type=AccountType.DEMO,
+                mt5=MT5Config(
+                    server="TestServer",
+                    login=10000 + i,
+                    password_env=f"MT5_TEST_PASSWORD_{i}",
+                ),
+                strategy="ma_crossover",
+                status="active",
+            )
+        )
+    return AccountsConfig(accounts=accounts)
+
+
+def create_config_with_new_account(account_id: str) -> AccountsConfig:
+    """Create AccountsConfig with a new account for hot-reload testing."""
+    return AccountsConfig(
+        accounts=[
+            AccountConfig(
+                id=account_id,
+                name=f"New Account {account_id}",
+                type=AccountType.DEMO,
+                mt5=MT5Config(
+                    server="TestServer",
+                    login=99999,
+                    password_env="MT5_NEW_PASSWORD",
+                ),
+                strategy="ma_crossover",
+                status="active",
+            )
+        ]
+    )
+
+
+@asynccontextmanager
+async def create_test_account_manager(mock_redis, num_accounts: int = 2):
+    """Context manager for creating and cleaning up AccountManager in tests.
+
+    Usage:
+        async with create_test_account_manager(mock_redis, 3) as manager:
+            await manager.start_all_accounts()
+            # ... test code ...
+        # Cleanup happens automatically
+
+    Args:
+        mock_redis: Mock Redis manager.
+        num_accounts: Number of test accounts to create.
+
+    Yields:
+        AccountManager instance.
+    """
+    manager = AccountManager(mock_redis)
+    config = create_config_with_n_accounts(num_accounts)
+    manager.load_accounts(config)
+
+    try:
+        yield manager
+    finally:
+        # Cleanup: cancel any running tasks
+        for task in manager._tasks.values():
+            task.cancel()
+        if manager._tasks:
+            await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
+        manager._tasks.clear()
+
+
+class TestMultiAccountOrchestration:
+    """Tests for multi-account task orchestration."""
+
+    @pytest.mark.asyncio
+    async def test_start_all_accounts_concurrent(self, mock_redis):
+        """AC1: All active accounts start concurrently."""
+        async with create_test_account_manager(mock_redis, 3) as manager:
+            mock_redis.get_account_status.return_value = None
+
+            await manager.start_all_accounts()
+
+            # Verify tasks created for each account
+            assert len(manager._tasks) == 3
+            assert "test-account-001" in manager._tasks
+            assert "test-account-002" in manager._tasks
+            assert "test-account-003" in manager._tasks
+
+    @pytest.mark.asyncio
+    async def test_stop_one_account_others_continue(self, mock_redis):
+        """AC2: Stopping one account doesn't affect others."""
+        async with create_test_account_manager(mock_redis, 2) as manager:
+            # Start all accounts
+            await manager.start_all_accounts()
+
+            # Let tasks start running
+            await asyncio.sleep(0.05)
+
+            # Stop one account
+            await manager.stop_account("test-account-001")
+
+            # Verify only one stopped
+            assert "test-account-001" not in manager._tasks
+            assert "test-account-002" in manager._tasks
+
+    @pytest.mark.asyncio
+    async def test_error_isolation(self, mock_redis):
+        """AC3: One account error doesn't crash others."""
+
+        async def failing_handler(account_id: str) -> None:
+            if account_id == "test-account-001":
+                raise RuntimeError("Simulated error")
+
+        async with create_test_account_manager(mock_redis, 2) as manager:
+            manager.set_signal_handler(failing_handler)
+            await manager.start_all_accounts()
+
+            # Wait for error to propagate
+            await asyncio.sleep(0.2)
+
+            # Account 1 should be in error state, account 2 still running
+            mock_redis.save_account_status.assert_any_call("test-account-001", "error")
+            assert "test-account-002" in manager._tasks
+
+    @pytest.mark.asyncio
+    async def test_hot_reload_add_account(self, mock_redis):
+        """AC4: Hot-reload adds new account without affecting existing."""
+        async with create_test_account_manager(mock_redis, 2) as manager:
+            # Start existing accounts
+            await manager.start_all_accounts()
+            initial_count = len(manager._tasks)
+
+            # Create config with new account
+            new_config = create_config_with_new_account("personal-002")
+
+            # Hot-reload
+            await manager.add_account("personal-002", new_config)
+
+            # Verify new account added and running
+            assert len(manager._tasks) == initial_count + 1
+            assert "personal-002" in manager._tasks
+
+
+class TestAccountHealth:
+    """Tests for account health tracking."""
+
+    @pytest.mark.asyncio
+    async def test_health_heartbeat_updated(self, mock_redis):
+        """Health heartbeat updates during account loop."""
+        async with create_test_account_manager(mock_redis, 1) as manager:
+            await manager._spawn_account_task("test-account-001")
+            await asyncio.sleep(0.15)  # Let loop run a couple iterations
+
+            mock_redis.update_account_health.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_health_cleared_on_stop(self, mock_redis):
+        """Health data cleared when account stops."""
+        async with create_test_account_manager(mock_redis, 1) as manager:
+            await manager._spawn_account_task("test-account-001")
+            await asyncio.sleep(0.05)  # Let task start
+            await manager.stop_account("test-account-001")
+
+            mock_redis.clear_account_health.assert_called_with("test-account-001")
+
+
+class TestAlertPayloadValidation:
+    """Tests for alert publishing payload format."""
+
+    @pytest.mark.asyncio
+    async def test_error_alert_payload_format(self, mock_redis):
+        """Verify alert payload contains required fields."""
+        async with create_test_account_manager(mock_redis, 1) as manager:
+
+            async def failing_handler(account_id: str) -> None:
+                raise RuntimeError("Test error message")
+
+            manager.set_signal_handler(failing_handler)
+            await manager.start_all_accounts()
+            await asyncio.sleep(0.2)  # Let error propagate
+
+            # Verify publish_alert was called with correct arguments
+            mock_redis.publish_alert.assert_called()
+            call_args = mock_redis.publish_alert.call_args
+
+            # Check positional arguments
+            assert call_args[0][0] == "test-account-001"  # account_id
+            assert call_args[0][1] == "error"  # alert_type
+            assert "Test error message" in call_args[0][2]  # message contains error
+
+    @pytest.mark.asyncio
+    async def test_health_includes_error_count(self, mock_redis):
+        """Verify health data includes error_count field."""
+        async with create_test_account_manager(mock_redis, 1) as manager:
+            await manager._spawn_account_task("test-account-001")
+            await asyncio.sleep(0.15)
+
+            # Verify update_account_health was called
+            mock_redis.update_account_health.assert_called()
+            call_args = mock_redis.update_account_health.call_args
+
+            # Check health data contains error_count
+            health_data = call_args[0][1]
+            assert "error_count" in health_data
+            assert "last_heartbeat" in health_data
+            assert "status" in health_data
+
+
+class TestEdgeCases:
+    """Tests for edge cases and error paths."""
+
+    @pytest.mark.asyncio
+    async def test_stop_account_not_running(self, account_manager, mock_redis):
+        """Stopping an account without a running task is safe (no-op for task)."""
+        # Account exists but no task spawned
+        await account_manager.stop_account("test-account-001")
+
+        # Should still update status, just no task to cancel
+        mock_redis.save_account_status.assert_called_with("test-account-001", "stopped")
+
+    @pytest.mark.asyncio
+    async def test_add_account_already_exists(self, account_manager):
+        """Adding an account that already exists raises ValueError."""
+        # Account already loaded
+        mock_config = create_config_with_new_account("test-account-001")
+
+        with pytest.raises(ValueError, match="already loaded"):
+            await account_manager.add_account("test-account-001", mock_config)
+
+    @pytest.mark.asyncio
+    async def test_add_account_not_in_config(self, account_manager):
+        """Adding an account not in config raises ValueError."""
+        mock_config = create_config_with_new_account("different-account")
+
+        with pytest.raises(ValueError, match="not found in config"):
+            await account_manager.add_account("nonexistent-account", mock_config)
+
+    @pytest.mark.asyncio
+    async def test_start_accounts_no_signal_handler(self, mock_redis):
+        """Accounts start even without signal handler (handler is optional)."""
+        async with create_test_account_manager(mock_redis, 1) as manager:
+            # No signal handler set
+            manager._signal_handler = None
+
+            await manager.start_all_accounts()
+
+            # Tasks should still be created
+            assert len(manager._tasks) >= 1
+
+    @pytest.mark.asyncio
+    async def test_spawn_task_already_running(self, mock_redis):
+        """Spawning task for account with existing task logs warning."""
+        async with create_test_account_manager(mock_redis, 1) as manager:
+            await manager._spawn_account_task("test-account-001")
+
+            # Try to spawn again
+            await manager._spawn_account_task("test-account-001")
+
+            # Should not create duplicate task
+            assert len(manager._tasks) == 1
+
+    @pytest.mark.asyncio
+    async def test_shutdown_cancels_all_tasks(self, mock_redis):
+        """Shutdown cancels all running tasks and closes Redis."""
+        manager = AccountManager(mock_redis)
+        config = create_config_with_n_accounts(2)
+        manager.load_accounts(config)
+
+        await manager.start_all_accounts()
+        await asyncio.sleep(0.05)  # Let tasks start
+
+        await manager.shutdown()
+
+        assert len(manager._tasks) == 0
+        mock_redis.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_with_no_running_tasks(self, mock_redis):
+        """Shutdown is safe when no tasks are running."""
+        manager = AccountManager(mock_redis)
+        config = create_config_with_n_accounts(2)
+        manager.load_accounts(config)
+
+        # Don't start any tasks, just shutdown immediately
+        await manager.shutdown()
+
+        assert len(manager._tasks) == 0
+        mock_redis.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_error_count_increments_on_repeated_errors(self, mock_redis):
+        """Error count increments correctly on repeated errors."""
+        manager = AccountManager(mock_redis)
+        config = create_config_with_n_accounts(1)
+        manager.load_accounts(config)
+
+        # Manually trigger error handling multiple times
+        await manager._handle_account_error("test-account-001", RuntimeError("Error 1"))
+        await manager._handle_account_error("test-account-001", RuntimeError("Error 2"))
+
+        # Error count should be 2
+        assert manager._error_counts.get("test-account-001") == 2

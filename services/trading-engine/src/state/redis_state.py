@@ -1,5 +1,8 @@
 """Redis state management for account status persistence."""
 
+import json
+from datetime import datetime, timezone
+
 import redis.asyncio as aioredis
 
 
@@ -92,6 +95,86 @@ class RedisStateManager:
         """
         key = f"account:{account_id}:status"
         await self.client.delete(key)
+
+    async def update_account_health(
+        self, account_id: str, health_data: dict[str, str]
+    ) -> None:
+        """Update account health hash with TTL.
+
+        Args:
+            account_id: Account identifier.
+            health_data: Health data dict (last_heartbeat, status, etc.)
+        """
+        key = f"account:{account_id}:health"
+        await self.client.hset(key, mapping=health_data)
+        await self.client.expire(key, 60)  # 60 second TTL
+
+    async def get_account_health(self, account_id: str) -> dict[str, str] | None:
+        """Get account health data.
+
+        Args:
+            account_id: Account identifier.
+
+        Returns:
+            Health data dict or None if not found.
+        """
+        key = f"account:{account_id}:health"
+        data = await self.client.hgetall(key)
+        return data if data else None
+
+    async def clear_account_health(self, account_id: str) -> None:
+        """Clear account health data.
+
+        Args:
+            account_id: Account identifier.
+        """
+        key = f"account:{account_id}:health"
+        await self.client.delete(key)
+
+    async def save_account_last_error(self, account_id: str, error: str) -> None:
+        """Save last error for account.
+
+        Args:
+            account_id: Account identifier.
+            error: Error message to save.
+        """
+        key = f"account:{account_id}:last_error"
+        await self.client.set(key, error)
+
+    async def get_account_last_error(self, account_id: str) -> str | None:
+        """Get last error for account.
+
+        Args:
+            account_id: Account identifier.
+
+        Returns:
+            Last error message or None if not found.
+        """
+        key = f"account:{account_id}:last_error"
+        return await self.client.get(key)
+
+    async def publish_alert(
+        self, account_id: str, alert_type: str, message: str
+    ) -> None:
+        """Publish alert to Redis pub/sub channel.
+
+        Channel format: alerts:{alert_type}:{account_id}
+
+        Args:
+            account_id: Account identifier.
+            alert_type: Type of alert (e.g., "error").
+            message: Alert message.
+        """
+        channel = f"alerts:{alert_type}:{account_id}"
+        payload = json.dumps(
+            {
+                "account_id": account_id,
+                "alert_type": alert_type,
+                "message": message,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        await self.client.publish(channel, payload)
 
     async def close(self) -> None:
         """Close Redis connection gracefully."""

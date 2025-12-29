@@ -145,6 +145,32 @@ def resume_account(
         raise typer.Exit(1)
 
 
+@accounts_app.command("add")
+def add_account(
+    account_id: str = typer.Argument(..., help="Account ID to add from config"),
+) -> None:
+    """Hot-reload: Add a new account while engine is running.
+
+    The account must already be defined in accounts.yaml.
+    This command loads the account and starts it if status is 'active'.
+    """
+    try:
+        manager = _get_account_manager()
+        # Reload config to get the fresh account definition
+        config_path = os.getenv("ACCOUNTS_CONFIG", "configs/accounts.yaml")
+        loader = ConfigLoader(config_path)
+        fresh_config = loader.load()
+
+        _run_async(manager.add_account(account_id, fresh_config))
+        typer.echo(
+            typer.style(f"✓ Account {account_id} added and started", fg=STATUS_COLORS["active"])
+        )
+        _run_async(manager.close())
+    except ValueError as e:
+        typer.echo(typer.style(f"✗ Error: {e}", fg=STATUS_COLORS["error"]))
+        raise typer.Exit(1)
+
+
 @accounts_app.command("status")
 def account_status(
     account_id: Optional[str] = typer.Argument(None, help="Account ID (optional)"),
