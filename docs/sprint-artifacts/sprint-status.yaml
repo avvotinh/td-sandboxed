@@ -59,8 +59,8 @@ development_status:
   2-6-redis-market-data-subscription: done
   2-7-basic-strategy-framework: done
   2-8-ma-crossover-strategy-implementation: done
-  2-9-signal-filtering-by-symbol: review
-  2-10-cli-engine-commands: backlog
+  2-9-signal-filtering-by-symbol: done
+  2-10-cli-engine-commands: done
   epic-2-retrospective: optional
 
   # Epic 3: Multi-Account Management (7 stories)

@@ -236,24 +236,26 @@ class TestMainCLI:
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
         assert "accounts" in result.stdout
+        assert "config" in result.stdout
         assert "start" in result.stdout
         assert "stop" in result.stdout
         assert "status" in result.stdout
 
-    def test_start_engine(self):
-        """Test start command."""
-        result = runner.invoke(app, ["start"])
+    def test_start_help_shows_options(self):
+        """Test start command shows --dry-run and --verbose options."""
+        result = runner.invoke(app, ["start", "--help"])
         assert result.exit_code == 0
-        assert "Starting trading engine" in result.stdout
+        assert "--dry-run" in result.stdout
+        assert "--verbose" in result.stdout or "-v" in result.stdout
 
-    def test_stop_engine(self):
-        """Test stop command."""
-        result = runner.invoke(app, ["stop"])
+    def test_stop_help_shows_force_option(self):
+        """Test stop command shows --force option."""
+        result = runner.invoke(app, ["stop", "--help"])
         assert result.exit_code == 0
-        assert "Stopping trading engine" in result.stdout
+        assert "--force" in result.stdout or "-f" in result.stdout
 
-    def test_status_engine(self):
-        """Test status command."""
-        result = runner.invoke(app, ["status"])
+    def test_status_help_shows_json_option(self):
+        """Test status command shows --json option."""
+        result = runner.invoke(app, ["status", "--help"])
         assert result.exit_code == 0
-        assert "status" in result.stdout.lower()
+        assert "--json" in result.stdout
