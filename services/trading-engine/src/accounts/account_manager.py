@@ -10,6 +10,7 @@ from .state import AccountState
 
 if TYPE_CHECKING:
     from ..state.redis_state import RedisStateManager
+    from .signal_router import SignalRouter
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ class AccountManager:
         self._signal_handler: SignalHandler | None = None
         self._error_counts: dict[str, int] = {}  # Track error count per account
         self._accounts_lock = asyncio.Lock()  # Protect account mutations
+        self._signal_router: "SignalRouter | None" = None  # Optional signal router
 
     def load_accounts(self, config: AccountsConfig) -> None:
         """Load account configurations for validation.
@@ -72,6 +74,25 @@ class AccountManager:
                      Called on each loop iteration for active accounts.
         """
         self._signal_handler = handler
+
+    def set_signal_router(self, router: "SignalRouter") -> None:
+        """Register a SignalRouter for automatic mapping updates.
+
+        When registered, the router's rebuild_mapping() is called automatically
+        when accounts are added via add_account().
+
+        Args:
+            router: SignalRouter instance to register.
+        """
+        self._signal_router = router
+
+    def get_signal_router(self) -> "SignalRouter | None":
+        """Get the registered SignalRouter.
+
+        Returns:
+            The registered SignalRouter or None if not registered.
+        """
+        return self._signal_router
 
     async def start_all_accounts(self) -> None:
         """Start all accounts with status 'active' concurrently.
@@ -377,6 +398,10 @@ class AccountManager:
 
             # Add to accounts dict and start atomically
             self._accounts[account_id] = new_account
+
+            # Update signal router mapping if registered
+            if self._signal_router is not None:
+                self._signal_router.add_account(new_account)
 
             # Start if status is active (within lock for atomicity)
             if new_account.status == "active":

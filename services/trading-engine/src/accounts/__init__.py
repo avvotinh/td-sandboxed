@@ -13,6 +13,7 @@ Exports:
 - SignalFilter: Signal filtering configuration
 - AccountState: Account lifecycle state enumeration
 - AccountManager: Account lifecycle manager
+- SignalRouter: Routes signals to accounts based on symbol filters
 """
 
 from .account_manager import AccountManager
@@ -23,6 +24,7 @@ from .models import (
     MT5Config,
     SignalFilter,
 )
+from .signal_router import SignalRouter
 from .state import AccountState
 
 __all__ = [
@@ -33,4 +35,5 @@ __all__ = [
     "AccountType",
     "MT5Config",
     "SignalFilter",
+    "SignalRouter",
 ]
