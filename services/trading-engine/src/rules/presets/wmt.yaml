@@ -1,0 +1,28 @@
+# WeMasterTrade (WMT) Prop Firm Rule Preset
+# Based on WeMasterTrade challenge and funded account rules
+# Reference: https://wemastertrade.com/
+
+name: "WeMasterTrade"
+version: "2024.1"
+description: "WeMasterTrade prop firm trading rules"
+
+rules:
+  # Daily Loss Limit: 4% of account balance per day
+  - type: daily_loss_limit
+    threshold_percent: 4.0
+    reset_time: "00:00"
+    timezone: "UTC"
+    action: "block_trading"
+    warning_at: [70, 80, 90]
+
+  # Maximum Drawdown: 8% relative to initial balance
+  - type: max_drawdown
+    threshold_percent: 8.0
+    reference: "initial_balance"
+    action: "block_trading"
+    warning_at: [50, 70, 85]
+
+  # Maximum Position Size: 5% risk per trade
+  - type: max_position_size
+    max_risk_percent: 5.0
+    action: "block_trading"

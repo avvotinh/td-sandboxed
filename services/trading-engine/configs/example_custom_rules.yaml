@@ -1,0 +1,51 @@
+# Example Custom Trading Rules
+# This file demonstrates how to create custom rule configurations
+# for personal trading accounts.
+#
+# Usage:
+# 1. Copy this file and rename it (e.g., my_rules.yaml)
+# 2. Modify the rules to match your trading requirements
+# 3. Reference it in your account configuration:
+#    accounts:
+#      - id: "my-account"
+#        type: "personal"
+#        rules_file: "my_rules.yaml"  # Relative to configs/ directory
+#
+# Available Rule Types:
+# - daily_loss_limit: Maximum loss allowed per day
+# - max_drawdown: Maximum overall drawdown from peak
+# - max_position_size: Maximum position size per trade
+# - profit_target: Target profit (informational)
+# - min_trading_days: Minimum trading days required
+#
+# Rule Actions:
+# - block_trading: Stop all trading when threshold reached
+# - notify: Send notification but allow trading to continue
+
+name: "Example Custom Rules"
+version: "1.0"
+description: "Example custom trading rules for personal accounts"
+
+rules:
+  # Conservative daily loss limit: 2%
+  # More restrictive than typical prop firms
+  - type: daily_loss_limit
+    threshold_percent: 2.0
+    reset_time: "00:00"
+    timezone: "UTC"
+    action: "block_trading"
+    warning_at: [50, 75, 90]  # Warning at 1%, 1.5%, 1.8%
+
+  # Conservative max drawdown: 5%
+  # Protects capital aggressively
+  - type: max_drawdown
+    threshold_percent: 5.0
+    reference: "initial_balance"
+    action: "block_trading"
+    warning_at: [40, 60, 80]  # Warning at 2%, 3%, 4%
+
+  # Maximum position size: 2% risk per trade
+  # Ensures proper risk management
+  - type: max_position_size
+    max_risk_percent: 2.0
+    action: "block_trading"

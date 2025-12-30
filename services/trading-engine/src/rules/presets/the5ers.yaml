@@ -1,0 +1,23 @@
+# The5ers Prop Firm Rule Preset
+# Based on The5ers challenge and funded account rules
+# Reference: https://the5ers.com/
+
+name: "The5ers"
+version: "2024.1"
+description: "The5ers prop firm trading rules"
+
+rules:
+  # Daily Loss Limit: 5% of account balance per day
+  - type: daily_loss_limit
+    threshold_percent: 5.0
+    reset_time: "00:00"
+    timezone: "UTC"
+    action: "block_trading"
+    warning_at: [70, 80, 90]
+
+  # Maximum Drawdown: 6% relative to initial balance
+  - type: max_drawdown
+    threshold_percent: 6.0
+    reference: "initial_balance"
+    action: "block_trading"
+    warning_at: [50, 70, 85]

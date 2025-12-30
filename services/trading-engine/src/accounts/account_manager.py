@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from decimal import Decimal
 
     from ..adapters.mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
+    from ..rules.assignment_service import RuleAssignmentService
+    from ..rules.base_rule import BaseRule
     from ..state.redis_state import RedisStateManager
     from .risk_registry import RiskStateRegistry
     from .risk_state import RiskState
@@ -64,6 +66,8 @@ class AccountManager:
         self._signal_router: "SignalRouter | None" = None  # Optional signal router
         self._mt5_connection_manager: "MT5ConnectionManager | None" = None  # Per-account connections
         self._risk_registry: "RiskStateRegistry | None" = None  # Per-account risk tracking
+        self._rule_assignment_service: "RuleAssignmentService | None" = None  # Rule assignment
+        self._account_rules: dict[str, list["BaseRule"]] = {}  # In-memory rules storage
 
     def load_accounts(self, config: AccountsConfig) -> None:
         """Load account configurations for validation.
@@ -154,6 +158,70 @@ class AccountManager:
             return None
         return self._risk_registry.get_risk_state(account_id)
 
+    def set_rule_assignment_service(
+        self,
+        service: "RuleAssignmentService",
+    ) -> None:
+        """Register a RuleAssignmentService for per-account rule assignment.
+
+        When registered, rules are automatically loaded during account initialization:
+        - _initialize_account_rules() called from _spawn_account_task()
+        - get_account_rules() returns assigned rules
+
+        Follows the same pattern as set_risk_registry() and set_mt5_connection_manager().
+
+        Args:
+            service: RuleAssignmentService instance to register.
+        """
+        self._rule_assignment_service = service
+
+    def get_rule_assignment_service(self) -> "RuleAssignmentService | None":
+        """Get the registered RuleAssignmentService.
+
+        Returns:
+            The registered RuleAssignmentService or None if not registered.
+        """
+        return self._rule_assignment_service
+
+    def get_account_rules(self, account_id: str) -> list["BaseRule"]:
+        """Get rules assigned to an account.
+
+        Args:
+            account_id: Account identifier.
+
+        Returns:
+            List of rules assigned to the account.
+            Empty list if account not found or has no rules.
+        """
+        return self._account_rules.get(account_id, [])
+
+    def _initialize_account_rules(self, account_id: str) -> None:
+        """Initialize rules for an account.
+
+        Called from _spawn_account_task() before starting the account loop.
+        Loads rules based on account configuration using RuleAssignmentService.
+
+        Args:
+            account_id: Account identifier.
+        """
+        if self._rule_assignment_service is None:
+            logger.debug(f"No rule assignment service - skipping rules for {account_id}")
+            return
+
+        account_config = self._accounts.get(account_id)
+        if not account_config:
+            logger.warning(f"Account not found for rule assignment: {account_id}")
+            return
+
+        try:
+            rules = self._rule_assignment_service.get_rules_for_account(account_config)
+            self._account_rules[account_id] = rules
+            logger.info(f"Assigned {len(rules)} rules to account {account_id}")
+        except Exception as e:
+            logger.error(f"Failed to assign rules to account {account_id}: {e}")
+            # Don't fail account startup - rules can be assigned later
+            self._account_rules[account_id] = []
+
     def get_connection_health(self, account_id: str) -> "ConnectionHealth | None":
         """Get MT5 connection health for an account.
 
@@ -190,6 +258,9 @@ class AccountManager:
         if account_id in self._tasks:
             logger.warning(f"Account {account_id} task already running")
             return
+
+        # Initialize rules before spawning task
+        self._initialize_account_rules(account_id)
 
         task = asyncio.create_task(
             self._run_account_loop(account_id),

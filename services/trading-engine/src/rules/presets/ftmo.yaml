@@ -1,0 +1,35 @@
+# FTMO Prop Firm Rule Preset
+# Based on FTMO challenge and funded account rules
+# Reference: https://ftmo.com/en/trading-rules/
+
+name: "FTMO"
+version: "2024.1"
+description: "FTMO prop firm trading rules - Challenge and Funded accounts"
+
+rules:
+  # Daily Loss Limit: Maximum 5% of initial balance per day
+  - type: daily_loss_limit
+    threshold_percent: 5.0
+    reset_time: "00:00"
+    timezone: "CET"  # FTMO uses Central European Time
+    action: "block_trading"
+    warning_at: [70, 80, 90]  # Warning at 3.5%, 4%, 4.5%
+
+  # Maximum Drawdown: 10% of initial balance (trailing)
+  - type: max_drawdown
+    threshold_percent: 10.0
+    reference: "initial_balance"
+    action: "block_trading"
+    warning_at: [50, 70, 85]  # Warning at 5%, 7%, 8.5%
+
+  # Profit Target: 10% for challenge (informational, doesn't block)
+  # Note: This is tracked but doesn't block trading
+  - type: profit_target
+    threshold_percent: 10.0
+    action: "notify"
+
+  # Minimum Trading Days: 4 days required for challenge
+  # Note: Informational tracking for challenge completion
+  - type: min_trading_days
+    required_days: 4
+    action: "notify"
