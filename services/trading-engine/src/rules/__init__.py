@@ -29,6 +29,9 @@ Story 4.1 Exports:
 Story 4.2 Exports:
 - DailyLossLimitRule: Blocks trades when daily loss exceeds threshold
 
+Story 4.3 Exports:
+- MaxDrawdownRule: Blocks trades when total drawdown exceeds threshold
+
 Full rule implementations in Epic 4+.
 """
 
@@ -42,7 +45,7 @@ from .engine_factory import RuleEngineFactory
 from .engine_result import RuleEngineResult
 from .parser import RuleParseError, RuleParser
 from .preset_loader import PresetNotFoundError, RulePresetLoader
-from .types.drawdown import DailyLossLimitRule
+from .types.drawdown import DailyLossLimitRule, MaxDrawdownRule
 
 __all__ = [
     # Base types
@@ -52,6 +55,7 @@ __all__ = [
     "RuleList",
     # Rule types (Story 4.2+)
     "DailyLossLimitRule",
+    "MaxDrawdownRule",
     # Assignment
     "RuleAssignment",
     "RuleAssignmentService",

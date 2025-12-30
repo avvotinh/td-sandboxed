@@ -1,0 +1,677 @@
+"""Integration tests for MaxDrawdownRule (Story 4.3).
+
+Tests cover:
+- RuleEngine with MaxDrawdownRule validates signals correctly
+- RuleEngine short-circuits on BLOCK from MaxDrawdownRule
+- Warning aggregation works with MaxDrawdownRule warnings
+- Loading from ftmo.yaml preset creates correct MaxDrawdownRule instance
+- Multiple accounts with different thresholds (FTMO 10%, The5ers 4%, custom 5%)
+- MaxDrawdownRule and DailyLossLimitRule together in RuleEngine (both evaluated)
+"""
+
+from unittest.mock import AsyncMock
+
+import pytest
+
+from src.accounts.account_manager import AccountManager
+from src.accounts.models import AccountConfig, AccountsConfig, AccountType, MT5Config
+from src.rules.assignment_service import RuleAssignmentService
+from src.rules.base_rule import RuleAction, RuleResult
+from src.rules.context_builder import RuleContextBuilder
+from src.rules.engine import RuleEngine
+from src.rules.parser import RuleParser
+from src.rules.preset_loader import RulePresetLoader
+from src.rules.types.drawdown import DailyLossLimitRule, MaxDrawdownRule
+
+
+# =============================================================================
+# TEST FIXTURES
+# =============================================================================
+
+
+def _create_mt5_config() -> MT5Config:
+    """Create a minimal MT5 config for testing."""
+    return MT5Config(server="Test-Server", login=12345, password_env="TEST_PASS")
+
+
+def _create_prop_firm_account(
+    account_id: str = "ftmo-001",
+    prop_firm: str = "ftmo",
+) -> AccountConfig:
+    """Create a prop firm account for testing."""
+    return AccountConfig(
+        id=account_id,
+        name=f"Prop {account_id}",
+        type=AccountType.PROP_FIRM,
+        prop_firm=prop_firm,
+        mt5=_create_mt5_config(),
+        strategy="ma_crossover",
+    )
+
+
+@pytest.fixture
+def mock_redis_manager():
+    """Create a mock Redis manager for testing."""
+    mock = AsyncMock()
+    mock.save_account_status = AsyncMock()
+    mock.get_account_status = AsyncMock(return_value="active")
+    mock.update_account_health = AsyncMock()
+    mock.clear_account_health = AsyncMock()
+    mock.publish_alert = AsyncMock()
+    mock.save_account_last_error = AsyncMock()
+    mock.close = AsyncMock()
+    return mock
+
+
+class MockRule:
+    """Mock rule for testing with MaxDrawdownRule."""
+
+    def __init__(
+        self,
+        rule_type: str = "mock_rule",
+        name: str = "Mock Rule",
+        priority: int = 50,
+        action: RuleAction = RuleAction.ALLOW,
+    ):
+        self.rule_type = rule_type
+        self.name = name
+        self.priority = priority
+        self._action = action
+
+    def validate(self, context: dict) -> RuleResult:
+        return RuleResult(action=self._action)
+
+    def get_current_value(self, context: dict) -> float:
+        return 0.0
+
+    def get_threshold(self) -> float:
+        return 100.0
+
+    def get_warning_thresholds(self) -> list[float]:
+        return [70.0, 80.0, 90.0]
+
+
+class MockSignal:
+    """Mock signal for testing."""
+
+    def __init__(self, symbol: str = "EURUSD", side: str = "buy", quantity: float = 1.0):
+        self.symbol = symbol
+        self.side = side
+        self.quantity = quantity
+
+
+# =============================================================================
+# RuleEngine Integration Tests
+# =============================================================================
+
+
+class TestRuleEngineWithMaxDrawdown:
+    """Test RuleEngine with MaxDrawdownRule validates signals correctly."""
+
+    def test_engine_allows_trade_below_threshold(self):
+        """Test engine allows trade when drawdown below threshold."""
+        rule = MaxDrawdownRule(threshold_percent=10.0)
+        engine = RuleEngine("test-001", [rule])
+
+        context = {
+            "account_id": "test-001",
+            "total_drawdown_percent": 4.0,  # 4% drawdown - below warning
+        }
+
+        result = engine.validate(context)
+
+        assert result.is_allowed
+        assert not result.is_blocked
+        assert result.action == RuleAction.ALLOW
+
+    def test_engine_warns_at_warning_threshold(self):
+        """Test engine warns when approaching max drawdown threshold."""
+        rule = MaxDrawdownRule(threshold_percent=10.0)
+        engine = RuleEngine("test-001", [rule])
+
+        context = {
+            "account_id": "test-001",
+            "total_drawdown_percent": 7.0,  # 7% drawdown - 70% of 10%
+        }
+
+        result = engine.validate(context)
+
+        assert result.is_allowed  # WARN still allows trading
+        assert not result.is_blocked
+        assert result.action == RuleAction.WARN
+        assert result.has_warnings
+
+    def test_engine_blocks_at_threshold(self):
+        """Test engine blocks trade when drawdown at threshold."""
+        rule = MaxDrawdownRule(threshold_percent=10.0)
+        engine = RuleEngine("test-001", [rule])
+
+        context = {
+            "account_id": "test-001",
+            "total_drawdown_percent": 10.0,  # 10% drawdown - at threshold
+        }
+
+        result = engine.validate(context)
+
+        assert not result.is_allowed
+        assert result.is_blocked
+        assert result.action == RuleAction.BLOCK
+
+    def test_engine_blocks_above_threshold(self):
+        """Test engine blocks trade when drawdown exceeds threshold."""
+        rule = MaxDrawdownRule(threshold_percent=10.0)
+        engine = RuleEngine("test-001", [rule])
+
+        context = {
+            "account_id": "test-001",
+            "total_drawdown_percent": 12.0,  # 12% drawdown - above threshold
+        }
+
+        result = engine.validate(context)
+
+        assert not result.is_allowed
+        assert result.is_blocked
+        assert result.action == RuleAction.BLOCK
+
+
+class TestRuleEngineShortCircuit:
+    """Test RuleEngine short-circuits on BLOCK from MaxDrawdownRule."""
+
+    def test_short_circuit_stops_on_max_drawdown_block(self):
+        """Test short-circuit stops evaluation when MaxDrawdownRule blocks."""
+        # MaxDrawdownRule has priority=2
+        max_drawdown_rule = MaxDrawdownRule(threshold_percent=10.0)
+        mock_rule = MockRule(rule_type="should_not_run", priority=99)
+
+        engine = RuleEngine("test-001", [max_drawdown_rule, mock_rule])
+
+        context = {
+            "account_id": "test-001",
+            "total_drawdown_percent": 10.0,  # BLOCK condition
+        }
+
+        result = engine.validate(context)
+
+        # Should only have 1 result (short-circuited)
+        assert len(result.all_results) == 1
+        assert result.is_blocked
+        rule, rule_result = result.all_results[0]
+        assert rule_result.metadata.get("rule_type") == "max_drawdown"
+
+    def test_continues_evaluation_on_allow(self):
+        """Test evaluation continues when MaxDrawdownRule allows."""
+        max_drawdown_rule = MaxDrawdownRule(threshold_percent=10.0)
+        mock_rule = MockRule(rule_type="second_rule", priority=99)
+
+        engine = RuleEngine("test-001", [max_drawdown_rule, mock_rule])
+
+        context = {
+            "account_id": "test-001",
+            "total_drawdown_percent": 4.0,  # ALLOW condition
+        }
+
+        result = engine.validate(context)
+
+        # Should have 2 results (both rules evaluated)
+        assert len(result.all_results) == 2
+        assert result.is_allowed
+
+    def test_continues_evaluation_on_warn(self):
+        """Test evaluation continues when MaxDrawdownRule warns."""
+        max_drawdown_rule = MaxDrawdownRule(threshold_percent=10.0)
+        mock_rule = MockRule(rule_type="second_rule", priority=99)
+
+        engine = RuleEngine("test-001", [max_drawdown_rule, mock_rule])
+
+        context = {
+            "account_id": "test-001",
+            "total_drawdown_percent": 7.0,  # WARN condition (70%)
+        }
+
+        result = engine.validate(context)
+
+        # Should have 2 results (warnings don't short-circuit)
+        assert len(result.all_results) == 2
+        assert result.is_allowed
+        assert result.has_warnings
+
+
+class TestWarningAggregation:
+    """Test warning aggregation works with MaxDrawdownRule warnings."""
+
+    def test_single_warning_captured(self):
+        """Test single warning from MaxDrawdownRule is captured."""
+        rule = MaxDrawdownRule(threshold_percent=10.0)
+        engine = RuleEngine("test-001", [rule])
+
+        context = {
+            "account_id": "test-001",
+            "total_drawdown_percent": 7.0,  # 70% warning
+        }
+
+        result = engine.validate(context)
+
+        assert result.has_warnings
+        assert len(result.warning_messages) == 1
+        assert "70%" in result.warning_messages[0]
+
+    def test_multiple_warnings_from_different_rules(self):
+        """Test warnings from multiple rules are aggregated."""
+        max_drawdown_rule = MaxDrawdownRule(threshold_percent=10.0)
+        warning_mock = MockRule(
+            rule_type="warning_mock",
+            priority=99,
+            action=RuleAction.WARN,
+        )
+
+        engine = RuleEngine("test-001", [max_drawdown_rule, warning_mock])
+
+        context = {
+            "account_id": "test-001",
+            "total_drawdown_percent": 7.0,  # 70% warning
+        }
+
+        result = engine.validate(context)
+
+        assert result.has_warnings
+        # Both rules should have warned
+        warn_count = sum(1 for _rule, rule_result in result.all_results if rule_result.action == RuleAction.WARN)
+        assert warn_count == 2
+
+    def test_warning_messages_content(self):
+        """Test warning messages contain useful information."""
+        rule = MaxDrawdownRule(threshold_percent=10.0)
+        engine = RuleEngine("test-001", [rule])
+
+        context = {
+            "account_id": "test-001",
+            "total_drawdown_percent": 8.5,  # 85% warning
+        }
+
+        result = engine.validate(context)
+
+        assert result.has_warnings
+        warning_msg = result.warning_messages[0]
+        assert "85%" in warning_msg  # Usage percentage
+        assert "10.0%" in warning_msg  # Threshold
+
+
+class TestFTMOPresetLoading:
+    """Test loading from ftmo.yaml preset creates correct MaxDrawdownRule."""
+
+    def test_ftmo_preset_loads_max_drawdown_rule(self):
+        """Test FTMO preset loads MaxDrawdownRule correctly."""
+        loader = RulePresetLoader()
+        rules = loader.load_preset("ftmo")
+
+        # Find max_drawdown rule
+        max_drawdown_rules = [r for r in rules if r.rule_type == "max_drawdown"]
+        assert len(max_drawdown_rules) == 1
+
+        rule = max_drawdown_rules[0]
+        assert isinstance(rule, MaxDrawdownRule)
+
+    def test_ftmo_preset_threshold_is_10_percent(self):
+        """Test FTMO preset max drawdown threshold is 10%."""
+        loader = RulePresetLoader()
+        rules = loader.load_preset("ftmo")
+
+        max_drawdown_rule = next(r for r in rules if r.rule_type == "max_drawdown")
+
+        assert max_drawdown_rule.get_threshold() == 10.0
+
+    def test_ftmo_preset_warning_thresholds(self):
+        """Test FTMO preset warning thresholds are [50, 70, 85]."""
+        loader = RulePresetLoader()
+        rules = loader.load_preset("ftmo")
+
+        max_drawdown_rule = next(r for r in rules if r.rule_type == "max_drawdown")
+
+        assert max_drawdown_rule.get_warning_thresholds() == [50.0, 70.0, 85.0]
+
+    def test_ftmo_preset_validates_correctly(self):
+        """Test FTMO preset rule validates correctly."""
+        loader = RulePresetLoader()
+        rules = loader.load_preset("ftmo")
+
+        max_drawdown_rule = next(r for r in rules if r.rule_type == "max_drawdown")
+
+        # Test ALLOW
+        result = max_drawdown_rule.validate({"total_drawdown_percent": 4.0})
+        assert result.action == RuleAction.ALLOW
+
+        # Test WARN at 50%
+        result = max_drawdown_rule.validate({"total_drawdown_percent": 5.0})
+        assert result.action == RuleAction.WARN
+
+        # Test WARN at 70%
+        result = max_drawdown_rule.validate({"total_drawdown_percent": 7.0})
+        assert result.action == RuleAction.WARN
+
+        # Test BLOCK at threshold
+        result = max_drawdown_rule.validate({"total_drawdown_percent": 10.0})
+        assert result.action == RuleAction.BLOCK
+
+
+class TestRuleParserWithMaxDrawdownRule:
+    """Test RuleParser correctly parses MaxDrawdownRule from YAML."""
+
+    def test_parser_creates_max_drawdown_rule(self):
+        """Test parser creates MaxDrawdownRule from YAML dict."""
+        parser = RuleParser()
+        yaml_content = {
+            "rules": [
+                {
+                    "type": "max_drawdown",
+                    "threshold_percent": 10.0,
+                    "reference": "initial_balance",
+                    "warning_at": [50, 70, 85],
+                }
+            ]
+        }
+
+        rules = parser.parse_rules(yaml_content)
+
+        assert len(rules) == 1
+        assert isinstance(rules[0], MaxDrawdownRule)
+        assert rules[0].threshold_percent == 10.0
+        assert rules[0].reference == "initial_balance"
+
+    def test_parser_with_custom_threshold(self):
+        """Test parser with custom threshold value."""
+        parser = RuleParser()
+        yaml_content = {
+            "rules": [
+                {
+                    "type": "max_drawdown",
+                    "threshold_percent": 5.0,
+                }
+            ]
+        }
+
+        rules = parser.parse_rules(yaml_content)
+        assert rules[0].threshold_percent == 5.0
+
+    def test_parser_with_default_values(self):
+        """Test parser uses default values when not specified."""
+        parser = RuleParser()
+        yaml_content = {
+            "rules": [
+                {
+                    "type": "max_drawdown",
+                }
+            ]
+        }
+
+        rules = parser.parse_rules(yaml_content)
+        rule = rules[0]
+
+        assert rule.threshold_percent == 10.0  # Default
+        assert rule.reference == "initial_balance"  # Default
+        assert rule.warning_at == [50.0, 70.0, 85.0]  # Default
+
+
+class TestMultipleAccountsWithDifferentThresholds:
+    """Test multiple accounts with different thresholds."""
+
+    def test_different_thresholds_per_account(self):
+        """Test each account can have different max drawdown thresholds."""
+        # Create rules for different accounts
+        ftmo_rule = MaxDrawdownRule(threshold_percent=10.0)  # FTMO 10%
+        the5ers_rule = MaxDrawdownRule(threshold_percent=4.0)  # The5ers 4%
+        custom_rule = MaxDrawdownRule(threshold_percent=5.0)  # Custom 5%
+
+        # Create engines
+        ftmo_engine = RuleEngine("ftmo-001", [ftmo_rule])
+        the5ers_engine = RuleEngine("the5ers-001", [the5ers_rule])
+        custom_engine = RuleEngine("custom-001", [custom_rule])
+
+        # Test FTMO at 8% drawdown - should WARN (80%)
+        ftmo_context = {"account_id": "ftmo-001", "total_drawdown_percent": 8.0}
+        ftmo_result = ftmo_engine.validate(ftmo_context)
+        assert ftmo_result.action == RuleAction.WARN
+
+        # Test The5ers at 4% drawdown - should BLOCK (at 4% threshold)
+        the5ers_context = {"account_id": "the5ers-001", "total_drawdown_percent": 4.0}
+        the5ers_result = the5ers_engine.validate(the5ers_context)
+        assert the5ers_result.action == RuleAction.BLOCK
+
+        # Test Custom at 4% drawdown - should WARN (80% of 5%)
+        custom_context = {"account_id": "custom-001", "total_drawdown_percent": 4.0}
+        custom_result = custom_engine.validate(custom_context)
+        assert custom_result.action == RuleAction.WARN
+
+    def test_account_manager_assigns_correct_rules(self, mock_redis_manager):
+        """Test AccountManager assigns correct rules to each account."""
+        manager = AccountManager(mock_redis_manager)
+        service = RuleAssignmentService()
+        manager.set_rule_assignment_service(service)
+
+        # Create FTMO and The5ers accounts
+        accounts = [
+            _create_prop_firm_account("ftmo-001", "ftmo"),
+            _create_prop_firm_account("the5ers-001", "the5ers"),
+        ]
+        config = AccountsConfig(accounts=accounts)
+        manager.load_accounts(config)
+
+        # Initialize rules for each account
+        for acc in accounts:
+            manager._initialize_account_rules(acc.id)
+
+        # Get engines
+        ftmo_engine = manager.get_rule_engine("ftmo-001")
+        the5ers_engine = manager.get_rule_engine("the5ers-001")
+
+        # Both should have max_drawdown rules
+        ftmo_rules = ftmo_engine.get_rules()
+        the5ers_rules = the5ers_engine.get_rules()
+
+        assert any(r.rule_type == "max_drawdown" for r in ftmo_rules)
+        assert any(r.rule_type == "max_drawdown" for r in the5ers_rules)
+
+
+class TestMaxDrawdownWithDailyLossLimit:
+    """Test MaxDrawdownRule and DailyLossLimitRule together in RuleEngine."""
+
+    def test_both_rules_evaluated_when_both_allow(self):
+        """Test both rules are evaluated when both allow."""
+        daily_loss_rule = DailyLossLimitRule(threshold_percent=5.0)
+        max_drawdown_rule = MaxDrawdownRule(threshold_percent=10.0)
+
+        engine = RuleEngine("test-001", [daily_loss_rule, max_drawdown_rule])
+
+        context = {
+            "account_id": "test-001",
+            "daily_pnl_percent": -2.0,  # ALLOW (below 5%)
+            "total_drawdown_percent": 4.0,  # ALLOW (below 50% of 10%)
+        }
+
+        result = engine.validate(context)
+
+        assert result.is_allowed
+        assert len(result.all_results) == 2
+
+    def test_daily_loss_blocks_before_max_drawdown(self):
+        """Test daily loss rule blocks before max drawdown is evaluated."""
+        daily_loss_rule = DailyLossLimitRule(threshold_percent=5.0)  # priority=1
+        max_drawdown_rule = MaxDrawdownRule(threshold_percent=10.0)  # priority=2
+
+        engine = RuleEngine("test-001", [daily_loss_rule, max_drawdown_rule])
+
+        context = {
+            "account_id": "test-001",
+            "daily_pnl_percent": -5.0,  # BLOCK (at 5%)
+            "total_drawdown_percent": 4.0,  # Would ALLOW
+        }
+
+        result = engine.validate(context)
+
+        assert result.is_blocked
+        # Only daily loss rule should be evaluated (short-circuit)
+        assert len(result.all_results) == 1
+        rule, rule_result = result.all_results[0]
+        assert rule_result.metadata.get("rule_type") == "daily_loss_limit"
+
+    def test_max_drawdown_blocks_when_daily_loss_allows(self):
+        """Test max drawdown can block even when daily loss allows."""
+        daily_loss_rule = DailyLossLimitRule(threshold_percent=5.0)  # priority=1
+        max_drawdown_rule = MaxDrawdownRule(threshold_percent=10.0)  # priority=2
+
+        engine = RuleEngine("test-001", [daily_loss_rule, max_drawdown_rule])
+
+        context = {
+            "account_id": "test-001",
+            "daily_pnl_percent": -2.0,  # ALLOW (40%)
+            "total_drawdown_percent": 10.0,  # BLOCK (at 10%)
+        }
+
+        result = engine.validate(context)
+
+        assert result.is_blocked
+        # Both rules should be evaluated
+        assert len(result.all_results) == 2
+
+    def test_both_rules_warn_aggregates_warnings(self):
+        """Test warnings from both rules are aggregated."""
+        daily_loss_rule = DailyLossLimitRule(threshold_percent=5.0)  # priority=1
+        max_drawdown_rule = MaxDrawdownRule(threshold_percent=10.0)  # priority=2
+
+        engine = RuleEngine("test-001", [daily_loss_rule, max_drawdown_rule])
+
+        context = {
+            "account_id": "test-001",
+            "daily_pnl_percent": -3.5,  # WARN (70% of 5%)
+            "total_drawdown_percent": 7.0,  # WARN (70% of 10%)
+        }
+
+        result = engine.validate(context)
+
+        assert result.is_allowed
+        assert result.has_warnings
+        assert len(result.warning_messages) == 2
+
+    def test_priority_ordering_correct(self):
+        """Test daily loss (priority=1) evaluated before max drawdown (priority=2)."""
+        daily_loss_rule = DailyLossLimitRule(threshold_percent=5.0)
+        max_drawdown_rule = MaxDrawdownRule(threshold_percent=10.0)
+
+        # Create engine with rules in "wrong" order
+        engine = RuleEngine("test-001", [max_drawdown_rule, daily_loss_rule])
+
+        context = {
+            "account_id": "test-001",
+            "daily_pnl_percent": -2.0,
+            "total_drawdown_percent": 4.0,
+        }
+
+        result = engine.validate(context)
+
+        # Verify order in all_results (should be sorted by priority)
+        rule_types = [r.rule_type for r, _ in result.all_results]
+        assert rule_types == ["daily_loss_limit", "max_drawdown"]
+
+
+class TestContextBuilderWithMaxDrawdownRule:
+    """Test RuleContextBuilder creates valid context for MaxDrawdownRule."""
+
+    def test_context_includes_total_drawdown_percent(self):
+        """Test context includes total_drawdown_percent field."""
+        builder = RuleContextBuilder()
+        context = builder.build_validation_context(
+            account_id="test-001",
+            signal=MockSignal(),
+            account_state={
+                "balance": 100000,
+                "equity": 93000,
+                "total_drawdown_percent": 7.0,
+            },
+        )
+
+        assert "total_drawdown_percent" in context
+        assert context["total_drawdown_percent"] == 7.0
+
+    def test_context_works_with_max_drawdown_rule(self):
+        """Test context from builder works with MaxDrawdownRule."""
+        builder = RuleContextBuilder()
+        rule = MaxDrawdownRule(threshold_percent=10.0)
+        engine = RuleEngine("test-001", [rule])
+
+        context = builder.build_validation_context(
+            account_id="test-001",
+            signal=MockSignal(),
+            account_state={
+                "balance": 100000,
+                "equity": 95000,
+                "total_drawdown_percent": 5.0,  # 5% drawdown (50% of limit)
+            },
+        )
+
+        result = engine.validate(context)
+
+        # Should warn (5% is 50% of 10% limit)
+        assert result.action == RuleAction.WARN
+
+
+class TestMaxDrawdownRulePerformance:
+    """Test MaxDrawdownRule performance meets requirements."""
+
+    def test_validate_under_5ms(self):
+        """Test validate() completes in under 5ms."""
+        import time
+
+        rule = MaxDrawdownRule(threshold_percent=10.0)
+        context = {"total_drawdown_percent": 7.0}
+
+        # Warm up
+        rule.validate(context)
+
+        # Measure
+        iterations = 1000
+        start = time.perf_counter()
+        for _ in range(iterations):
+            rule.validate(context)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        avg_ms = elapsed_ms / iterations
+        assert avg_ms < 5, f"Average validate() time {avg_ms:.3f}ms exceeds 5ms target"
+
+    def test_engine_with_max_drawdown_under_50ms(self):
+        """Test engine with MaxDrawdownRule validates under 50ms (NFR2)."""
+        import time
+
+        rule = MaxDrawdownRule(threshold_percent=10.0)
+        engine = RuleEngine("perf-test", [rule])
+        context = {
+            "account_id": "perf-test",
+            "total_drawdown_percent": 7.0,
+        }
+
+        # Measure
+        start = time.perf_counter()
+        result = engine.validate(context)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        assert elapsed_ms < 50, f"Validation took {elapsed_ms:.2f}ms, exceeds 50ms target"
+        assert result.evaluation_time_ms < 50
+
+    def test_engine_with_both_rules_under_50ms(self):
+        """Test engine with both drawdown rules validates under 50ms."""
+        import time
+
+        daily_loss_rule = DailyLossLimitRule(threshold_percent=5.0)
+        max_drawdown_rule = MaxDrawdownRule(threshold_percent=10.0)
+        engine = RuleEngine("perf-test", [daily_loss_rule, max_drawdown_rule])
+
+        context = {
+            "account_id": "perf-test",
+            "daily_pnl_percent": -3.5,
+            "total_drawdown_percent": 7.0,
+        }
+
+        # Measure
+        start = time.perf_counter()
+        result = engine.validate(context)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        assert elapsed_ms < 50, f"Validation took {elapsed_ms:.2f}ms, exceeds 50ms target"
