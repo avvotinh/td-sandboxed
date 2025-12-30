@@ -95,7 +95,7 @@ class RuleParser:
         """Registry mapping YAML type to rule class.
 
         Lazy-loaded to defer Epic 4 imports until actually needed.
-        Returns placeholder classes if Epic 4 rule classes don't exist yet.
+        Returns placeholder classes for rule types that don't exist yet.
 
         Returns:
             Dictionary mapping rule type strings to rule classes.
@@ -103,30 +103,64 @@ class RuleParser:
         if self._rule_types is not None:
             return self._rule_types
 
+        # Start with placeholder types for all rules
+        self._rule_types = self._create_placeholder_types()
+
+        # Try to import each implemented rule type individually
+        # This allows partial Epic 4 implementation (e.g., Story 4.2 adds DailyLossLimitRule)
         try:
-            # These imports will work once Epic 4 is implemented
-            from .types.drawdown import DailyLossLimitRule, MaxDrawdownRule
-            from .types.position import MaxPositionSizeRule
-            from .types.targets import MinTradingDaysRule, ProfitTargetRule
+            from .types.drawdown import DailyLossLimitRule
 
-            self._rule_types = {
-                "daily_loss_limit": DailyLossLimitRule,
-                "max_drawdown": MaxDrawdownRule,
-                "max_position_size": MaxPositionSizeRule,
-                "profit_target": ProfitTargetRule,
-                "min_trading_days": MinTradingDaysRule,
-            }
-            logger.debug("Loaded Epic 4 rule types")
+            self._rule_types["daily_loss_limit"] = DailyLossLimitRule
+            logger.debug("Loaded DailyLossLimitRule")
         except ImportError:
-            # Epic 4 not implemented yet - create placeholder classes
-            if not self._placeholders_created:
-                logger.info(
-                    "Epic 4 rule types not found - using placeholder classes. "
-                    "Full rule implementations will be available in Epic 4."
-                )
-                self._placeholders_created = True
+            pass
 
-            self._rule_types = self._create_placeholder_types()
+        try:
+            from .types.drawdown import MaxDrawdownRule
+
+            self._rule_types["max_drawdown"] = MaxDrawdownRule
+            logger.debug("Loaded MaxDrawdownRule")
+        except ImportError:
+            pass
+
+        try:
+            from .types.position import MaxPositionSizeRule
+
+            self._rule_types["max_position_size"] = MaxPositionSizeRule
+            logger.debug("Loaded MaxPositionSizeRule")
+        except ImportError:
+            pass
+
+        try:
+            from .types.targets import ProfitTargetRule
+
+            self._rule_types["profit_target"] = ProfitTargetRule
+            logger.debug("Loaded ProfitTargetRule")
+        except ImportError:
+            pass
+
+        try:
+            from .types.targets import MinTradingDaysRule
+
+            self._rule_types["min_trading_days"] = MinTradingDaysRule
+            logger.debug("Loaded MinTradingDaysRule")
+        except ImportError:
+            pass
+
+        # Log which rules are using placeholders
+        placeholder_types = [
+            k
+            for k, v in self._rule_types.items()
+            if "Placeholder" in v.__name__
+        ]
+        if placeholder_types and not self._placeholders_created:
+            logger.info(
+                "Using placeholder classes for: %s. "
+                "Full implementations will be available as Epic 4 progresses.",
+                ", ".join(placeholder_types),
+            )
+            self._placeholders_created = True
 
         return self._rule_types
 

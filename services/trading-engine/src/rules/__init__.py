@@ -26,6 +26,9 @@ Story 4.1 Exports:
 - RuleContextBuilder: Builder for creating validation contexts
 - RuleValidationError: Exception for rule validation failures
 
+Story 4.2 Exports:
+- DailyLossLimitRule: Blocks trades when daily loss exceeds threshold
+
 Full rule implementations in Epic 4+.
 """
 
@@ -39,6 +42,7 @@ from .engine_factory import RuleEngineFactory
 from .engine_result import RuleEngineResult
 from .parser import RuleParseError, RuleParser
 from .preset_loader import PresetNotFoundError, RulePresetLoader
+from .types.drawdown import DailyLossLimitRule
 
 __all__ = [
     # Base types
@@ -46,6 +50,8 @@ __all__ = [
     "RuleAction",
     "RuleResult",
     "RuleList",
+    # Rule types (Story 4.2+)
+    "DailyLossLimitRule",
     # Assignment
     "RuleAssignment",
     "RuleAssignmentService",
