@@ -2,11 +2,14 @@
 
 import asyncio
 import os
-from typing import Any, Optional
+from typing import Any
 
 import typer
+from tabulate import tabulate
 
 from ..accounts.account_manager import AccountManager
+from ..accounts.metrics_service import AccountMetricsService
+from ..accounts.risk_registry import RiskStateRegistry
 from ..config.loader import ConfigLoader, ConfigValidationError
 from ..state.redis_state import RedisStateManager
 from .constants import STATUS_COLORS
@@ -69,6 +72,23 @@ def _get_account_manager() -> AccountManager:
     manager = AccountManager(redis)
     manager.load_accounts(accounts_config)
     return manager
+
+
+def _get_metrics_service(
+    redis: RedisStateManager, manager: AccountManager
+) -> AccountMetricsService:
+    """Create AccountMetricsService with dependencies.
+
+    Args:
+        redis: Redis state manager.
+        manager: Account manager.
+
+    Returns:
+        Configured AccountMetricsService instance.
+    """
+    risk_registry = RiskStateRegistry(redis)
+    manager.set_risk_registry(risk_registry)
+    return AccountMetricsService(redis, risk_registry, manager)
 
 
 @accounts_app.command("start")
@@ -173,33 +193,144 @@ def add_account(
 
 @accounts_app.command("status")
 def account_status(
-    account_id: Optional[str] = typer.Argument(None, help="Account ID (optional)"),
+    account_id: str = typer.Argument(..., help="Account ID to show status for"),
 ) -> None:
-    """Show account status (all accounts if no ID specified)."""
-    try:
-        manager = _get_account_manager()
-        if account_id:
-            # Validate account exists
-            try:
-                manager._validate_account_exists(account_id)
-            except ValueError as e:
-                typer.echo(typer.style(f"✗ Error: {e}", fg=STATUS_COLORS["error"]))
-                _run_async(manager.close())
-                raise typer.Exit(1)
+    """Show detailed status for a specific account.
 
-            status = _run_async(manager.get_account_status(account_id)) or "unknown"
-            color = STATUS_COLORS.get(status, STATUS_COLORS["unknown"])
-            typer.echo(f"Account {account_id}: " + typer.style(status, fg=color))
-        else:
-            statuses = _run_async(manager.get_all_statuses())
-            if not statuses:
-                typer.echo("No accounts configured.")
-            else:
-                typer.echo("Account Statuses:")
-                for acc_id, status in statuses.items():
-                    color = STATUS_COLORS.get(status, STATUS_COLORS["unknown"])
-                    typer.echo(f"  {acc_id}: " + typer.style(status, fg=color))
-        _run_async(manager.close())
-    except ValueError as e:
-        typer.echo(typer.style(f"✗ Error: {e}", fg=STATUS_COLORS["error"]))
+    Displays Account ID, Name, Status, Balance, Equity, Daily P&L,
+    Max Drawdown, and Peak Equity from the account's metrics.
+
+    Example: trading-engine accounts status ftmo-gold-001
+    """
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    redis = RedisStateManager(redis_url)
+
+    try:
+        _run_async(redis.connect())
+    except Exception as e:
+        typer.echo(
+            typer.style(f"✗ Redis connection failed: {e}", fg=STATUS_COLORS["error"])
+        )
         raise typer.Exit(1)
+
+    # Load accounts config
+    config_path = os.getenv("ACCOUNTS_CONFIG", "configs/accounts.yaml")
+    try:
+        loader = ConfigLoader(config_path)
+        accounts_config = loader.load()
+    except FileNotFoundError:
+        typer.echo(
+            typer.style(
+                f"✗ Config file not found: {config_path}",
+                fg=STATUS_COLORS["error"],
+            )
+        )
+        _run_async(redis.close())
+        raise typer.Exit(1)
+    except ConfigValidationError as e:
+        typer.echo(typer.style(f"✗ {e}", fg=STATUS_COLORS["error"]))
+        _run_async(redis.close())
+        raise typer.Exit(1)
+
+    manager = AccountManager(redis)
+    manager.load_accounts(accounts_config)
+    metrics_service = _get_metrics_service(redis, manager)
+
+    # Get account metrics
+    metrics = _run_async(metrics_service.get_account_metrics(account_id))
+
+    if not metrics:
+        typer.echo(
+            typer.style(f"Account not found: {account_id}", fg=STATUS_COLORS["error"])
+        )
+        _run_async(redis.close())
+        raise typer.Exit(1)
+
+    # Display formatted output
+    status_data = metrics.to_status_dict()
+    status_color = STATUS_COLORS.get(metrics.status, STATUS_COLORS["unknown"])
+
+    typer.echo(f"Account: {status_data['account_id']} ({status_data['account_name']})")
+    typer.echo("Status: " + typer.style(status_data["status"], fg=status_color))
+    typer.echo(f"Balance: {status_data['balance']}")
+    typer.echo(f"Equity: {status_data['equity']}")
+
+    # Color-code P&L
+    pnl_color = STATUS_COLORS.get("active") if metrics.daily_pnl >= 0 else STATUS_COLORS.get("error")
+    typer.echo("Daily P&L: " + typer.style(status_data["daily_pnl"], fg=pnl_color))
+
+    typer.echo(f"Max Drawdown: {status_data['max_drawdown']}")
+    typer.echo(f"Peak Equity: {status_data['peak_equity']}")
+
+    _run_async(redis.close())
+
+
+@accounts_app.command("list")
+def list_accounts() -> None:
+    """List all accounts with summary metrics.
+
+    Displays a table with columns: ID, Name, Status, Balance, Daily P&L %
+    Sorted by status (active first), then by ID.
+    Shows total balance across all accounts.
+
+    Example: trading-engine accounts list
+    """
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    redis = RedisStateManager(redis_url)
+
+    try:
+        _run_async(redis.connect())
+    except Exception as e:
+        typer.echo(
+            typer.style(f"✗ Redis connection failed: {e}", fg=STATUS_COLORS["error"])
+        )
+        raise typer.Exit(1)
+
+    # Load accounts config
+    config_path = os.getenv("ACCOUNTS_CONFIG", "configs/accounts.yaml")
+    try:
+        loader = ConfigLoader(config_path)
+        accounts_config = loader.load()
+    except FileNotFoundError:
+        typer.echo(
+            typer.style(
+                f"✗ Config file not found: {config_path}",
+                fg=STATUS_COLORS["error"],
+            )
+        )
+        _run_async(redis.close())
+        raise typer.Exit(1)
+    except ConfigValidationError as e:
+        typer.echo(typer.style(f"✗ {e}", fg=STATUS_COLORS["error"]))
+        _run_async(redis.close())
+        raise typer.Exit(1)
+
+    manager = AccountManager(redis)
+    manager.load_accounts(accounts_config)
+    metrics_service = _get_metrics_service(redis, manager)
+
+    # Get all account metrics
+    all_metrics = _run_async(metrics_service.get_all_account_metrics())
+
+    if not all_metrics:
+        typer.echo("No accounts configured.")
+        _run_async(redis.close())
+        return
+
+    # Sort: active first, then by ID
+    sorted_metrics = sorted(
+        all_metrics.values(),
+        key=lambda m: (0 if m.status == "active" else 1, m.account_id),
+    )
+
+    # Build table
+    headers = ["ID", "Name", "Status", "Balance", "Daily P&L"]
+    rows = [m.to_list_row() for m in sorted_metrics]
+
+    typer.echo(tabulate(rows, headers=headers, tablefmt="simple"))
+
+    # Summary row
+    total_balance = sum(m.balance for m in sorted_metrics)
+    typer.echo(f"\nTotal Balance: ${total_balance:,.2f}")
+
+    _run_async(redis.close())

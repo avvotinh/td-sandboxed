@@ -486,6 +486,25 @@ class AccountManager:
             statuses[account_id] = status or "unknown"
         return statuses
 
+    def get_all_accounts(self) -> list[str]:
+        """Get all registered account IDs.
+
+        Returns:
+            List of account IDs.
+        """
+        return list(self._accounts.keys())
+
+    def get_account(self, account_id: str) -> "AccountConfig | None":
+        """Get account configuration by ID.
+
+        Args:
+            account_id: Account identifier.
+
+        Returns:
+            AccountConfig if found, None otherwise.
+        """
+        return self._accounts.get(account_id)
+
     async def add_account(self, account_id: str, config: AccountsConfig) -> None:
         """Hot-reload: Add a new account while others are running.
 

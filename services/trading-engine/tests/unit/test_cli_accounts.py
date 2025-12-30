@@ -164,54 +164,193 @@ class TestAccountsResume:
 
 
 class TestAccountsStatus:
-    """Tests for accounts status command."""
+    """Tests for accounts status command (detailed single-account view)."""
 
-    def test_status_all_accounts(self, mock_get_account_manager):
-        """Test getting status of all accounts."""
+    def test_status_requires_account_id(self):
+        """Test that status command requires an account_id argument."""
         result = runner.invoke(app, ["accounts", "status"])
+        # Should fail due to missing required argument
+        assert result.exit_code == 2
+        # Error message may be in stdout or combined output
+        output = result.stdout + (result.output if hasattr(result, "output") else "")
+        assert "Missing argument" in output or "Usage:" in output or result.exit_code == 2
 
-        assert result.exit_code == 0
-        assert "test-001" in result.stdout
-        assert "test-002" in result.stdout
-        assert "active" in result.stdout
-        assert "paused" in result.stdout
-        mock_get_account_manager.get_all_statuses.assert_called_once()
+    def test_status_specific_account(self):
+        """Test getting detailed status of specific account."""
+        from decimal import Decimal
+        from unittest.mock import MagicMock
 
-    def test_status_specific_account(self, mock_get_account_manager):
-        """Test getting status of specific account."""
-        result = runner.invoke(app, ["accounts", "status", "test-001"])
+        mock_metrics = MagicMock()
+        mock_metrics.account_id = "test-001"
+        mock_metrics.account_name = "Test Account"
+        mock_metrics.status = "active"
+        mock_metrics.daily_pnl = Decimal("100")
+        mock_metrics.to_status_dict.return_value = {
+            "account_id": "test-001",
+            "account_name": "Test Account",
+            "status": "active",
+            "balance": "$100,000.00",
+            "equity": "$100,100.00",
+            "daily_pnl": "$100.00 (+0.1%)",
+            "max_drawdown": "0.0%",
+            "peak_equity": "$100,100.00",
+        }
 
-        assert result.exit_code == 0
-        assert "test-001" in result.stdout
-        assert "active" in result.stdout
-        mock_get_account_manager.get_account_status.assert_called_once_with("test-001")
+        with patch("src.cli.accounts.RedisStateManager") as mock_redis_cls:
+            mock_redis = MagicMock()
+            mock_redis.connect = AsyncMock()
+            mock_redis.close = AsyncMock()
+            mock_redis_cls.return_value = mock_redis
 
-    def test_status_nonexistent_account(self, mock_get_account_manager):
+            with patch("src.cli.accounts.ConfigLoader") as mock_loader:
+                mock_config = MagicMock()
+                mock_loader.return_value.load.return_value = mock_config
+
+                with patch("src.cli.accounts.AccountManager") as mock_manager_cls:
+                    mock_manager = MagicMock()
+                    mock_manager_cls.return_value = mock_manager
+
+                    with patch("src.cli.accounts._get_metrics_service") as mock_get_service:
+                        mock_service = MagicMock()
+                        mock_service.get_account_metrics = AsyncMock(
+                            return_value=mock_metrics
+                        )
+                        mock_get_service.return_value = mock_service
+
+                        result = runner.invoke(
+                            app, ["accounts", "status", "test-001"]
+                        )
+
+                        assert result.exit_code == 0
+                        assert "test-001" in result.stdout
+                        assert "active" in result.stdout
+
+    def test_status_nonexistent_account(self):
         """Test getting status of nonexistent account."""
-        mock_get_account_manager._validate_account_exists.side_effect = ValueError(
-            "Account not found"
-        )
+        with patch("src.cli.accounts.RedisStateManager") as mock_redis_cls:
+            mock_redis = MagicMock()
+            mock_redis.connect = AsyncMock()
+            mock_redis.close = AsyncMock()
+            mock_redis_cls.return_value = mock_redis
 
-        result = runner.invoke(app, ["accounts", "status", "nonexistent"])
+            with patch("src.cli.accounts.ConfigLoader") as mock_loader:
+                mock_config = MagicMock()
+                mock_loader.return_value.load.return_value = mock_config
 
-        assert result.exit_code == 1
-        assert "Error" in result.stdout
+                with patch("src.cli.accounts.AccountManager") as mock_manager_cls:
+                    mock_manager = MagicMock()
+                    mock_manager_cls.return_value = mock_manager
 
-    def test_status_empty_accounts(self, mock_get_account_manager):
-        """Test status with no configured accounts."""
-        mock_get_account_manager.get_all_statuses.return_value = {}
+                    with patch("src.cli.accounts._get_metrics_service") as mock_get_service:
+                        mock_service = MagicMock()
+                        mock_service.get_account_metrics = AsyncMock(return_value=None)
+                        mock_get_service.return_value = mock_service
 
-        result = runner.invoke(app, ["accounts", "status"])
+                        result = runner.invoke(
+                            app, ["accounts", "status", "nonexistent"]
+                        )
 
-        assert result.exit_code == 0
-        assert "No accounts configured" in result.stdout
+                        assert result.exit_code == 1
+                        assert "not found" in result.stdout.lower()
+
+
+class TestAccountsList:
+    """Tests for accounts list command (summary table view)."""
+
+    def test_list_all_accounts(self):
+        """Test listing all accounts with summary metrics."""
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+
+        mock_metrics_a = MagicMock()
+        mock_metrics_a.account_id = "test-001"
+        mock_metrics_a.account_name = "Test One"
+        mock_metrics_a.status = "active"
+        mock_metrics_a.balance = Decimal("100000")
+        mock_metrics_a.to_list_row.return_value = [
+            "test-001",
+            "Test One",
+            "active",
+            "$100,000.00",
+            "+0.5%",
+        ]
+
+        mock_metrics_b = MagicMock()
+        mock_metrics_b.account_id = "test-002"
+        mock_metrics_b.account_name = "Test Two"
+        mock_metrics_b.status = "paused"
+        mock_metrics_b.balance = Decimal("50000")
+        mock_metrics_b.to_list_row.return_value = [
+            "test-002",
+            "Test Two",
+            "paused",
+            "$50,000.00",
+            "-1.0%",
+        ]
+
+        with patch("src.cli.accounts.RedisStateManager") as mock_redis_cls:
+            mock_redis = MagicMock()
+            mock_redis.connect = AsyncMock()
+            mock_redis.close = AsyncMock()
+            mock_redis_cls.return_value = mock_redis
+
+            with patch("src.cli.accounts.ConfigLoader") as mock_loader:
+                mock_config = MagicMock()
+                mock_loader.return_value.load.return_value = mock_config
+
+                with patch("src.cli.accounts.AccountManager") as mock_manager_cls:
+                    mock_manager = MagicMock()
+                    mock_manager_cls.return_value = mock_manager
+
+                    with patch("src.cli.accounts._get_metrics_service") as mock_get_service:
+                        mock_service = MagicMock()
+                        mock_service.get_all_account_metrics = AsyncMock(
+                            return_value={
+                                "test-001": mock_metrics_a,
+                                "test-002": mock_metrics_b,
+                            }
+                        )
+                        mock_get_service.return_value = mock_service
+
+                        result = runner.invoke(app, ["accounts", "list"])
+
+                        assert result.exit_code == 0
+                        assert "test-001" in result.stdout
+                        assert "test-002" in result.stdout
+                        assert "Total Balance" in result.stdout
+
+    def test_list_empty_accounts(self):
+        """Test list with no configured accounts."""
+        with patch("src.cli.accounts.RedisStateManager") as mock_redis_cls:
+            mock_redis = MagicMock()
+            mock_redis.connect = AsyncMock()
+            mock_redis.close = AsyncMock()
+            mock_redis_cls.return_value = mock_redis
+
+            with patch("src.cli.accounts.ConfigLoader") as mock_loader:
+                mock_config = MagicMock()
+                mock_loader.return_value.load.return_value = mock_config
+
+                with patch("src.cli.accounts.AccountManager") as mock_manager_cls:
+                    mock_manager = MagicMock()
+                    mock_manager_cls.return_value = mock_manager
+
+                    with patch("src.cli.accounts._get_metrics_service") as mock_get_service:
+                        mock_service = MagicMock()
+                        mock_service.get_all_account_metrics = AsyncMock(return_value={})
+                        mock_get_service.return_value = mock_service
+
+                        result = runner.invoke(app, ["accounts", "list"])
+
+                        assert result.exit_code == 0
+                        assert "No accounts configured" in result.stdout
 
 
 class TestAccountsConfigErrors:
     """Tests for configuration error handling."""
 
-    def test_config_not_found(self):
-        """Test handling of missing config file."""
+    def test_config_not_found_for_status(self):
+        """Test handling of missing config file for status command."""
         with patch("src.cli.accounts.ConfigLoader") as mock_loader:
             mock_loader.return_value.load.side_effect = FileNotFoundError(
                 "Config not found"
@@ -222,7 +361,24 @@ class TestAccountsConfigErrors:
                 mock_instance.close = AsyncMock()
                 mock_redis.return_value = mock_instance
 
-                result = runner.invoke(app, ["accounts", "status"])
+                result = runner.invoke(app, ["accounts", "status", "test-001"])
+
+                assert result.exit_code == 1
+                assert "Config file not found" in result.stdout
+
+    def test_config_not_found_for_list(self):
+        """Test handling of missing config file for list command."""
+        with patch("src.cli.accounts.ConfigLoader") as mock_loader:
+            mock_loader.return_value.load.side_effect = FileNotFoundError(
+                "Config not found"
+            )
+            with patch("src.cli.accounts.RedisStateManager") as mock_redis:
+                mock_instance = MagicMock()
+                mock_instance.connect = AsyncMock()
+                mock_instance.close = AsyncMock()
+                mock_redis.return_value = mock_instance
+
+                result = runner.invoke(app, ["accounts", "list"])
 
                 assert result.exit_code == 1
                 assert "Config file not found" in result.stdout

@@ -33,13 +33,17 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from typing import AsyncIterator
+from decimal import Decimal
+from typing import TYPE_CHECKING, AsyncIterator
 
 import zmq
 import zmq.asyncio
 from pydantic import BaseModel
 
 from .zmq_models import Order, OrderResult, OrderStatus, Tick
+
+if TYPE_CHECKING:
+    from ..accounts.metrics_service import AccountMetricsService
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +116,19 @@ class ZmqAdapter:
         self._state = _ConnectionState()
         self._pending_orders: dict[str, asyncio.Future[OrderResult]] = {}
         self._reconnect_attempt = 0
+        self._metrics_service: AccountMetricsService | None = None
+
+    def set_metrics_service(self, service: "AccountMetricsService") -> None:
+        """Register metrics service for balance/equity updates.
+
+        When registered, account_info messages from MT5 will trigger
+        updates through the metrics service.
+
+        Args:
+            service: AccountMetricsService instance.
+        """
+        self._metrics_service = service
+        logger.info("Metrics service registered with ZMQ adapter")
 
     @property
     def is_connected(self) -> bool:
@@ -145,9 +162,10 @@ class ZmqAdapter:
             sub_endpoint = f"tcp://{self.config.bridge_host}:{self.config.tick_port}"
             self._sub_socket.connect(sub_endpoint)
 
-            # Subscribe to tick and order_result topics
+            # Subscribe to tick, order_result, and account_info topics
             self._sub_socket.subscribe(b"tick:")
             self._sub_socket.subscribe(b"order_result:")
+            self._sub_socket.subscribe(b"account_info:")
 
             logger.info("SUB socket connected to %s", sub_endpoint)
 
@@ -279,6 +297,10 @@ class ZmqAdapter:
                     except (json.JSONDecodeError, KeyError, ValueError) as e:
                         logger.warning("Failed to parse order result: %s - %s", e, payload)
 
+                elif topic.startswith("account_info:"):
+                    # Handle account balance/equity updates from MT5
+                    await self._handle_account_info(payload)
+
             except zmq.Again:
                 # Receive timeout - continue loop (allows checking for cancellation)
                 continue
@@ -369,3 +391,31 @@ class ZmqAdapter:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Async context manager exit - disconnect."""
         await self.disconnect()
+
+    async def _handle_account_info(self, payload: str) -> None:
+        """Handle account info update from MT5.
+
+        Message format from MT5 EA:
+        {"account_id": "ftmo-001", "balance": 100000.00, "equity": 98500.00}
+
+        This updates the account metrics through AccountMetricsService
+        which handles debouncing and persistence.
+
+        Args:
+            payload: JSON payload string with account info
+        """
+        if self._metrics_service is None:
+            # No metrics service registered, skip processing
+            return
+
+        try:
+            data = json.loads(payload)
+            account_id = data["account_id"]
+            balance = Decimal(str(data["balance"]))
+            equity = Decimal(str(data["equity"]))
+
+            await self._metrics_service.on_mt5_balance_update(
+                account_id, balance, equity
+            )
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.warning("Failed to parse account_info: %s - %s", e, payload)

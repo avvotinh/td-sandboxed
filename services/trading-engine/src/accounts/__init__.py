@@ -5,6 +5,7 @@ This module handles:
 - Signal routing per account
 - Account state persistence
 - Per-account risk isolation
+- Per-account equity and balance tracking
 
 Exports:
 - AccountConfig: Single trading account configuration
@@ -20,9 +21,13 @@ Exports:
 - RiskStateRegistry: Registry for per-account risk managers
 - RiskIsolationService: Integration point for risk isolation
 - RuleConfig: Configuration for a single risk rule
+- AccountMetrics: Per-account financial metrics for display (Story 3.6)
+- AccountMetricsService: Service for retrieving account metrics (Story 3.6)
 """
 
 from .account_manager import AccountManager
+from .metrics import AccountMetrics
+from .metrics_service import AccountMetricsService
 from .models import (
     AccountConfig,
     AccountsConfig,
@@ -41,6 +46,8 @@ __all__ = [
     "AccountConfig",
     "AccountsConfig",
     "AccountManager",
+    "AccountMetrics",
+    "AccountMetricsService",
     "AccountRiskManager",
     "AccountState",
     "AccountType",

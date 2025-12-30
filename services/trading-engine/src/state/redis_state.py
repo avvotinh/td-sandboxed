@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 import redis.asyncio as aioredis
 
 if TYPE_CHECKING:
+    from decimal import Decimal
+
     from ..accounts.risk_state import RiskState
 
 
@@ -270,3 +272,57 @@ class RedisStateManager:
         await self.client.lpush(key, violation)
         await self.client.ltrim(key, 0, self.RISK_VIOLATION_MAX_ENTRIES - 1)
         await self.client.expire(key, self.RISK_VIOLATION_TTL_SECONDS)
+
+    # Account Balance Management Methods (Story 3.6)
+
+    async def save_account_balance(
+        self, account_id: str, balance: "Decimal"
+    ) -> None:
+        """Save account balance to Redis.
+
+        Key pattern: account:{account_id}:balance
+
+        Args:
+            account_id: Account identifier
+            balance: Balance value (stored as string for precision)
+        """
+        key = f"account:{account_id}:balance"
+        await self.client.set(key, str(balance))
+
+    async def get_account_balance(self, account_id: str) -> "Decimal | None":
+        """Get account balance from Redis.
+
+        Args:
+            account_id: Account identifier
+
+        Returns:
+            Decimal balance if found, None otherwise
+        """
+        from decimal import Decimal
+
+        key = f"account:{account_id}:balance"
+        value = await self.client.get(key)
+        if value is None:
+            return None
+        return Decimal(value)
+
+    async def get_all_account_balances(self) -> "dict[str, Decimal]":
+        """Get balances for all accounts.
+
+        Scans for all balance keys and returns a dict.
+
+        Returns:
+            Dict mapping account_id to balance
+        """
+        from decimal import Decimal
+
+        balances: dict[str, Decimal] = {}
+        async for key in self.client.scan_iter("account:*:balance"):
+            # Extract account_id from key pattern account:{id}:balance
+            parts = key.split(":")
+            if len(parts) == 3:
+                account_id = parts[1]
+                value = await self.client.get(key)
+                if value:
+                    balances[account_id] = Decimal(value)
+        return balances
