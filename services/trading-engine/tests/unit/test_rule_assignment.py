@@ -603,13 +603,29 @@ class TestBaseRule:
         assert result.metadata["limit"] == 5.0
 
     def test_protocol_compliance(self):
-        """Test that a class can satisfy BaseRule protocol."""
+        """Test that a class can satisfy BaseRule protocol.
+
+        Updated in Story 4.1 to include new protocol requirements:
+        - name and priority attributes
+        - get_current_value(), get_threshold(), get_warning_thresholds() methods
+        """
 
         class TestRule:
             rule_type = "test_rule"
+            name = "Test Rule"
+            priority = 50
 
             def validate(self, context):
                 return RuleResult(action=RuleAction.ALLOW)
+
+            def get_current_value(self, context):
+                return 0.0
+
+            def get_threshold(self):
+                return 100.0
+
+            def get_warning_thresholds(self):
+                return [70.0, 80.0, 90.0]
 
         rule = TestRule()
         assert isinstance(rule, BaseRule)

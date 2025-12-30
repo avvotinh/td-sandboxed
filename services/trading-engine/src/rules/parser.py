@@ -138,13 +138,27 @@ class RuleParser:
         """
         from .base_rule import RuleAction, RuleResult
 
+        # Priority mapping for different rule types (critical rules first)
+        priority_map = {
+            "daily_loss_limit": 1,
+            "max_drawdown": 2,
+            "max_position_size": 10,
+            "profit_target": 100,
+            "min_trading_days": 100,
+        }
+
         def make_placeholder(rule_type_name: str) -> type:
             """Create a placeholder rule class."""
 
             class PlaceholderRule:
-                """Placeholder rule - full implementation in Epic 4."""
+                """Placeholder rule - full implementation in Epic 4.
+
+                Implements the extended BaseRule protocol from Story 4.1.
+                """
 
                 rule_type: str = rule_type_name
+                name: str = f"Placeholder {rule_type_name.replace('_', ' ').title()}"
+                priority: int = priority_map.get(rule_type_name, 50)
 
                 def __init__(self, **kwargs: Any):
                     """Store all kwargs as attributes."""
@@ -157,6 +171,18 @@ class RuleParser:
                         action=RuleAction.ALLOW,
                         message=f"Placeholder rule {rule_type_name} - Epic 4 not implemented",
                     )
+
+                def get_current_value(self, context: dict[str, Any]) -> float:
+                    """Placeholder - returns 0.0."""
+                    return 0.0
+
+                def get_threshold(self) -> float:
+                    """Get threshold from config, default 100.0."""
+                    return getattr(self, "threshold_percent", 100.0)
+
+                def get_warning_thresholds(self) -> list[float]:
+                    """Placeholder - returns default warning thresholds."""
+                    return [70.0, 80.0, 90.0]
 
                 def __repr__(self) -> str:
                     attrs = ", ".join(f"{k}={v}" for k, v in self.__dict__.items())

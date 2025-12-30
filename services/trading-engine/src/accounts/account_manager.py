@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from ..adapters.mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
     from ..rules.assignment_service import RuleAssignmentService
     from ..rules.base_rule import BaseRule
+    from ..rules.engine import RuleEngine
     from ..state.redis_state import RedisStateManager
     from .risk_registry import RiskStateRegistry
     from .risk_state import RiskState
@@ -68,6 +69,7 @@ class AccountManager:
         self._risk_registry: "RiskStateRegistry | None" = None  # Per-account risk tracking
         self._rule_assignment_service: "RuleAssignmentService | None" = None  # Rule assignment
         self._account_rules: dict[str, list["BaseRule"]] = {}  # In-memory rules storage
+        self._rule_engines: dict[str, "RuleEngine"] = {}  # Per-account rule engines (Story 4.1)
 
     def load_accounts(self, config: AccountsConfig) -> None:
         """Load account configurations for validation.
@@ -199,7 +201,8 @@ class AccountManager:
         """Initialize rules for an account.
 
         Called from _spawn_account_task() before starting the account loop.
-        Loads rules based on account configuration using RuleAssignmentService.
+        Loads rules based on account configuration using RuleAssignmentService,
+        then creates a RuleEngine for the account.
 
         Args:
             account_id: Account identifier.
@@ -217,10 +220,29 @@ class AccountManager:
             rules = self._rule_assignment_service.get_rules_for_account(account_config)
             self._account_rules[account_id] = rules
             logger.info(f"Assigned {len(rules)} rules to account {account_id}")
+
+            # Create RuleEngine for the account (Story 4.1)
+            if rules:
+                from ..rules.engine_factory import RuleEngineFactory
+
+                engine = RuleEngineFactory.create_for_account(account_id, rules)
+                self._rule_engines[account_id] = engine
+                logger.info(f"Created RuleEngine for account {account_id}")
         except Exception as e:
             logger.error(f"Failed to assign rules to account {account_id}: {e}")
             # Don't fail account startup - rules can be assigned later
             self._account_rules[account_id] = []
+
+    def get_rule_engine(self, account_id: str) -> "RuleEngine | None":
+        """Get the RuleEngine for an account.
+
+        Args:
+            account_id: Account identifier.
+
+        Returns:
+            RuleEngine if account has one, None otherwise.
+        """
+        return self._rule_engines.get(account_id)
 
     def get_connection_health(self, account_id: str) -> "ConnectionHealth | None":
         """Get MT5 connection health for an account.
