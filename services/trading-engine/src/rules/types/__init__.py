@@ -9,8 +9,10 @@ This module contains concrete rule implementations:
 """
 
 from .drawdown import DailyLossLimitRule, MaxDrawdownRule
+from .position import MaxPositionSizeRule
 
 __all__ = [
     "DailyLossLimitRule",
     "MaxDrawdownRule",
+    "MaxPositionSizeRule",
 ]

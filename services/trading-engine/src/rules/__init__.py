@@ -32,6 +32,9 @@ Story 4.2 Exports:
 Story 4.3 Exports:
 - MaxDrawdownRule: Blocks trades when total drawdown exceeds threshold
 
+Story 4.4 Exports:
+- MaxPositionSizeRule: Limits position sizes with fixed or scaled limits
+
 Full rule implementations in Epic 4+.
 """
 
@@ -46,6 +49,7 @@ from .engine_result import RuleEngineResult
 from .parser import RuleParseError, RuleParser
 from .preset_loader import PresetNotFoundError, RulePresetLoader
 from .types.drawdown import DailyLossLimitRule, MaxDrawdownRule
+from .types.position import MaxPositionSizeRule
 
 __all__ = [
     # Base types
@@ -56,6 +60,7 @@ __all__ = [
     # Rule types (Story 4.2+)
     "DailyLossLimitRule",
     "MaxDrawdownRule",
+    "MaxPositionSizeRule",
     # Assignment
     "RuleAssignment",
     "RuleAssignmentService",

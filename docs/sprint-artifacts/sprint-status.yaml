@@ -79,7 +79,7 @@ development_status:
   4-1-rule-engine-framework: done
   4-2-daily-loss-limit-rule: done
   4-3-max-drawdown-rule: done
-  4-4-position-size-limit-rule: backlog
+  4-4-position-size-limit-rule: done
   4-5-ftmo-preset-configuration: backlog
   4-6-rule-validation-before-trade: backlog
   4-7-real-time-pnl-tracking: backlog
