@@ -11,9 +11,11 @@ from typing import Any
 
 # Context keys documentation (for IDE support)
 # Required: account_id, current_balance, current_equity
-# Optional: signal, symbol, side, quantity, daily_pnl, daily_pnl_percent,
+# Standard: signal, symbol, side, quantity, daily_pnl, daily_pnl_percent,
 #           total_drawdown_percent, open_positions_count, total_exposure,
 #           initial_balance, peak_balance, timestamp
+# Rule-specific: account_balance, requested_lots, current_position_lots,
+#               total_pnl_percent, trading_days_count
 
 
 @dataclass
@@ -50,6 +52,11 @@ class RuleContextBuilder:
         Returns:
             Context dictionary for rule validation.
         """
+        # Get volume from signal (Order uses 'volume', signals use 'quantity')
+        signal_volume = getattr(
+            signal, "volume", getattr(signal, "quantity", account_state.get("quantity", 0.0))
+        )
+
         context = {
             # Account identification
             "account_id": account_id,
@@ -58,9 +65,7 @@ class RuleContextBuilder:
             "signal": signal,
             "symbol": getattr(signal, "symbol", account_state.get("symbol")),
             "side": getattr(signal, "side", account_state.get("side")),
-            "quantity": getattr(
-                signal, "quantity", account_state.get("quantity", 0.0)
-            ),
+            "quantity": signal_volume,
             # Account state
             "current_balance": account_state.get("balance", 0.0),
             "current_equity": account_state.get("equity", 0.0),
@@ -73,6 +78,14 @@ class RuleContextBuilder:
             # Position info
             "open_positions_count": account_state.get("open_positions_count", 0),
             "total_exposure": account_state.get("total_exposure", 0.0),
+            # Rule-specific fields (for rules that access context directly)
+            # MaxPositionSizeRule uses these
+            "account_balance": account_state.get("account_balance", account_state.get("balance", 0.0)),
+            "requested_lots": account_state.get("requested_lots", signal_volume),
+            "current_position_lots": account_state.get("current_position_lots", 0.0),
+            # ProfitTargetRule, MinTradingDaysRule use these
+            "total_pnl_percent": account_state.get("total_pnl_percent", 0.0),
+            "trading_days_count": account_state.get("trading_days_count", 0),
         }
 
         # Add custom fields
