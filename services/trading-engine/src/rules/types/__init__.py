@@ -10,9 +10,12 @@ This module contains concrete rule implementations:
 
 from .drawdown import DailyLossLimitRule, MaxDrawdownRule
 from .position import MaxPositionSizeRule
+from .targets import MinTradingDaysRule, ProfitTargetRule
 
 __all__ = [
     "DailyLossLimitRule",
     "MaxDrawdownRule",
     "MaxPositionSizeRule",
+    "ProfitTargetRule",
+    "MinTradingDaysRule",
 ]

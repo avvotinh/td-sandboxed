@@ -50,6 +50,7 @@ from .parser import RuleParseError, RuleParser
 from .preset_loader import PresetNotFoundError, RulePresetLoader
 from .types.drawdown import DailyLossLimitRule, MaxDrawdownRule
 from .types.position import MaxPositionSizeRule
+from .types.targets import MinTradingDaysRule, ProfitTargetRule
 
 __all__ = [
     # Base types
@@ -61,6 +62,8 @@ __all__ = [
     "DailyLossLimitRule",
     "MaxDrawdownRule",
     "MaxPositionSizeRule",
+    "ProfitTargetRule",
+    "MinTradingDaysRule",
     # Assignment
     "RuleAssignment",
     "RuleAssignmentService",
