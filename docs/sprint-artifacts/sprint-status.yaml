@@ -89,7 +89,7 @@ development_status:
   # Epic 5: State Persistence & Crash Recovery (7 stories)
   epic-5: contexted
   5-1-redis-state-snapshots: review
-  5-2-crash-detection-and-recovery-initiation: backlog
+  5-2-crash-detection-and-recovery-initiation: review
   5-3-position-reconciliation-with-mt5: backlog
   5-4-daily-pnl-recalculation: backlog
   5-5-trading-resume-after-recovery: backlog
