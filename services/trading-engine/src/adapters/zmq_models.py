@@ -4,12 +4,14 @@ This module defines the data models for:
 - Tick: Market tick data from mt5-bridge
 - Order: Order command to mt5-bridge
 - OrderResult: Order execution result from mt5-bridge
+- MT5Position: Position data from MT5 for reconciliation
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Optional
 
@@ -144,3 +146,60 @@ class OrderResult:
     def is_rejected(self) -> bool:
         """Check if order was rejected or errored."""
         return self.status in (OrderStatus.REJECTED, OrderStatus.ERROR)
+
+
+@dataclass
+class MT5Position:
+    """Position data from MT5 via mt5-bridge.
+
+    Used for position reconciliation during crash recovery.
+    MT5 positions are ALWAYS the source of truth.
+
+    Attributes:
+        ticket: MT5 position ticket number
+        symbol: Trading symbol (e.g., "XAUUSD")
+        side: Position direction ("BUY" or "SELL")
+        volume: Position size in lots
+        entry_price: Price at which position was opened
+        entry_time: ISO8601 timestamp of position entry
+        current_price: Current market price
+        profit: Current unrealized profit
+        swap: Accumulated swap charges
+        commission: Commission paid
+    """
+
+    ticket: int
+    symbol: str
+    side: str  # "BUY" or "SELL"
+    volume: Decimal
+    entry_price: Decimal
+    entry_time: str  # ISO8601
+    current_price: Decimal
+    profit: Decimal
+    swap: Decimal
+    commission: Decimal
+
+    @classmethod
+    def from_dict(cls, data: dict) -> MT5Position:
+        """Create MT5Position from dictionary.
+
+        Handles type conversion from JSON payload.
+
+        Args:
+            data: Dictionary with position data from mt5-bridge
+
+        Returns:
+            MT5Position instance
+        """
+        return cls(
+            ticket=int(data["ticket"]),
+            symbol=str(data["symbol"]),
+            side=str(data["side"]),
+            volume=Decimal(str(data["volume"])),
+            entry_price=Decimal(str(data["entry_price"])),
+            entry_time=str(data["entry_time"]),
+            current_price=Decimal(str(data["current_price"])),
+            profit=Decimal(str(data["profit"])),
+            swap=Decimal(str(data["swap"])),
+            commission=Decimal(str(data["commission"])),
+        )

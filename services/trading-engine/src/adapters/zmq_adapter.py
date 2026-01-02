@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, AsyncIterator
@@ -40,7 +41,7 @@ import zmq
 import zmq.asyncio
 from pydantic import BaseModel
 
-from .zmq_models import Order, OrderResult, OrderStatus, Tick
+from .zmq_models import MT5Position, Order, OrderResult, OrderStatus, Tick
 
 if TYPE_CHECKING:
     from ..accounts.metrics_service import AccountMetricsService
@@ -116,6 +117,7 @@ class ZmqAdapter:
         self._pub_socket: zmq.asyncio.Socket | None = None
         self._state = _ConnectionState()
         self._pending_orders: dict[str, asyncio.Future[OrderResult]] = {}
+        self._pending_positions: dict[str, asyncio.Future[list[MT5Position]]] = {}
         self._reconnect_attempt = 0
         self._metrics_service: AccountMetricsService | None = None
         self._pnl_registry: PnLTrackerRegistry | None = None
@@ -176,10 +178,11 @@ class ZmqAdapter:
             sub_endpoint = f"tcp://{self.config.bridge_host}:{self.config.tick_port}"
             self._sub_socket.connect(sub_endpoint)
 
-            # Subscribe to tick, order_result, and account_info topics
+            # Subscribe to tick, order_result, account_info, and positions_result topics
             self._sub_socket.subscribe(b"tick:")
             self._sub_socket.subscribe(b"order_result:")
             self._sub_socket.subscribe(b"account_info:")
+            self._sub_socket.subscribe(b"positions_result:")
 
             logger.info("SUB socket connected to %s", sub_endpoint)
 
@@ -325,6 +328,10 @@ class ZmqAdapter:
                     # Handle account balance/equity updates from MT5
                     await self._handle_account_info(payload)
 
+                elif topic.startswith("positions_result:"):
+                    # Handle position query results for crash recovery
+                    await self._handle_positions_result(payload)
+
             except zmq.Again:
                 # Receive timeout - continue loop (allows checking for cancellation)
                 continue
@@ -443,3 +450,113 @@ class ZmqAdapter:
             )
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.warning("Failed to parse account_info: %s - %s", e, payload)
+
+    async def _handle_positions_result(self, payload: str) -> None:
+        """Handle position query result from mt5-bridge.
+
+        Message format from mt5-bridge:
+        {
+            "type": "positions_result",
+            "request_id": "UUID",
+            "account_id": "ftmo-gold-001",
+            "positions": [
+                {
+                    "ticket": 12345678,
+                    "symbol": "XAUUSD",
+                    "side": "BUY",
+                    "volume": 0.1,
+                    "entry_price": 1850.45,
+                    "entry_time": "2026-01-03T10:15:30.000Z",
+                    "current_price": 1852.30,
+                    "profit": 185.00,
+                    "swap": -2.50,
+                    "commission": -1.00
+                }
+            ],
+            "timestamp": "2026-01-03T14:32:15.123Z"
+        }
+
+        Args:
+            payload: JSON payload string with position data
+        """
+        try:
+            data = json.loads(payload)
+            request_id = data["request_id"]
+            positions = [MT5Position.from_dict(p) for p in data.get("positions", [])]
+
+            # Resolve pending position query future
+            future = self._pending_positions.pop(request_id, None)
+            if future and not future.done():
+                future.set_result(positions)
+            else:
+                logger.warning(
+                    "Received positions_result for unknown request: %s", request_id
+                )
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.warning("Failed to parse positions_result: %s - %s", e, payload)
+
+    async def query_positions(
+        self,
+        account_id: str,
+        timeout: float = 10.0,
+    ) -> list[MT5Position]:
+        """Query MT5 for current open positions.
+
+        Uses the existing PUB/SUB pattern with pending futures (same as orders).
+        Publishes get_positions request and waits for positions_result response.
+
+        ARCHITECTURE: Reuses existing PUB socket for requests, SUB socket for responses.
+        This follows the same pattern as send_order_and_wait() with _pending_orders.
+
+        IMPORTANT: receive_ticks() must be running in a background task
+        for this method to work, as positions_result messages are processed there.
+
+        Args:
+            account_id: Account to query positions for
+            timeout: Response timeout in seconds (default 10s for recovery)
+
+        Returns:
+            List of MT5Position objects representing current open positions
+
+        Raises:
+            asyncio.TimeoutError: If no response within timeout
+            RuntimeError: If not connected
+        """
+        if not self._pub_socket:
+            raise RuntimeError("Not connected - call connect() first")
+
+        request_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[list[MT5Position]] = loop.create_future()
+        self._pending_positions[request_id] = future
+
+        try:
+            # Publish position query request
+            topic = f"get_positions:{account_id}"
+            payload = json.dumps({
+                "type": "get_positions",
+                "account_id": account_id,
+                "request_id": request_id,
+            })
+            await self._pub_socket.send_multipart([
+                topic.encode(),
+                payload.encode(),
+            ])
+
+            logger.debug("Position query sent for %s (request_id=%s)", account_id, request_id)
+
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return result
+        except asyncio.TimeoutError:
+            # CLEANUP: Remove stale pending request on timeout
+            self._pending_positions.pop(request_id, None)
+            logger.error("Position query timeout for account %s", account_id)
+            raise
+
+    def get_pending_position_query_count(self) -> int:
+        """Get count of pending position queries waiting for results.
+
+        Returns:
+            Number of position queries awaiting results
+        """
+        return len(self._pending_positions)

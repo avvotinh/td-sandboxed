@@ -12,7 +12,7 @@ from .redis_adapter import MaxReconnectAttemptsError, RedisAdapter
 from .redis_config import RedisConfig
 from .redis_models import Bar
 from .zmq_adapter import ZmqAdapter, ZmqConfig
-from .zmq_models import Order, OrderResult, OrderSide, OrderStatus, Tick
+from .zmq_models import MT5Position, Order, OrderResult, OrderSide, OrderStatus, Tick
 
 __all__ = [
     # Redis adapter
@@ -28,6 +28,7 @@ __all__ = [
     "OrderResult",
     "OrderSide",
     "OrderStatus",
+    "MT5Position",
     # MT5 Connection Manager
     "MT5ConnectionManager",
     "ConnectionHealth",

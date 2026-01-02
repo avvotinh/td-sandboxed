@@ -6,7 +6,9 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .adapters.zmq_adapter import ZmqAdapter
     from .state.crash_recovery import CrashRecoveryManager, RecoveryResult
+    from .state.position_reconciler import PositionReconciler, ReconciliationResult
     from .state.redis_state import RedisStateManager
 
 logger = logging.getLogger(__name__)
@@ -29,18 +31,24 @@ class TradingEngine:
     def __init__(
         self,
         redis_manager: RedisStateManager | None = None,
+        zmq_adapter: ZmqAdapter | None = None,
     ) -> None:
         """Initialize the trading engine.
 
         Args:
             redis_manager: Optional Redis state manager for crash recovery.
                           If provided, crash recovery will be enabled.
+            zmq_adapter: Optional ZMQ adapter for MT5 communication.
+                        Required for position reconciliation during recovery.
         """
         self._running = False
         self._shutdown_event = asyncio.Event()
         self._redis_manager = redis_manager
+        self._zmq_adapter = zmq_adapter
         self._crash_recovery: CrashRecoveryManager | None = None
         self._recovery_result: RecoveryResult | None = None
+        self._reconciliation_results: dict[str, ReconciliationResult] | None = None
+        self._reconciler: PositionReconciler | None = None
 
     @property
     def is_running(self) -> bool:
@@ -59,6 +67,16 @@ class TradingEngine:
             RecoveryResult if crash recovery ran, None otherwise.
         """
         return self._recovery_result
+
+    @property
+    def reconciliation_results(self) -> dict[str, ReconciliationResult] | None:
+        """Get the position reconciliation results from startup.
+
+        Returns:
+            Dict mapping account_id to ReconciliationResult, or None if
+            no reconciliation was performed.
+        """
+        return self._reconciliation_results
 
     def _on_lock_lost(self) -> None:
         """Handle loss of process lock by triggering emergency shutdown.
@@ -98,15 +116,85 @@ class TradingEngine:
             logger.critical("Engine startup failed: %s", e)
             raise SystemExit(1) from e
 
-        # Handle recovery mode if needed
+        # Handle recovery mode if needed (Story 5.3 - Position Reconciliation)
         if result.recovery_mode:
             logger.warning(
                 "Entering recovery mode for %d accounts",
                 len(result.accounts_needing_recovery),
             )
-            # Story 5.3 will implement position reconciliation here
+
+            # Run position reconciliation if ZMQ adapter is available
+            if self._zmq_adapter is not None:
+                self._reconciliation_results = await self._run_position_reconciliation(
+                    result.accounts_needing_recovery
+                )
+
+                # Check for any accounts requiring manual intervention
+                blocked_accounts = [
+                    acc
+                    for acc, recon_result in self._reconciliation_results.items()
+                    if recon_result.requires_manual_intervention
+                ]
+
+                if blocked_accounts:
+                    logger.critical(
+                        "Accounts blocked pending manual intervention: %s",
+                        blocked_accounts,
+                    )
+                    # These accounts won't be started until manually reviewed
+
+                # AC6: Only clear crash indicators if ALL accounts reconciled successfully
+                all_success = all(
+                    r.success for r in self._reconciliation_results.values()
+                )
+                if all_success:
+                    await self._crash_recovery.clear_crash_indicators()
+                    logger.info("Crash indicators cleared - all accounts reconciled successfully")
+                else:
+                    logger.warning(
+                        "Crash indicators NOT cleared - some accounts require manual intervention"
+                    )
+            else:
+                logger.warning(
+                    "ZMQ adapter not available - skipping position reconciliation"
+                )
+                # No reconciliation performed, clear indicators to allow startup
+                await self._crash_recovery.clear_crash_indicators()
 
         return result
+
+    async def _run_position_reconciliation(
+        self,
+        accounts: list[str],
+    ) -> dict[str, ReconciliationResult]:
+        """Run reconciliation for all accounts needing recovery.
+
+        Called after crash detection, before resuming trading.
+        Initializes PositionReconciler and runs reconciliation for each account.
+
+        Args:
+            accounts: List of account IDs from recovery result
+
+        Returns:
+            Dict mapping account_id to ReconciliationResult
+        """
+        from .state.position_reconciler import (
+            PositionReconciler,
+            run_position_reconciliation,
+        )
+
+        # Initialize the reconciler
+        self._reconciler = PositionReconciler(
+            zmq_adapter=self._zmq_adapter,
+            redis_manager=self._redis_manager,
+        )
+
+        # Run reconciliation using helper function
+        return await run_position_reconciliation(
+            reconciler=self._reconciler,
+            crash_recovery=self._crash_recovery,
+            accounts=accounts,
+        )
 
     async def run(self) -> None:
         """Start the trading engine main loop.
