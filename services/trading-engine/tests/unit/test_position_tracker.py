@@ -352,3 +352,131 @@ class TestPositionTrackerQueries:
         repr_str = repr(populated_tracker)
         assert "PositionTracker" in repr_str
         assert "3" in repr_str
+
+
+class TestGetPositionsDict:
+    """Tests for get_positions_dict() method (Story 5.1)."""
+
+    @pytest.fixture
+    def tracker_with_positions(self):
+        """Create tracker with positions for dict testing."""
+        tracker = PositionTracker()
+
+        order1 = InternalOrder(
+            account_id="ftmo-001",
+            symbol="XAUUSD",
+            action=OrderSide.BUY,
+            volume=0.1,
+            price=1850.00,
+        )
+        order1.state = OrderState.FILLED
+        order1.fill_price = 1850.25
+        order1.filled_at = datetime(2026, 1, 3, 10, 0, 0, tzinfo=timezone.utc)
+        tracker.open_position(order1)
+
+        order2 = InternalOrder(
+            account_id="ftmo-001",
+            symbol="EURUSD",
+            action=OrderSide.SELL,
+            volume=0.5,
+            price=1.0850,
+        )
+        order2.state = OrderState.FILLED
+        order2.fill_price = 1.0852
+        order2.filled_at = datetime(2026, 1, 3, 11, 0, 0, tzinfo=timezone.utc)
+        tracker.open_position(order2)
+
+        order3 = InternalOrder(
+            account_id="ftmo-002",
+            symbol="XAUUSD",
+            action=OrderSide.SELL,
+            volume=0.2,
+            price=1851.00,
+        )
+        order3.state = OrderState.FILLED
+        order3.fill_price = 1851.50
+        order3.filled_at = datetime(2026, 1, 3, 12, 0, 0, tzinfo=timezone.utc)
+        tracker.open_position(order3)
+
+        return tracker
+
+    def test_get_positions_dict_returns_list(self, tracker_with_positions):
+        """get_positions_dict should return a list of dicts."""
+        result = tracker_with_positions.get_positions_dict()
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert all(isinstance(item, dict) for item in result)
+
+    def test_get_positions_dict_filtered_by_account(self, tracker_with_positions):
+        """get_positions_dict should filter by account_id."""
+        result = tracker_with_positions.get_positions_dict(account_id="ftmo-001")
+        assert len(result) == 2
+
+        result = tracker_with_positions.get_positions_dict(account_id="ftmo-002")
+        assert len(result) == 1
+
+    def test_get_positions_dict_empty_tracker(self):
+        """get_positions_dict should return empty list for empty tracker."""
+        tracker = PositionTracker()
+        result = tracker.get_positions_dict()
+        assert result == []
+
+    def test_get_positions_dict_nonexistent_account(self, tracker_with_positions):
+        """get_positions_dict should return empty list for unknown account."""
+        result = tracker_with_positions.get_positions_dict(account_id="unknown")
+        assert result == []
+
+    def test_get_positions_dict_contains_required_fields(self, tracker_with_positions):
+        """Each position dict should have all required snapshot fields."""
+        result = tracker_with_positions.get_positions_dict(account_id="ftmo-001")
+
+        for pos_dict in result:
+            assert "symbol" in pos_dict
+            assert "side" in pos_dict
+            assert "volume" in pos_dict
+            assert "entry_price" in pos_dict
+            assert "entry_time" in pos_dict
+            assert "order_id" in pos_dict
+
+    def test_get_positions_dict_values_are_strings(self, tracker_with_positions):
+        """Volume and entry_price should be serialized as strings."""
+        result = tracker_with_positions.get_positions_dict(account_id="ftmo-001")
+
+        for pos_dict in result:
+            assert isinstance(pos_dict["volume"], str)
+            assert isinstance(pos_dict["entry_price"], str)
+            assert isinstance(pos_dict["entry_time"], str)
+
+    def test_get_positions_dict_volume_from_quantity(self, tracker_with_positions):
+        """Volume field should be string of Position.quantity."""
+        result = tracker_with_positions.get_positions_dict(account_id="ftmo-001")
+
+        # Find XAUUSD position (volume 0.1)
+        xau_pos = next(p for p in result if p["symbol"] == "XAUUSD")
+        assert xau_pos["volume"] == "0.1"
+
+        # Find EURUSD position (volume 0.5)
+        eur_pos = next(p for p in result if p["symbol"] == "EURUSD")
+        assert eur_pos["volume"] == "0.5"
+
+    def test_get_positions_dict_side_is_enum_value(self, tracker_with_positions):
+        """Side should be the enum value string (BUY/SELL)."""
+        result = tracker_with_positions.get_positions_dict()
+
+        sides = {p["side"] for p in result}
+        assert sides == {"BUY", "SELL"}
+
+    def test_get_positions_dict_entry_time_iso_format(self, tracker_with_positions):
+        """Entry time should be in ISO format."""
+        result = tracker_with_positions.get_positions_dict(account_id="ftmo-001")
+
+        xau_pos = next(p for p in result if p["symbol"] == "XAUUSD")
+        assert xau_pos["entry_time"] == "2026-01-03T10:00:00+00:00"
+
+    def test_get_positions_dict_preserves_order_id(self, tracker_with_positions):
+        """Order ID should be preserved as non-empty string."""
+        result = tracker_with_positions.get_positions_dict()
+
+        for pos_dict in result:
+            assert isinstance(pos_dict["order_id"], str)
+            assert len(pos_dict["order_id"]) > 0

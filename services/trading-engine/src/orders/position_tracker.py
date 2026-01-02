@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from src.adapters.zmq_models import OrderSide
 from src.orders.order import InternalOrder
@@ -227,6 +227,34 @@ class PositionTracker:
             for pos in self._positions.values()
             if pos.account_id == account_id
         )
+
+    def get_positions_dict(self, account_id: Optional[str] = None) -> list[dict[str, Any]]:
+        """Return positions as list of dicts for snapshot.
+
+        Converts Position objects to serializable dicts suitable for
+        Redis storage and state snapshots.
+
+        Args:
+            account_id: Optional filter by account. If None, returns all.
+
+        Returns:
+            List of position dicts with string values for Redis storage.
+
+        Note:
+            Position uses 'quantity' (float), stored as 'volume' (string) for snapshot.
+        """
+        positions = self.get_all_positions(account_id)
+        return [
+            {
+                "symbol": pos.symbol,
+                "side": pos.side.value,
+                "volume": str(pos.quantity),  # Position.quantity -> snapshot volume
+                "entry_price": str(pos.entry_price),
+                "entry_time": pos.entry_time.isoformat(),
+                "order_id": pos.order_id,
+            }
+            for pos in positions
+        ]
 
     def clear(self) -> int:
         """Clear all positions (for testing/reset).

@@ -1,15 +1,19 @@
 """Redis state management for account status persistence."""
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import redis.asyncio as aioredis
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from decimal import Decimal
 
     from ..accounts.risk_state import RiskState
+    from .snapshot import StateSnapshot
 
 
 class RedisStateManager:
@@ -326,3 +330,72 @@ class RedisStateManager:
                 if value:
                     balances[account_id] = Decimal(value)
         return balances
+
+    # State Snapshot Methods (Story 5.1)
+
+    async def save_snapshot(
+        self,
+        account_id: str,
+        snapshot: "StateSnapshot",
+        ttl_seconds: int = 3600,
+    ) -> None:
+        """Save snapshot atomically with TTL using pipeline.
+
+        Key pattern: snapshot:{account_id}:latest
+        Uses transaction pipeline for atomic hset + expire.
+
+        Args:
+            account_id: Account identifier
+            snapshot: StateSnapshot to persist
+            ttl_seconds: Time-to-live in seconds (default: 3600 = 1 hour)
+        """
+        key = f"snapshot:{account_id}:latest"
+        async with self.client.pipeline(transaction=True) as pipe:
+            await pipe.hset(key, mapping=snapshot.to_dict())
+            await pipe.expire(key, ttl_seconds)
+            await pipe.execute()
+
+    async def get_snapshot(self, account_id: str) -> "StateSnapshot | None":
+        """Get snapshot from Redis and deserialize.
+
+        Args:
+            account_id: Account identifier
+
+        Returns:
+            StateSnapshot if found and valid, None otherwise.
+            Returns None if data is corrupt (logs error).
+        """
+        from .snapshot import StateSnapshot
+
+        key = f"snapshot:{account_id}:latest"
+        data = await self.client.hgetall(key)
+        if not data:
+            return None
+
+        try:
+            return StateSnapshot.from_dict(data)
+        except (KeyError, ValueError, json.JSONDecodeError) as e:
+            logger.error(
+                "Failed to deserialize snapshot for %s: %s. Data may be corrupt.",
+                account_id,
+                e,
+            )
+            return None
+
+    async def get_snapshot_ttl(self, account_id: str) -> int | None:
+        """Get remaining TTL for snapshot key.
+
+        Args:
+            account_id: Account identifier
+
+        Returns:
+            Remaining TTL in seconds (positive int), or None if:
+            - Key doesn't exist (Redis returns -2)
+            - Key exists but has no TTL set (Redis returns -1)
+        """
+        key = f"snapshot:{account_id}:latest"
+        ttl = await self.client.ttl(key)
+        if ttl < 0:
+            # -1 = no TTL set, -2 = key doesn't exist
+            return None
+        return ttl
