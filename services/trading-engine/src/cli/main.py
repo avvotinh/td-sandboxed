@@ -6,14 +6,16 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import typer
+from tabulate import tabulate
 from typing_extensions import Annotated
 
 from ..accounts.account_manager import AccountManager
 from ..config.loader import ConfigLoader, ConfigValidationError, ConfigSyntaxError
+from ..rules.audit_logger import AuditEntry
 from ..state.redis_state import RedisStateManager
 from .accounts import accounts_app
 from .config import config_app
@@ -437,6 +439,211 @@ def status(
 
     if redis_status == "connected":
         _run_async(redis.close())
+
+
+def _parse_time_delta(since: str) -> timedelta:
+    """Parse a time duration string (e.g., '1h', '24h', '30m') into a timedelta.
+
+    Args:
+        since: Time duration string.
+
+    Returns:
+        Timedelta representing the duration.
+
+    Raises:
+        ValueError: If the format is invalid.
+    """
+    since = since.strip().lower()
+    if since.endswith("h"):
+        return timedelta(hours=int(since[:-1]))
+    elif since.endswith("m"):
+        return timedelta(minutes=int(since[:-1]))
+    elif since.endswith("d"):
+        return timedelta(days=int(since[:-1]))
+    elif since.endswith("s"):
+        return timedelta(seconds=int(since[:-1]))
+    else:
+        # Try to parse as hours
+        return timedelta(hours=int(since))
+
+
+async def _query_redis_audit_logs(
+    redis: RedisStateManager,
+    account_id: str,
+    event_type: str | None,
+    since: timedelta,
+) -> list[AuditEntry]:
+    """Query audit logs from Redis.
+
+    Args:
+        redis: Redis state manager.
+        account_id: Account ID to filter by.
+        event_type: Optional event type filter.
+        since: Time range to query.
+
+    Returns:
+        List of AuditEntry instances.
+    """
+    # Calculate the cutoff time
+    cutoff = datetime.now(timezone.utc) - since
+
+    # Scan for matching keys
+    pattern = f"audit:{account_id}:*"
+    entries: list[AuditEntry] = []
+
+    # Use SCAN to iterate through keys
+    cursor = 0
+    while True:
+        cursor, keys = await redis.client.scan(cursor, match=pattern, count=100)
+        for key in keys:
+            try:
+                value = await redis.client.get(key)
+                if value:
+                    data = json.loads(value)
+                    entry = AuditEntry.from_dict(data)
+
+                    # Filter by time
+                    if entry.timestamp < cutoff:
+                        continue
+
+                    # Filter by event type if specified
+                    if event_type and entry.event_type != event_type:
+                        continue
+
+                    entries.append(entry)
+            except (json.JSONDecodeError, KeyError) as e:
+                logging.debug("Failed to parse audit entry %s: %s", key, e)
+
+        if cursor == 0:
+            break
+
+    # Sort by timestamp descending
+    entries.sort(key=lambda e: e.timestamp, reverse=True)
+    return entries
+
+
+def _format_audit_table(entries: list[AuditEntry]) -> str:
+    """Format audit entries as a table.
+
+    Args:
+        entries: List of AuditEntry instances.
+
+    Returns:
+        Formatted table string.
+    """
+    if not entries:
+        return "No audit entries found."
+
+    rows = []
+    for entry in entries:
+        # Truncate context for display
+        context_str = ""
+        if entry.context:
+            context_str = str(entry.context)
+            if len(context_str) > 40:
+                context_str = context_str[:37] + "..."
+
+        rows.append([
+            entry.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            entry.rule_name[:20] if entry.rule_name else "-",
+            entry.rule_result,
+            f"{entry.current_value:.2f}" if entry.current_value is not None else "-",
+            f"{entry.threshold_value:.2f}" if entry.threshold_value is not None else "-",
+            entry.order_id[:8] if entry.order_id else "-",
+            context_str,
+        ])
+
+    headers = ["Timestamp", "Rule", "Result", "Current", "Threshold", "Order", "Context"]
+    return tabulate(rows, headers=headers, tablefmt="simple")
+
+
+@app.command()
+def logs(
+    account: Annotated[
+        str, typer.Option("--account", "-a", help="Account ID to query logs for")
+    ],
+    event_type: Annotated[
+        str | None, typer.Option("--type", "-t", help="Filter by event type (rule_check, trade_blocked, warning_triggered)")
+    ] = None,
+    since: Annotated[
+        str, typer.Option("--since", "-s", help="Time range (e.g., '1h', '24h', '30m')")
+    ] = "24h",
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output as JSON")
+    ] = False,
+    limit: Annotated[
+        int, typer.Option("--limit", "-l", help="Maximum number of entries to show")
+    ] = 100,
+) -> None:
+    """Query audit logs for an account.
+
+    Shows rule check audit entries from Redis. Use filters to narrow results.
+
+    Examples:
+        # Query all logs for an account (last 24 hours)
+        trading-engine logs --account ftmo-gold-001
+
+        # Query blocked trades only
+        trading-engine logs --account ftmo-gold-001 --type trade_blocked
+
+        # Query last hour
+        trading-engine logs --account ftmo-gold-001 --since 1h
+    """
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    redis = RedisStateManager(redis_url)
+
+    try:
+        # Parse time range
+        try:
+            time_delta = _parse_time_delta(since)
+        except ValueError:
+            typer.echo(
+                typer.style(f"Invalid time format: {since}", fg=STATUS_COLORS["error"])
+            )
+            typer.echo("Use format like '1h', '24h', '30m', '7d'")
+            raise typer.Exit(1)
+
+        # Connect to Redis
+        try:
+            _run_async(redis.connect())
+            _run_async(redis.client.ping())
+        except Exception as e:
+            typer.echo(
+                typer.style(f"Redis connection failed: {e}", fg=STATUS_COLORS["error"])
+            )
+            raise typer.Exit(1)
+
+        # Query audit logs
+        entries = _run_async(
+            _query_redis_audit_logs(redis, account, event_type, time_delta)
+        )
+
+        # Apply limit
+        if len(entries) > limit:
+            entries = entries[:limit]
+            typer.echo(f"Showing first {limit} entries (use --limit to adjust)")
+            typer.echo("")
+
+        if json_output:
+            # JSON output
+            output = [entry.to_dict() for entry in entries]
+            typer.echo(json.dumps(output, indent=2, default=str))
+        else:
+            # Table output
+            typer.echo(f"Audit Logs for {account}")
+            typer.echo(f"Time range: last {since}")
+            if event_type:
+                typer.echo(f"Event type: {event_type}")
+            typer.echo("")
+            typer.echo(_format_audit_table(entries))
+            typer.echo("")
+            typer.echo(f"Total entries: {len(entries)}")
+
+    finally:
+        try:
+            _run_async(redis.close())
+        except Exception:
+            pass
 
 
 def cli() -> None:

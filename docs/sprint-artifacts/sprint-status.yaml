@@ -83,7 +83,7 @@ development_status:
   4-5-ftmo-preset-configuration: done
   4-6-rule-validation-before-trade: done
   4-7-real-time-pnl-tracking: done
-  4-8-rule-check-audit-logging: backlog
+  4-8-rule-check-audit-logging: done
   epic-4-retrospective: optional
 
   # Epic 5: State Persistence & Crash Recovery (7 stories)

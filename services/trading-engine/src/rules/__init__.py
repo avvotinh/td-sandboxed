@@ -35,11 +35,27 @@ Story 4.3 Exports:
 Story 4.4 Exports:
 - MaxPositionSizeRule: Limits position sizes with fixed or scaled limits
 
+Story 4.8 Exports:
+- AuditLogger: Logs rule checks to Redis with fire-and-forget pattern
+- AuditEntry: Dataclass representing a single audit log entry
+- AuditLoggerRegistry: Per-account audit logger management
+- AuditDBWriter: Batch persistence to TimescaleDB
+- audit_task_done_callback: Done callback for fire-and-forget audit tasks
+
 Full rule implementations in Epic 4+.
 """
 
 from .assignment import RuleAssignment
 from .assignment_service import RuleAssignmentService
+from .audit_db_writer import AuditDBWriter, AuditLogModel
+from .audit_logger import (
+    AUDIT_TTL_SECONDS,
+    AuditEntry,
+    AuditEventType,
+    AuditLogger,
+    audit_task_done_callback,
+)
+from .audit_registry import AuditLoggerRegistry
 from .base_rule import BaseRule, RuleAction, RuleList, RuleResult
 from .context_builder import RuleContextBuilder
 from .custom_loader import CustomRuleLoader, RulesFileInvalidError, RulesFileNotFoundError
@@ -77,6 +93,15 @@ __all__ = [
     "RuleEngineFactory",
     "RuleContextBuilder",
     "RuleValidationError",
+    # Audit logging (Story 4.8)
+    "AuditLogger",
+    "AuditEntry",
+    "AuditEventType",
+    "AuditLoggerRegistry",
+    "AuditDBWriter",
+    "AuditLogModel",
+    "audit_task_done_callback",
+    "AUDIT_TTL_SECONDS",
     # Exceptions
     "PresetNotFoundError",
     "RulesFileNotFoundError",
