@@ -25,7 +25,7 @@ Execution flow:
 """
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..accounts.risk_registry import RiskStateRegistry
 from ..accounts.risk_state import RiskState
@@ -33,6 +33,9 @@ from ..adapters.zmq_adapter import ZmqAdapter
 from ..adapters.zmq_models import Order, OrderResult
 from .exceptions import OrderBlockedError
 from .order_validator import OrderValidator
+
+if TYPE_CHECKING:
+    from ..accounts.pnl_registry import PnLTrackerRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +73,7 @@ class ValidatedZmqAdapter:
         zmq_adapter: ZmqAdapter,
         order_validator: OrderValidator,
         risk_registry: RiskStateRegistry,
+        pnl_registry: "PnLTrackerRegistry | None" = None,
     ) -> None:
         """Initialize ValidatedZmqAdapter.
 
@@ -77,13 +81,28 @@ class ValidatedZmqAdapter:
             zmq_adapter: ZmqAdapter instance for MT5 communication.
             order_validator: OrderValidator for pre-trade validation.
             risk_registry: RiskStateRegistry for fetching account state.
+            pnl_registry: Optional PnLTrackerRegistry for position tracking.
         """
         self._adapter = zmq_adapter
         self._validator = order_validator
         self._risk_registry = risk_registry
+        self._pnl_registry = pnl_registry
+
+    def set_pnl_registry(self, registry: "PnLTrackerRegistry") -> None:
+        """Register P&L tracker registry for order execution notifications.
+
+        Args:
+            registry: PnLTrackerRegistry instance.
+        """
+        self._pnl_registry = registry
+        logger.info("PnL registry registered with ValidatedZmqAdapter")
 
     async def send_order(self, order: Order) -> None:
-        """Validate and send order to MT5.
+        """Validate and send order to MT5 (fire-and-forget).
+
+        WARNING: This method does NOT track P&L because it doesn't wait for
+        the OrderResult. For trades that need P&L tracking, use
+        send_order_and_wait() instead.
 
         This method:
         1. Fetches account state from RiskStateRegistry
@@ -98,6 +117,11 @@ class ValidatedZmqAdapter:
             OrderBlockedError: If order is blocked by compliance rules.
             RuntimeError: If not connected to MT5.
             zmq.ZMQError: If send fails.
+
+        Note:
+            P&L tracking requires OrderResult to create positions. Since this
+            method doesn't wait for results, positions won't be tracked.
+            Use send_order_and_wait() for proper P&L integration.
         """
         # Get account state from RiskStateRegistry
         risk_state = self._risk_registry.get_risk_state(order.account_id)
@@ -202,6 +226,11 @@ class ValidatedZmqAdapter:
             result.evaluation_time_ms,
         )
 
+        # Notify PnL tracker of trade execution for position tracking
+        if self._pnl_registry and order_result.is_filled:
+            tracker = await self._pnl_registry.get_or_create(order.account_id)
+            await tracker.on_trade_executed(order_result, order)
+
         return order_result
 
     def _build_account_state(
@@ -262,6 +291,16 @@ class ValidatedZmqAdapter:
         balance = float(risk_state.daily_starting_balance)
         equity = float(risk_state.current_equity)
 
+        # Get position data from PnLTrackerRegistry if available
+        open_positions_count = 0
+        total_exposure = 0.0
+        current_position_lots = 0.0
+
+        if self._pnl_registry:
+            open_positions_count = self._pnl_registry.get_open_positions_count(account_id)
+            total_exposure = float(self._pnl_registry.get_total_exposure(account_id))
+            current_position_lots = float(self._pnl_registry.get_total_position_lots(account_id))
+
         return {
             # Standard fields for RuleContextBuilder
             "balance": balance,
@@ -271,15 +310,14 @@ class ValidatedZmqAdapter:
             "daily_pnl": float(risk_state.daily_pnl),
             "daily_pnl_percent": float(risk_state.daily_pnl_percent),
             "total_drawdown_percent": float(risk_state.total_drawdown_percent),
-            # Position tracking - NOT currently tracked in RiskState
-            # TODO: Track these in RiskState for position-based rules
-            "open_positions_count": 0,
-            "total_exposure": 0.0,
+            # Position tracking from PnLTrackerRegistry
+            "open_positions_count": open_positions_count,
+            "total_exposure": total_exposure,
             # Additional fields for rules that access context directly
             # (MaxPositionSizeRule, ProfitTargetRule, MinTradingDaysRule)
             "account_balance": balance,
             "requested_lots": order.volume if order else 0.0,
-            "current_position_lots": 0.0,  # TODO: Track in RiskState
+            "current_position_lots": current_position_lots,
             "total_pnl_percent": float(risk_state.daily_pnl_percent),  # Approximation
             "trading_days_count": 1,  # TODO: Track in RiskState
         }

@@ -28,6 +28,7 @@ class AccountMetrics:
         daily_pnl_percent: Daily P&L as percentage of starting balance
         peak_equity: Highest equity reached (high water mark)
         max_drawdown_percent: Drawdown from peak as percentage
+        open_positions_count: Number of open positions (Story 4.7)
         last_updated: Timestamp of last state update
     """
 
@@ -40,6 +41,7 @@ class AccountMetrics:
     daily_pnl_percent: Decimal = Decimal("0")
     peak_equity: Decimal = Decimal("0")
     max_drawdown_percent: Decimal = Decimal("0")
+    open_positions_count: int = 0
     last_updated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property

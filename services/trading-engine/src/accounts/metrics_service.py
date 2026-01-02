@@ -3,6 +3,7 @@
 Combines data from multiple sources:
 - Balance: From MT5 via account:{id}:balance key
 - Risk metrics: From RiskStateRegistry (Story 3.5)
+- Real-time P&L: From PnLTrackerRegistry (Story 4.7)
 - Account config: From AccountManager
 """
 
@@ -17,6 +18,7 @@ from .metrics import AccountMetrics
 if TYPE_CHECKING:
     from ..state.redis_state import RedisStateManager
     from .account_manager import AccountManager
+    from .pnl_registry import PnLTrackerRegistry
     from .risk_registry import RiskStateRegistry
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,7 @@ class AccountMetricsService:
         redis_manager: "RedisStateManager",
         risk_registry: "RiskStateRegistry",
         account_manager: "AccountManager",
+        pnl_registry: "PnLTrackerRegistry | None" = None,
     ) -> None:
         """Initialize metrics service.
 
@@ -60,12 +63,23 @@ class AccountMetricsService:
             redis_manager: Redis state manager for balance storage
             risk_registry: Risk state registry for risk metrics
             account_manager: Account manager for account configs
+            pnl_registry: Optional PnL tracker registry for real-time P&L
         """
         self._redis = redis_manager
         self._risk_registry = risk_registry
         self._account_manager = account_manager
+        self._pnl_registry = pnl_registry
         self._last_update: dict[str, datetime] = {}
         self._update_lock = asyncio.Lock()
+
+    def set_pnl_registry(self, registry: "PnLTrackerRegistry") -> None:
+        """Register PnL tracker registry for real-time P&L metrics.
+
+        Args:
+            registry: PnLTrackerRegistry instance.
+        """
+        self._pnl_registry = registry
+        logger.info("PnL registry registered with AccountMetricsService")
 
     async def get_account_metrics(self, account_id: str) -> AccountMetrics | None:
         """Get complete metrics for a single account.
@@ -98,8 +112,29 @@ class AccountMetricsService:
         # Get account status
         status = await self._redis.get_account_status(account_id) or "unknown"
 
+        # Try to get real-time P&L metrics from PnLTracker
+        pnl_tracker = None
+        if self._pnl_registry:
+            pnl_tracker = self._pnl_registry.get(account_id)
+
         # Build metrics combining all sources
-        if risk_state:
+        if pnl_tracker:
+            # Use PnLTracker for real-time equity and unrealized P&L
+            pnl_metrics = pnl_tracker.get_pnl_metrics()
+            return AccountMetrics(
+                account_id=account_id,
+                account_name=account_config.name,
+                status=status,
+                balance=pnl_metrics.balance,
+                equity=pnl_metrics.current_equity,
+                daily_pnl=pnl_metrics.daily_pnl,
+                daily_pnl_percent=pnl_metrics.daily_pnl_percent,
+                peak_equity=risk_state.peak_equity if risk_state else pnl_metrics.balance,
+                max_drawdown_percent=pnl_metrics.total_drawdown_percent,
+                open_positions_count=pnl_metrics.open_positions_count,
+                last_updated=datetime.now(timezone.utc),
+            )
+        elif risk_state:
             return AccountMetrics(
                 account_id=account_id,
                 account_name=account_config.name,
@@ -110,10 +145,11 @@ class AccountMetricsService:
                 daily_pnl_percent=risk_state.daily_pnl_percent,
                 peak_equity=risk_state.peak_equity,
                 max_drawdown_percent=risk_state.total_drawdown_percent,
+                open_positions_count=0,  # No PnL tracker, no position tracking
                 last_updated=risk_state.last_updated,
             )
         else:
-            # No risk state - use defaults with balance as equity
+            # No risk state or PnL tracker - use defaults with balance as equity
             return AccountMetrics(
                 account_id=account_id,
                 account_name=account_config.name,
@@ -124,6 +160,7 @@ class AccountMetricsService:
                 daily_pnl_percent=Decimal("0"),
                 peak_equity=balance,
                 max_drawdown_percent=Decimal("0"),
+                open_positions_count=0,
             )
 
     async def get_all_account_metrics(self) -> dict[str, AccountMetrics]:

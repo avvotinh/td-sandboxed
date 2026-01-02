@@ -6,6 +6,7 @@ This module handles:
 - Account state persistence
 - Per-account risk isolation
 - Per-account equity and balance tracking
+- Real-time P&L tracking (Story 4.7)
 
 Exports:
 - AccountConfig: Single trading account configuration
@@ -23,6 +24,10 @@ Exports:
 - RuleConfig: Configuration for a single risk rule
 - AccountMetrics: Per-account financial metrics for display (Story 3.6)
 - AccountMetricsService: Service for retrieving account metrics (Story 3.6)
+- PnLTracker: Per-account P&L tracker for real-time position monitoring (Story 4.7)
+- PnLTrackerRegistry: Registry for per-account P&L trackers (Story 4.7)
+- Position: Open position dataclass (Story 4.7)
+- PnLMetrics: P&L metrics snapshot dataclass (Story 4.7)
 """
 
 from .account_manager import AccountManager
@@ -35,6 +40,8 @@ from .models import (
     MT5Config,
     SignalFilter,
 )
+from .pnl_registry import PnLTrackerRegistry
+from .pnl_tracker import PnLMetrics, PnLTracker, Position
 from .risk_isolation import RiskIsolationService, RuleConfig
 from .risk_manager import AccountRiskManager
 from .risk_registry import RiskStateRegistry
@@ -52,6 +59,10 @@ __all__ = [
     "AccountState",
     "AccountType",
     "MT5Config",
+    "PnLMetrics",
+    "PnLTracker",
+    "PnLTrackerRegistry",
+    "Position",
     "RiskIsolationService",
     "RiskState",
     "RiskStateRegistry",

@@ -82,7 +82,7 @@ development_status:
   4-4-position-size-limit-rule: done
   4-5-ftmo-preset-configuration: done
   4-6-rule-validation-before-trade: done
-  4-7-real-time-pnl-tracking: backlog
+  4-7-real-time-pnl-tracking: done
   4-8-rule-check-audit-logging: backlog
   epic-4-retrospective: optional
 

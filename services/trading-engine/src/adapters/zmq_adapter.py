@@ -44,6 +44,7 @@ from .zmq_models import Order, OrderResult, OrderStatus, Tick
 
 if TYPE_CHECKING:
     from ..accounts.metrics_service import AccountMetricsService
+    from ..accounts.pnl_registry import PnLTrackerRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,7 @@ class ZmqAdapter:
         self._pending_orders: dict[str, asyncio.Future[OrderResult]] = {}
         self._reconnect_attempt = 0
         self._metrics_service: AccountMetricsService | None = None
+        self._pnl_registry: PnLTrackerRegistry | None = None
 
     def set_metrics_service(self, service: "AccountMetricsService") -> None:
         """Register metrics service for balance/equity updates.
@@ -129,6 +131,18 @@ class ZmqAdapter:
         """
         self._metrics_service = service
         logger.info("Metrics service registered with ZMQ adapter")
+
+    def set_pnl_registry(self, registry: "PnLTrackerRegistry") -> None:
+        """Register P&L tracker registry for tick routing.
+
+        When registered, tick messages will be routed to the P&L registry
+        for real-time P&L updates.
+
+        Args:
+            registry: PnLTrackerRegistry instance.
+        """
+        self._pnl_registry = registry
+        logger.info("PnL registry registered with ZMQ adapter")
 
     @property
     def is_connected(self) -> bool:
@@ -271,6 +285,16 @@ class ZmqAdapter:
                             ask=data["ask"],
                             timestamp=data["timestamp"],
                         )
+
+                        # Route tick to P&L registry for real-time P&L updates
+                        if self._pnl_registry:
+                            # Convert float to Decimal at boundary
+                            bid_decimal = Decimal(str(tick.bid))
+                            ask_decimal = Decimal(str(tick.ask))
+                            await self._pnl_registry.on_tick_all(
+                                tick.symbol, bid_decimal, ask_decimal
+                            )
+
                         yield tick
                     except (json.JSONDecodeError, KeyError) as e:
                         logger.warning("Failed to parse tick: %s - %s", e, payload)
