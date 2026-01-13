@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 from tabulate import tabulate
@@ -20,6 +20,53 @@ from ..state.redis_state import RedisStateManager
 from .accounts import accounts_app
 from .config import config_app
 from .constants import ENGINE_STATE_KEY, ENGINE_START_TIME_KEY, STATUS_COLORS
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+
+def create_db_session_factory() -> "async_sessionmaker[AsyncSession] | None":
+    """Create async database session factory from DATABASE_URL environment variable.
+
+    Returns:
+        async_sessionmaker if DATABASE_URL is set, None otherwise.
+
+    Note:
+        Required for P&L recalculation during crash recovery (Story 5.4).
+        The session factory is passed to TradingEngine for database queries.
+    """
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        logging.debug("DATABASE_URL not set, database features disabled")
+        return None
+
+    try:
+        from sqlalchemy.ext.asyncio import (
+            AsyncSession,
+            async_sessionmaker,
+            create_async_engine,
+        )
+
+        # Ensure URL uses asyncpg driver
+        if database_url.startswith("postgresql://"):
+            database_url = database_url.replace(
+                "postgresql://", "postgresql+asyncpg://", 1
+            )
+
+        async_engine = create_async_engine(database_url, echo=False)
+        session_factory = async_sessionmaker(
+            async_engine, class_=AsyncSession, expire_on_commit=False
+        )
+        logging.debug("Database session factory created successfully")
+        return session_factory
+    except ImportError:
+        logging.warning(
+            "sqlalchemy[asyncio] not installed, database features disabled"
+        )
+        return None
+    except Exception as e:
+        logging.warning("Failed to create database session factory: %s", e)
+        return None
 
 app = typer.Typer(
     name="trading-engine",

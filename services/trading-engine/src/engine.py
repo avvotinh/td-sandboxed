@@ -3,11 +3,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from .accounts.pnl_registry import PnLTrackerRegistry
+    from .accounts.risk_registry import RiskStateRegistry
     from .adapters.zmq_adapter import ZmqAdapter
     from .state.crash_recovery import CrashRecoveryManager, RecoveryResult
+    from .state.daily_pnl_recalculator import DailyPnLRecalculator, RecalculationResult
     from .state.position_reconciler import PositionReconciler, ReconciliationResult
     from .state.redis_state import RedisStateManager
 
@@ -32,6 +38,9 @@ class TradingEngine:
         self,
         redis_manager: RedisStateManager | None = None,
         zmq_adapter: ZmqAdapter | None = None,
+        db_session_factory: async_sessionmaker[AsyncSession] | None = None,
+        risk_registry: RiskStateRegistry | None = None,
+        pnl_registry: PnLTrackerRegistry | None = None,
     ) -> None:
         """Initialize the trading engine.
 
@@ -40,15 +49,26 @@ class TradingEngine:
                           If provided, crash recovery will be enabled.
             zmq_adapter: Optional ZMQ adapter for MT5 communication.
                         Required for position reconciliation during recovery.
+            db_session_factory: Optional async session factory for database queries.
+                               Required for P&L recalculation during recovery.
+            risk_registry: Optional RiskStateRegistry for risk state management.
+                          Required for P&L recalculation during recovery.
+            pnl_registry: Optional PnLTrackerRegistry for P&L tracker access.
+                         Required for P&L recalculation during recovery.
         """
         self._running = False
         self._shutdown_event = asyncio.Event()
         self._redis_manager = redis_manager
         self._zmq_adapter = zmq_adapter
+        self._db_session_factory = db_session_factory
+        self._risk_registry = risk_registry
+        self._pnl_registry = pnl_registry
         self._crash_recovery: CrashRecoveryManager | None = None
         self._recovery_result: RecoveryResult | None = None
         self._reconciliation_results: dict[str, ReconciliationResult] | None = None
+        self._pnl_recalculation_results: dict[str, RecalculationResult] | None = None
         self._reconciler: PositionReconciler | None = None
+        self._pnl_recalculator: DailyPnLRecalculator | None = None
 
     @property
     def is_running(self) -> bool:
@@ -77,6 +97,16 @@ class TradingEngine:
             no reconciliation was performed.
         """
         return self._reconciliation_results
+
+    @property
+    def pnl_recalculation_results(self) -> dict[str, RecalculationResult] | None:
+        """Get the P&L recalculation results from startup.
+
+        Returns:
+            Dict mapping account_id to RecalculationResult, or None if
+            no recalculation was performed.
+        """
+        return self._pnl_recalculation_results
 
     def _on_lock_lost(self) -> None:
         """Handle loss of process lock by triggering emergency shutdown.
@@ -148,6 +178,13 @@ class TradingEngine:
                     r.success for r in self._reconciliation_results.values()
                 )
                 if all_success:
+                    # Story 5.4: Daily P&L recalculation after position reconciliation
+                    self._pnl_recalculation_results = (
+                        await self._run_daily_pnl_recalculation(
+                            self._reconciliation_results
+                        )
+                    )
+
                     await self._crash_recovery.clear_crash_indicators()
                     logger.info("Crash indicators cleared - all accounts reconciled successfully")
                 else:
@@ -195,6 +232,91 @@ class TradingEngine:
             crash_recovery=self._crash_recovery,
             accounts=accounts,
         )
+
+    async def _run_daily_pnl_recalculation(
+        self,
+        reconciliation_results: dict[str, ReconciliationResult],
+    ) -> dict[str, RecalculationResult]:
+        """Recalculate daily P&L for all successfully reconciled accounts.
+
+        Called after position reconciliation (Story 5.3), before trading resumes.
+        Only recalculates for accounts that passed reconciliation.
+
+        Args:
+            reconciliation_results: Results from position reconciliation
+
+        Returns:
+            Dict mapping account_id to RecalculationResult
+        """
+        from .state.daily_pnl_recalculator import DailyPnLRecalculator
+
+        results: dict[str, RecalculationResult] = {}
+
+        # Skip if required dependencies are not configured
+        if (
+            self._db_session_factory is None
+            or self._redis_manager is None
+            or self._risk_registry is None
+            or self._pnl_registry is None
+        ):
+            logger.warning(
+                "Skipping P&L recalculation - missing required dependencies "
+                "(db_session_factory, redis_manager, risk_registry, or pnl_registry)"
+            )
+            return results
+
+        # Initialize the recalculator (lazy init)
+        if self._pnl_recalculator is None:
+            self._pnl_recalculator = DailyPnLRecalculator(
+                db_session_factory=self._db_session_factory,
+                redis_manager=self._redis_manager,
+                risk_registry=self._risk_registry,
+                pnl_registry=self._pnl_registry,
+            )
+
+        for account_id, recon_result in reconciliation_results.items():
+            # Skip accounts that failed reconciliation
+            if recon_result.requires_manual_intervention:
+                logger.warning(
+                    "Skipping P&L recalculation for %s - manual intervention required",
+                    account_id,
+                )
+                continue
+
+            # Get snapshot daily P&L for comparison
+            valid, snapshot = await self._crash_recovery.validate_snapshot_for_recovery(
+                account_id
+            )
+            # Use daily_starting_balance as base for comparison
+            # (daily_pnl in snapshot could be stale)
+            snapshot_daily_pnl = Decimal("0")
+            if snapshot is not None:
+                # Get current daily P&L from risk state (if available)
+                risk_state = self._risk_registry.get_risk_state(account_id)
+                if risk_state is not None:
+                    snapshot_daily_pnl = risk_state.daily_pnl
+
+            # Recalculate
+            result = await self._pnl_recalculator.recalculate_daily_pnl(
+                account_id,
+                snapshot_daily_pnl,
+            )
+
+            # Apply if successful
+            if result.success:
+                await self._pnl_recalculator.apply_recalculation(account_id, result)
+
+            results[account_id] = result
+
+            # Log summary
+            if result.success and result.adjustment != Decimal("0"):
+                logger.info(
+                    "Account %s P&L adjusted by %s",
+                    account_id,
+                    result.adjustment,
+                )
+
+        return results
 
     async def run(self) -> None:
         """Start the trading engine main loop.

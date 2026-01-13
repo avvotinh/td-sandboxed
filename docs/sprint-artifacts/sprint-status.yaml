@@ -91,7 +91,7 @@ development_status:
   5-1-redis-state-snapshots: done
   5-2-crash-detection-and-recovery-initiation: done
   5-3-position-reconciliation-with-mt5: done
-  5-4-daily-pnl-recalculation: backlog
+  5-4-daily-pnl-recalculation: done
   5-5-trading-resume-after-recovery: backlog
   5-6-graceful-shutdown-with-state-persistence: backlog
   5-7-timescaledb-cold-storage-backup: backlog

@@ -5,6 +5,7 @@ This module handles:
 - Position reconciliation
 - Crash recovery state
 - Account status persistence
+- Daily P&L recalculation after recovery
 
 Exports:
 - RedisStateManager: Async Redis state persistence
@@ -17,9 +18,17 @@ Exports:
 - PositionDiscrepancy: Describes a mismatch between snapshot and MT5
 - ReconciliationResult: Result of position reconciliation
 - DiscrepancyType: Types of position discrepancies
+- DailyPnLRecalculator: Recalculates daily P&L from trade history
+- RecalculatedPnL: Result of P&L recalculation
+- RecalculationResult: Full result with success status
 """
 
 from .crash_recovery import CrashIndicatorResult, CrashRecoveryManager, RecoveryResult
+from .daily_pnl_recalculator import (
+    DailyPnLRecalculator,
+    RecalculatedPnL,
+    RecalculationResult,
+)
 from .position_reconciler import (
     DiscrepancyType,
     PositionDiscrepancy,
@@ -33,9 +42,12 @@ from .snapshot_service import SnapshotService
 __all__ = [
     "CrashIndicatorResult",
     "CrashRecoveryManager",
+    "DailyPnLRecalculator",
     "DiscrepancyType",
     "PositionDiscrepancy",
     "PositionReconciler",
+    "RecalculatedPnL",
+    "RecalculationResult",
     "ReconciliationResult",
     "RecoveryResult",
     "RedisStateManager",
