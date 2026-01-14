@@ -25,6 +25,12 @@ var (
 
 	// ErrMessageSendFailed indicates a message could not be sent.
 	ErrMessageSendFailed = errors.New("failed to send message")
+
+	// ErrInvalidTradeEvent indicates the trade event payload is malformed.
+	ErrInvalidTradeEvent = errors.New("invalid trade event payload")
+
+	// ErrUnknownEventType indicates an unrecognized event type in the payload.
+	ErrUnknownEventType = errors.New("unknown event type")
 )
 
 // NotificationError wraps errors with additional context.

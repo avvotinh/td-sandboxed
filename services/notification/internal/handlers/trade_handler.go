@@ -1,11 +1,11 @@
 // Package handlers provides message handlers for notifications.
-//
-// Scaffold placeholder. Full implementation in Story 6.3.
 package handlers
 
 import (
+	"encoding/json"
 	"log"
 
+	"github.com/user/sandboxed/services/notification/internal/errors"
 	"github.com/user/sandboxed/services/notification/internal/formatters"
 )
 
@@ -21,11 +21,39 @@ func NewTradeHandler() *TradeHandler {
 	}
 }
 
+// baseTradeEvent contains the type field for routing.
+type baseTradeEvent struct {
+	Type string `json:"type"`
+}
+
 // Handle processes a trade event message and returns formatted notification text.
-// Scaffold: Returns placeholder message. Full implementation in Story 6.3.
 func (h *TradeHandler) Handle(accountID string, payload []byte) (string, error) {
-	log.Printf("Trade event for account %s: %s", accountID, string(payload))
-	// Scaffold: Return empty string (no notification sent)
-	// Full implementation in Story 6.3 will parse JSON and format message
-	return "", nil
+	// First, determine event type
+	var base baseTradeEvent
+	if err := json.Unmarshal(payload, &base); err != nil {
+		log.Printf("Failed to parse trade event base: %v", err)
+		return "", errors.Wrap("Handle", errors.ErrMessageParseError, err.Error())
+	}
+
+	switch base.Type {
+	case "trade_opened":
+		var event formatters.TradeEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			log.Printf("Failed to parse trade_opened event: %v", err)
+			return "", errors.Wrap("Handle", errors.ErrInvalidTradeEvent, err.Error())
+		}
+		return h.formatter.FormatOpen(&event), nil
+
+	case "trade_closed":
+		var event formatters.TradeCloseEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			log.Printf("Failed to parse trade_closed event: %v", err)
+			return "", errors.Wrap("Handle", errors.ErrInvalidTradeEvent, err.Error())
+		}
+		return h.formatter.FormatClose(&event), nil
+
+	default:
+		log.Printf("Unknown trade event type: %s", base.Type)
+		return "", errors.Wrap("Handle", errors.ErrUnknownEventType, base.Type)
+	}
 }

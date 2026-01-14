@@ -101,7 +101,7 @@ development_status:
   epic-6: contexted
   6-1-notification-service-setup: done
   6-2-redis-alert-subscription: done
-  6-3-trade-execution-notifications: backlog
+  6-3-trade-execution-notifications: done
   6-4-rule-violation-alerts: backlog
   6-5-emergency-stop-command: backlog
   6-6-resume-trading-command: backlog
