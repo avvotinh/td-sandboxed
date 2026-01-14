@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from .accounts.account_manager import AccountManager
     from .accounts.pnl_registry import PnLTrackerRegistry
     from .accounts.risk_registry import RiskStateRegistry
     from .adapters.zmq_adapter import ZmqAdapter
@@ -16,6 +19,7 @@ if TYPE_CHECKING:
     from .state.daily_pnl_recalculator import DailyPnLRecalculator, RecalculationResult
     from .state.position_reconciler import PositionReconciler, ReconciliationResult
     from .state.redis_state import RedisStateManager
+    from .state.trading_resumer import ResumeResult, TradingResumer
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,7 @@ class TradingEngine:
         db_session_factory: async_sessionmaker[AsyncSession] | None = None,
         risk_registry: RiskStateRegistry | None = None,
         pnl_registry: PnLTrackerRegistry | None = None,
+        account_manager: AccountManager | None = None,
     ) -> None:
         """Initialize the trading engine.
 
@@ -55,6 +60,8 @@ class TradingEngine:
                           Required for P&L recalculation during recovery.
             pnl_registry: Optional PnLTrackerRegistry for P&L tracker access.
                          Required for P&L recalculation during recovery.
+            account_manager: Optional AccountManager for starting account tasks.
+                            Required for trading resume during recovery.
         """
         self._running = False
         self._shutdown_event = asyncio.Event()
@@ -63,12 +70,15 @@ class TradingEngine:
         self._db_session_factory = db_session_factory
         self._risk_registry = risk_registry
         self._pnl_registry = pnl_registry
+        self._account_manager = account_manager
         self._crash_recovery: CrashRecoveryManager | None = None
         self._recovery_result: RecoveryResult | None = None
         self._reconciliation_results: dict[str, ReconciliationResult] | None = None
         self._pnl_recalculation_results: dict[str, RecalculationResult] | None = None
         self._reconciler: PositionReconciler | None = None
         self._pnl_recalculator: DailyPnLRecalculator | None = None
+        self._trading_resumer: TradingResumer | None = None
+        self._resume_result: ResumeResult | None = None
 
     @property
     def is_running(self) -> bool:
@@ -107,6 +117,15 @@ class TradingEngine:
             no recalculation was performed.
         """
         return self._pnl_recalculation_results
+
+    @property
+    def resume_result(self) -> ResumeResult | None:
+        """Get the trading resume result from startup.
+
+        Returns:
+            ResumeResult if trading resume ran, None otherwise.
+        """
+        return self._resume_result
 
     def _on_lock_lost(self) -> None:
         """Handle loss of process lock by triggering emergency shutdown.
@@ -148,6 +167,9 @@ class TradingEngine:
 
         # Handle recovery mode if needed (Story 5.3 - Position Reconciliation)
         if result.recovery_mode:
+            # Capture recovery start time NOW for accurate duration calculation
+            recovery_start_time = datetime.now(timezone.utc)
+
             logger.warning(
                 "Entering recovery mode for %d accounts",
                 len(result.accounts_needing_recovery),
@@ -183,6 +205,14 @@ class TradingEngine:
                         await self._run_daily_pnl_recalculation(
                             self._reconciliation_results
                         )
+                    )
+
+                    # Story 5.5: Resume trading for eligible accounts
+                    # Uses recovery_start_time captured at recovery mode entry
+                    self._resume_result = await self._run_trading_resume(
+                        reconciliation_results=self._reconciliation_results,
+                        pnl_results=self._pnl_recalculation_results or {},
+                        recovery_start_time=recovery_start_time,
                     )
 
                     await self._crash_recovery.clear_crash_indicators()
@@ -317,6 +347,59 @@ class TradingEngine:
                 )
 
         return results
+
+    async def _run_trading_resume(
+        self,
+        reconciliation_results: dict[str, ReconciliationResult],
+        pnl_results: dict[str, RecalculationResult],
+        recovery_start_time: datetime,
+    ) -> ResumeResult:
+        """Resume trading for all eligible accounts after recovery.
+
+        Called after P&L recalculation, before clearing crash indicators.
+        Only resumes accounts that:
+        - Were "active" before crash
+        - Passed reconciliation successfully
+        - Passed P&L recalculation (or fallback)
+
+        Args:
+            reconciliation_results: Results from position reconciliation
+            pnl_results: Results from P&L recalculation
+            recovery_start_time: When crash recovery started
+
+        Returns:
+            ResumeResult with resume details
+        """
+        from datetime import timedelta
+
+        from .state.trading_resumer import ResumeResult, TradingResumer
+
+        # Initialize resumer (lazy init)
+        if self._trading_resumer is None:
+            if self._redis_manager is None or self._account_manager is None:
+                logger.warning(
+                    "Skipping trading resume - missing redis_manager or account_manager"
+                )
+                return ResumeResult(
+                    success=False,
+                    accounts_resumed=0,
+                    accounts_skipped=0,
+                    accounts_blocked=0,
+                    recovery_duration=timedelta(0),
+                    account_results=[],
+                    notification_sent=False,
+                )
+
+            self._trading_resumer = TradingResumer(
+                redis_manager=self._redis_manager,
+                account_manager=self._account_manager,
+            )
+
+        return await self._trading_resumer.resume_trading_after_recovery(
+            reconciliation_results=reconciliation_results,
+            pnl_results=pnl_results,
+            recovery_start_time=recovery_start_time,
+        )
 
     async def run(self) -> None:
         """Start the trading engine main loop.
