@@ -8,6 +8,20 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// mockRedisStatusChecker is a test double for RedisStatusChecker.
+type mockRedisStatusChecker struct {
+	connected bool
+	channels  []string
+}
+
+func (m *mockRedisStatusChecker) IsConnected() bool {
+	return m.connected
+}
+
+func (m *mockRedisStatusChecker) Channels() []string {
+	return m.channels
+}
+
 // mockBot creates a Bot struct for testing without actual Telegram connection.
 // Sets lastHealthCheck to far future to ensure IsHealthy() uses cached value.
 func mockBot(username string, chatID int64, healthy bool) *Bot {
@@ -85,8 +99,8 @@ func TestHandleStatus_HealthyBot(t *testing.T) {
 	response := handler.handleStatus()
 
 	// Verify status shows connected (uses cached healthy value)
-	if !strings.Contains(response, "🟢 Connected") {
-		t.Errorf("Expected '🟢 Connected' for healthy bot, got:\n%s", response)
+	if !strings.Contains(response, "Status: Connected") {
+		t.Errorf("Expected 'Status: Connected' for healthy bot, got:\n%s", response)
 	}
 
 	// Verify username is shown
@@ -106,8 +120,8 @@ func TestHandleStatus_UnhealthyBot(t *testing.T) {
 	response := handler.handleStatus()
 
 	// Verify status shows disconnected
-	if !strings.Contains(response, "🔴 Disconnected") {
-		t.Errorf("Expected '🔴 Disconnected' for unhealthy bot, got:\n%s", response)
+	if !strings.Contains(response, "Status: Disconnected") {
+		t.Errorf("Expected 'Status: Disconnected' for unhealthy bot, got:\n%s", response)
 	}
 
 	// Verify chat ID not configured warning
@@ -166,5 +180,69 @@ func TestHandleResumeAll_ScaffoldResponse(t *testing.T) {
 	// Verify scaffold response mentions it's not fully implemented
 	if !strings.Contains(response, "Scaffold") || !strings.Contains(response, "Story 6.6") {
 		t.Errorf("Expected scaffold response with story reference, got:\n%s", response)
+	}
+}
+
+func TestHandleStatus_RedisConnected(t *testing.T) {
+	// Set up mock Redis subscriber as connected
+	mockSub := &mockRedisStatusChecker{
+		connected: true,
+		channels:  []string{"alerts:trade:*", "alerts:risk:*", "alerts:system", "emergency:stop"},
+	}
+	oldSub := redisSubscriber
+	SetSubscriber(mockSub)
+	defer SetSubscriber(oldSub)
+
+	handler := NewCommandHandler(mockBot("TestBot", 123456789, true))
+	response := handler.handleStatus()
+
+	// Verify Redis shows as connected
+	if !strings.Contains(response, "Redis Subscriber") {
+		t.Errorf("Expected 'Redis Subscriber' section in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "Status: Connected") {
+		t.Errorf("Expected Redis 'Status: Connected' in response, got:\n%s", response)
+	}
+	// Verify channels are displayed
+	if !strings.Contains(response, "alerts:trade:*") {
+		t.Errorf("Expected channel list in response, got:\n%s", response)
+	}
+}
+
+func TestHandleStatus_RedisDisconnected(t *testing.T) {
+	// Set up mock Redis subscriber as disconnected
+	mockSub := &mockRedisStatusChecker{
+		connected: false,
+		channels:  []string{"alerts:trade:*", "alerts:risk:*"},
+	}
+	oldSub := redisSubscriber
+	SetSubscriber(mockSub)
+	defer SetSubscriber(oldSub)
+
+	handler := NewCommandHandler(mockBot("TestBot", 0, true))
+	response := handler.handleStatus()
+
+	// Verify Redis shows as disconnected
+	if !strings.Contains(response, "Redis Subscriber") {
+		t.Errorf("Expected 'Redis Subscriber' section in response, got:\n%s", response)
+	}
+	// Count occurrences - should have "Status: Disconnected" for Redis (not just Telegram)
+	if strings.Count(response, "Disconnected") < 1 {
+		t.Errorf("Expected 'Disconnected' for Redis status, got:\n%s", response)
+	}
+}
+
+func TestHandleStatus_RedisNotInitialized(t *testing.T) {
+	// Set subscriber to nil to simulate not initialized
+	oldSub := redisSubscriber
+	SetSubscriber(nil)
+	defer SetSubscriber(oldSub)
+
+	handler := NewCommandHandler(mockBot("TestBot", 0, true))
+	response := handler.handleStatus()
+
+	// Verify Redis shows as not initialized
+	if !strings.Contains(response, "Not initialized") {
+		t.Errorf("Expected 'Not initialized' for Redis status, got:\n%s", response)
 	}
 }

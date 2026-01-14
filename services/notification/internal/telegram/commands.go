@@ -4,9 +4,38 @@ package telegram
 import (
 	"fmt"
 	"log"
+	"strings"
+	"sync"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
+
+// RedisStatusChecker provides Redis connection status.
+type RedisStatusChecker interface {
+	IsConnected() bool
+	Channels() []string
+}
+
+// Package-level subscriber reference for status checks with mutex protection
+var (
+	redisSubscriber   RedisStatusChecker
+	redisSubscriberMu sync.RWMutex
+)
+
+// SetSubscriber sets the subscriber reference for status checks.
+// Thread-safe for concurrent access.
+func SetSubscriber(sub RedisStatusChecker) {
+	redisSubscriberMu.Lock()
+	defer redisSubscriberMu.Unlock()
+	redisSubscriber = sub
+}
+
+// getSubscriber returns the subscriber reference safely.
+func getSubscriber() RedisStatusChecker {
+	redisSubscriberMu.RLock()
+	defer redisSubscriberMu.RUnlock()
+	return redisSubscriber
+}
 
 // CommandHandler processes bot commands.
 type CommandHandler struct {
@@ -68,7 +97,7 @@ func (h *CommandHandler) handleStart(msg *tgbotapi.Message) string {
 	log.Printf("================================")
 
 	// Format welcome message with configuration instructions
-	return fmt.Sprintf(`*Welcome to Sandboxed Trading Bot!* 🤖
+	return fmt.Sprintf(`*Welcome to Sandboxed Trading Bot!*
 
 *Your Configuration Details:*
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -111,15 +140,29 @@ func (h *CommandHandler) handleHelp() string {
 
 func (h *CommandHandler) handleStatus() string {
 	// Check actual bot health status
-	botStatus := "🔴 Disconnected"
+	botStatus := "Disconnected"
 	if h.bot.IsHealthy() {
-		botStatus = "🟢 Connected"
+		botStatus = "Connected"
 	}
 
 	// Get configured chat ID status
-	chatIDStatus := "⚠️ Not configured"
+	chatIDStatus := "Not configured"
 	if h.bot.ChatID() != 0 {
-		chatIDStatus = fmt.Sprintf("✅ Configured (%d)", h.bot.ChatID())
+		chatIDStatus = fmt.Sprintf("Configured (%d)", h.bot.ChatID())
+	}
+
+	// Check Redis connection status (thread-safe access)
+	redisStatus := "Not initialized"
+	channelInfo := ""
+	sub := getSubscriber()
+	if sub != nil {
+		if sub.IsConnected() {
+			redisStatus = "Connected"
+			channels := sub.Channels()
+			channelInfo = fmt.Sprintf("\n• Channels: %s", strings.Join(channels, ", "))
+		} else {
+			redisStatus = "Disconnected"
+		}
 	}
 
 	return fmt.Sprintf(`*System Status*
@@ -129,11 +172,13 @@ func (h *CommandHandler) handleStatus() string {
 • Username: @%s
 • Chat ID: %s
 
+*Redis Subscriber:*
+• Status: %s%s
+
 *Services:*
-• Redis: Not connected (Story 6.2)
 • Trading Accounts: N/A (Story 6.3+)
 
-_Last checked: now_`, botStatus, h.bot.Username(), chatIDStatus)
+_Last checked: now_`, botStatus, h.bot.Username(), chatIDStatus, redisStatus, channelInfo)
 }
 
 func (h *CommandHandler) handleStopAll() string {

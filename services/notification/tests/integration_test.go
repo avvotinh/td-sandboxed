@@ -7,17 +7,36 @@ import (
 	"time"
 
 	"github.com/user/sandboxed/services/notification/internal/config"
+	"github.com/user/sandboxed/services/notification/internal/handlers"
 	"github.com/user/sandboxed/services/notification/internal/subscriber"
 	"github.com/user/sandboxed/services/notification/internal/telegram"
 )
 
+// mockNotifier is a test double for the Notifier interface.
+type mockNotifier struct{}
+
+func (m *mockNotifier) SendMessage(text string) error {
+	return nil
+}
+
 func TestSubscriberChannels(t *testing.T) {
 	// Verify subscriber returns expected channel list
 	cfg := &config.Config{
-		RedisURL: "localhost:6379",
+		RedisURL:       "localhost:6379",
+		MaxRetries:     3,
+		RetryBaseDelay: time.Second,
+		MaxRetryDelay:  30 * time.Second,
 	}
 
-	sub := subscriber.New(cfg)
+	notifier := &mockNotifier{}
+	router := subscriber.NewRouter(notifier,
+		handlers.NewTradeHandler(),
+		handlers.NewRiskHandler(),
+		handlers.NewSystemHandler(),
+		handlers.NewEmergencyHandler(),
+	)
+
+	sub := subscriber.New(cfg, router)
 	channels := sub.Channels()
 
 	expectedChannels := []string{
@@ -40,11 +59,22 @@ func TestSubscriberChannels(t *testing.T) {
 
 func TestSubscriberNew(t *testing.T) {
 	cfg := &config.Config{
-		RedisURL:      "localhost:6379",
-		RedisPassword: "",
+		RedisURL:       "localhost:6379",
+		RedisPassword:  "",
+		MaxRetries:     3,
+		RetryBaseDelay: time.Second,
+		MaxRetryDelay:  30 * time.Second,
 	}
 
-	sub := subscriber.New(cfg)
+	notifier := &mockNotifier{}
+	router := subscriber.NewRouter(notifier,
+		handlers.NewTradeHandler(),
+		handlers.NewRiskHandler(),
+		handlers.NewSystemHandler(),
+		handlers.NewEmergencyHandler(),
+	)
+
+	sub := subscriber.New(cfg, router)
 	if sub == nil {
 		t.Error("Expected subscriber to be created, got nil")
 	}

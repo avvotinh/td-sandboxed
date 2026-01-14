@@ -14,6 +14,12 @@ var (
 	// ErrRedisConnection indicates failure to connect to Redis.
 	ErrRedisConnection = errors.New("failed to connect to Redis")
 
+	// ErrSubscriptionFailed indicates failure to subscribe to Redis channels.
+	ErrSubscriptionFailed = errors.New("failed to subscribe to Redis channels")
+
+	// ErrMessageParseError indicates failure to parse a message payload.
+	ErrMessageParseError = errors.New("failed to parse message payload")
+
 	// ErrMissingConfig indicates required configuration is missing.
 	ErrMissingConfig = errors.New("required configuration missing")
 

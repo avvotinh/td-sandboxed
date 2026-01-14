@@ -21,9 +21,11 @@ func NewRiskHandler() *RiskHandler {
 	}
 }
 
-// Handle processes a risk alert message.
-// Scaffold: Just logs the event.
-func (h *RiskHandler) Handle(accountID string, payload []byte) error {
-	log.Printf("Risk alert for account %s (scaffold): %s", accountID, string(payload))
-	return nil
+// Handle processes a risk alert message and returns formatted notification text.
+// Scaffold: Returns placeholder message. Full implementation in Story 6.4.
+func (h *RiskHandler) Handle(accountID string, payload []byte) (string, error) {
+	log.Printf("Risk alert for account %s: %s", accountID, string(payload))
+	// Scaffold: Return empty string (no notification sent)
+	// Full implementation in Story 6.4 will parse JSON and format message
+	return "", nil
 }
