@@ -29,12 +29,18 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Initialize Telegram bot
+	// Initialize Telegram bot with retry logic
 	bot, err := telegram.NewBot(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize Telegram bot: %v", err)
 	}
 	log.Println("Telegram bot connected")
+
+	// Validate chat ID if configured (sends test message)
+	if err := bot.ValidateChatID(); err != nil {
+		log.Printf("Warning: Chat ID validation failed: %v", err)
+		// Non-blocking - continue startup
+	}
 
 	// Initialize Redis subscriber (scaffold - doesn't connect yet)
 	sub := subscriber.New(cfg)

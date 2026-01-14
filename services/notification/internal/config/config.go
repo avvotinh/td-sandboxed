@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -15,6 +16,11 @@ type Config struct {
 	// Telegram configuration
 	TelegramBotToken string
 	TelegramChatID   int64
+
+	// Connection retry configuration
+	MaxRetries     int
+	RetryBaseDelay time.Duration
+	MaxRetryDelay  time.Duration
 
 	// Redis configuration
 	RedisURL      string
@@ -38,6 +44,9 @@ func Load() (*Config, error) {
 	v.SetDefault("log_level", "info")
 	v.SetDefault("debug", false)
 	v.SetDefault("redis_url", "redis:6379")
+	v.SetDefault("max_retries", 5)
+	v.SetDefault("retry_base_delay", 1) // seconds
+	v.SetDefault("max_retry_delay", 30) // seconds
 
 	// Also check for common env var names without prefix (using os.Getenv for test isolation)
 	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
@@ -55,6 +64,9 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		TelegramBotToken: v.GetString("telegram_bot_token"),
 		TelegramChatID:   v.GetInt64("telegram_chat_id"),
+		MaxRetries:       v.GetInt("max_retries"),
+		RetryBaseDelay:   time.Duration(v.GetInt("retry_base_delay")) * time.Second,
+		MaxRetryDelay:    time.Duration(v.GetInt("max_retry_delay")) * time.Second,
 		RedisURL:         v.GetString("redis_url"),
 		RedisPassword:    v.GetString("redis_password"),
 		LogLevel:         v.GetString("log_level"),

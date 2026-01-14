@@ -46,21 +46,56 @@ func (h *CommandHandler) Handle(msg *tgbotapi.Message) {
 }
 
 func (h *CommandHandler) handleStart(msg *tgbotapi.Message) string {
+	// Extract user information
 	userName := "unknown"
+	firstName := ""
+	lastName := ""
+	userID := int64(0)
 	if msg.From != nil {
 		userName = msg.From.UserName
+		firstName = msg.From.FirstName
+		lastName = msg.From.LastName
+		userID = msg.From.ID
 	}
-	log.Printf("Start command from chat_id: %d, user: %s", msg.Chat.ID, userName)
-	return fmt.Sprintf(`*Welcome to Sandboxed Trading Bot!*
 
-Your chat ID: `+"`%d`"+`
+	// Log comprehensive user and chat information
+	log.Printf("=== /start command received ===")
+	log.Printf("  Chat ID: %d", msg.Chat.ID)
+	log.Printf("  Chat Type: %s", msg.Chat.Type)
+	log.Printf("  User ID: %d", userID)
+	log.Printf("  Username: @%s", userName)
+	log.Printf("  Name: %s %s", firstName, lastName)
+	log.Printf("================================")
 
-This bot will notify you about:
-- Trade executions
-- Risk warnings
-- System alerts
+	// Format welcome message with configuration instructions
+	return fmt.Sprintf(`*Welcome to Sandboxed Trading Bot!* 🤖
 
-Use /help for available commands.`, msg.Chat.ID)
+*Your Configuration Details:*
+━━━━━━━━━━━━━━━━━━━━━━
+Chat ID: `+"`%d`"+`
+Username: @%s
+━━━━━━━━━━━━━━━━━━━━━━
+
+*To receive notifications:*
+Add this to your environment:
+`+"```"+`
+TELEGRAM_CHAT_ID=%d
+`+"```"+`
+
+*This bot will notify you about:*
+• Trade executions and fills
+• Risk limit warnings
+• FTMO rule violations
+• System alerts and errors
+• Emergency stop notifications
+
+*Available Commands:*
+/status - Check bot connection status
+/help - Show all available commands
+/stop_all - Emergency stop all trading
+/resume_all - Resume trading after stop
+
+_Tip: Save your Chat ID above for configuration!_`, msg.Chat.ID, userName, msg.Chat.ID)
 }
 
 func (h *CommandHandler) handleHelp() string {
@@ -75,14 +110,30 @@ func (h *CommandHandler) handleHelp() string {
 }
 
 func (h *CommandHandler) handleStatus() string {
-	// Scaffold: Return placeholder status
-	return `*System Status (Scaffold)*
+	// Check actual bot health status
+	botStatus := "🔴 Disconnected"
+	if h.bot.IsHealthy() {
+		botStatus = "🟢 Connected"
+	}
 
-Bot: Online
-Redis: Not connected (scaffold)
-Accounts: N/A
+	// Get configured chat ID status
+	chatIDStatus := "⚠️ Not configured"
+	if h.bot.ChatID() != 0 {
+		chatIDStatus = fmt.Sprintf("✅ Configured (%d)", h.bot.ChatID())
+	}
 
-Full status in Story 6.1+`
+	return fmt.Sprintf(`*System Status*
+
+*Telegram Bot:*
+• Status: %s
+• Username: @%s
+• Chat ID: %s
+
+*Services:*
+• Redis: Not connected (Story 6.2)
+• Trading Accounts: N/A (Story 6.3+)
+
+_Last checked: now_`, botStatus, h.bot.Username(), chatIDStatus)
 }
 
 func (h *CommandHandler) handleStopAll() string {

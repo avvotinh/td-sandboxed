@@ -98,8 +98,8 @@ development_status:
   epic-5-retrospective: optional
 
   # Epic 6: Notifications & Emergency Control (6 stories)
-  epic-6: backlog
-  6-1-notification-service-setup: backlog
+  epic-6: contexted
+  6-1-notification-service-setup: done
   6-2-redis-alert-subscription: backlog
   6-3-trade-execution-notifications: backlog
   6-4-rule-violation-alerts: backlog
