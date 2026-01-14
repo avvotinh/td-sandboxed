@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..accounts.account_manager import AccountManager
     from ..adapters.zmq_adapter import ZmqAdapter
+    from .cold_storage_service import ColdStorageService
     from .crash_recovery import CrashRecoveryManager
     from .redis_state import RedisStateManager
     from .snapshot_service import SnapshotService
@@ -100,6 +101,7 @@ class GracefulShutdown:
         snapshot_service: SnapshotService | None = None,
         zmq_adapter: ZmqAdapter | None = None,
         crash_recovery: CrashRecoveryManager | None = None,
+        cold_storage_service: ColdStorageService | None = None,
     ) -> None:
         """Initialize GracefulShutdown.
 
@@ -109,12 +111,14 @@ class GracefulShutdown:
             snapshot_service: For final state snapshots (optional)
             zmq_adapter: ZMQ adapter for pending order tracking (optional)
             crash_recovery: Crash recovery manager for clean shutdown flag
+            cold_storage_service: Cold storage service for final TimescaleDB snapshot
         """
         self._redis = redis_manager
         self._account_manager = account_manager
         self._snapshot_service = snapshot_service
         self._zmq = zmq_adapter
         self._crash_recovery = crash_recovery
+        self._cold_storage_service = cold_storage_service
         self._shutdown_event = asyncio.Event()
         self._shutdown_in_progress = False
         self._current_phase = ShutdownPhase.NOT_STARTED
@@ -255,10 +259,11 @@ class GracefulShutdown:
     async def _persist_final_state(self) -> int:
         """Persist final state snapshot for all accounts.
 
-        Uses SnapshotService.stop() which:
-        1. Stops the periodic snapshot loop
-        2. Creates one final snapshot for all active accounts
-        3. Logs any snapshot failures
+        Uses SnapshotService.stop() and ColdStorageService.stop() which:
+        1. Stop the periodic snapshot loops
+        2. Create one final snapshot for all active accounts
+        3. Write final snapshots to both Redis and TimescaleDB
+        4. Log any snapshot failures
 
         Returns:
             Number of accounts with successful final snapshot
@@ -266,25 +271,29 @@ class GracefulShutdown:
         self._current_phase = ShutdownPhase.PERSISTING_STATE
         logger.info("Persisting final state snapshots...")
 
-        if self._snapshot_service is None:
-            logger.debug("No snapshot service - skipping final state persistence")
-            return 0
+        active_accounts = 0
 
-        try:
-            # SnapshotService.stop() performs final snapshot for all accounts
-            await self._snapshot_service.stop()
+        # Stop Redis snapshot service (creates final Redis snapshot)
+        if self._snapshot_service is not None:
+            try:
+                await self._snapshot_service.stop()
+                active_accounts = await self._get_active_account_count()
+                logger.info(
+                    "Final Redis state persisted for %d accounts",
+                    active_accounts,
+                )
+            except Exception as e:
+                logger.error("Failed to persist final Redis state: %s", e)
 
-            # Count active accounts that were snapshotted
-            active_accounts = await self._get_active_account_count()
-            logger.info(
-                "Final state persisted for %d accounts",
-                active_accounts,
-            )
-            return active_accounts
+        # Stop cold storage service (creates final TimescaleDB snapshot)
+        if self._cold_storage_service is not None:
+            try:
+                await self._cold_storage_service.stop()
+                logger.info("Final TimescaleDB cold storage snapshot persisted")
+            except Exception as e:
+                logger.error("Failed to persist final cold storage state: %s", e)
 
-        except Exception as e:
-            logger.error("Failed to persist final state: %s", e)
-            return 0
+        return active_accounts
 
     async def _get_active_account_count(self) -> int:
         """Get count of active accounts for logging."""

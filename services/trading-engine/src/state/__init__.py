@@ -2,6 +2,7 @@
 
 This module handles:
 - Redis state snapshots
+- TimescaleDB cold storage backup (fallback for Redis)
 - Position reconciliation
 - Crash recovery state
 - Account status persistence
@@ -12,7 +13,10 @@ This module handles:
 Exports:
 - RedisStateManager: Async Redis state persistence
 - StateSnapshot: Point-in-time account state for crash recovery
-- SnapshotService: Periodic state snapshot service
+- StateSnapshotModel: SQLAlchemy model for TimescaleDB persistence
+- SnapshotService: Periodic state snapshot service (Redis, 5s interval)
+- ColdStorageWriter: TimescaleDB snapshot writer
+- ColdStorageService: Periodic cold storage service (TimescaleDB, 60s interval)
 - CrashRecoveryManager: Crash detection and recovery initiation
 - CrashIndicatorResult: Result of crash indicator detection
 - RecoveryResult: Result of startup sequence with recovery info
@@ -31,6 +35,8 @@ Exports:
 - ShutdownResult: Result of graceful shutdown operation
 """
 
+from .cold_storage_service import ColdStorageService
+from .cold_storage_writer import ColdStorageWriter
 from .crash_recovery import CrashIndicatorResult, CrashRecoveryManager, RecoveryResult
 from .daily_pnl_recalculator import (
     DailyPnLRecalculator,
@@ -46,11 +52,14 @@ from .position_reconciler import (
 )
 from .redis_state import RedisStateManager
 from .snapshot import StateSnapshot
+from .snapshot_db_model import StateSnapshotModel
 from .snapshot_service import SnapshotService
 from .trading_resumer import AccountResumeResult, ResumeResult, TradingResumer
 
 __all__ = [
     "AccountResumeResult",
+    "ColdStorageService",
+    "ColdStorageWriter",
     "CrashIndicatorResult",
     "CrashRecoveryManager",
     "DailyPnLRecalculator",
@@ -68,5 +77,6 @@ __all__ = [
     "ShutdownResult",
     "SnapshotService",
     "StateSnapshot",
+    "StateSnapshotModel",
     "TradingResumer",
 ]

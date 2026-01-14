@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from .accounts.pnl_registry import PnLTrackerRegistry
     from .accounts.risk_registry import RiskStateRegistry
     from .adapters.zmq_adapter import ZmqAdapter
+    from .state.cold_storage_service import ColdStorageService
+    from .state.cold_storage_writer import ColdStorageWriter
     from .state.crash_recovery import CrashRecoveryManager, RecoveryResult
     from .state.daily_pnl_recalculator import DailyPnLRecalculator, RecalculationResult
     from .state.graceful_shutdown import GracefulShutdown, ShutdownResult
@@ -49,6 +51,7 @@ class TradingEngine:
         pnl_registry: PnLTrackerRegistry | None = None,
         account_manager: AccountManager | None = None,
         snapshot_service: SnapshotService | None = None,
+        database_url: str | None = None,
     ) -> None:
         """Initialize the trading engine.
 
@@ -67,6 +70,9 @@ class TradingEngine:
                             Required for trading resume during recovery.
             snapshot_service: Optional SnapshotService for state snapshots.
                             Required for graceful shutdown final snapshot.
+            database_url: Optional async PostgreSQL URL for cold storage.
+                         Format: postgresql+asyncpg://user:pass@host:port/db
+                         If provided, enables TimescaleDB cold storage backup.
         """
         self._running = False
         self._shutdown_event = asyncio.Event()
@@ -77,6 +83,7 @@ class TradingEngine:
         self._pnl_registry = pnl_registry
         self._account_manager = account_manager
         self._snapshot_service = snapshot_service
+        self._database_url = database_url
         self._crash_recovery: CrashRecoveryManager | None = None
         self._recovery_result: RecoveryResult | None = None
         self._reconciliation_results: dict[str, ReconciliationResult] | None = None
@@ -87,6 +94,8 @@ class TradingEngine:
         self._resume_result: ResumeResult | None = None
         self._graceful_shutdown: GracefulShutdown | None = None
         self._shutdown_result: ShutdownResult | None = None
+        self._cold_storage_writer: ColdStorageWriter | None = None
+        self._cold_storage_service: ColdStorageService | None = None
 
     @property
     def is_running(self) -> bool:
@@ -154,6 +163,31 @@ class TradingEngine:
         self._running = False
         self._shutdown_event.set()
 
+    async def _initialize_cold_storage(self) -> None:
+        """Initialize cold storage service for TimescaleDB backup.
+
+        Creates ColdStorageService if cold_storage_writer (created in crash recovery)
+        and snapshot_service are configured. This starts the 60-second snapshot loop.
+        """
+        if self._cold_storage_writer is None:
+            # Writer not created (no database_url in crash recovery)
+            return
+
+        if self._snapshot_service is None:
+            logger.warning(
+                "Cold storage requires snapshot_service, cold storage disabled"
+            )
+            return
+
+        from .state.cold_storage_service import ColdStorageService
+
+        self._cold_storage_service = ColdStorageService(
+            cold_storage_writer=self._cold_storage_writer,
+            snapshot_service=self._snapshot_service,
+        )
+        await self._cold_storage_service.start()
+        logger.info("Cold storage service initialized")
+
     async def _initialize_crash_recovery(self) -> RecoveryResult | None:
         """Initialize crash recovery manager and run startup sequence.
 
@@ -167,11 +201,18 @@ class TradingEngine:
             logger.info("No Redis manager configured, skipping crash recovery")
             return None
 
+        # Initialize cold storage writer first (needed for fallback recovery)
+        if self._database_url is not None:
+            from .state.cold_storage_writer import ColdStorageWriter
+
+            self._cold_storage_writer = ColdStorageWriter(self._database_url)
+
         from .state.crash_recovery import CrashRecoveryManager
 
         self._crash_recovery = CrashRecoveryManager(
             redis_manager=self._redis_manager,
             on_lock_lost=self._on_lock_lost,
+            cold_storage_writer=self._cold_storage_writer,
         )
 
         # Run startup sequence - this checks for crashes and acquires lock
@@ -438,6 +479,7 @@ class TradingEngine:
             snapshot_service=self._snapshot_service,
             zmq_adapter=self._zmq_adapter,
             crash_recovery=self._crash_recovery,
+            cold_storage_service=self._cold_storage_service,
         )
         self._graceful_shutdown.register_signal_handlers()
         logger.info("Graceful shutdown handler initialized")
@@ -454,6 +496,10 @@ class TradingEngine:
         """
         # Initialize crash recovery FIRST before other components
         self._recovery_result = await self._initialize_crash_recovery()
+
+        # Initialize cold storage service after crash recovery
+        # (uses the writer that was created in crash recovery)
+        await self._initialize_cold_storage()
 
         # Initialize graceful shutdown after crash recovery
         self._initialize_graceful_shutdown()

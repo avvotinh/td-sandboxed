@@ -880,3 +880,254 @@ class TestRecoveryModeLogging:
             "Recovery mode: Previous session did not shut down cleanly" in record.message
             for record in caplog.records
         )
+
+
+class TestColdStorageFallback:
+    """Tests for TimescaleDB cold storage fallback (Story 5.7 - AC: 2, 4)."""
+
+    @pytest.fixture
+    def mock_cold_storage(self):
+        """Create mock ColdStorageWriter."""
+        from unittest.mock import MagicMock
+
+        writer = MagicMock()
+        writer.get_latest_snapshot = AsyncMock(return_value=None)
+        return writer
+
+    @pytest.mark.asyncio
+    async def test_init_with_cold_storage(self, mock_redis_manager, mock_cold_storage):
+        """CrashRecoveryManager should accept cold_storage_writer parameter."""
+        manager = CrashRecoveryManager(
+            redis_manager=mock_redis_manager,
+            cold_storage_writer=mock_cold_storage,
+        )
+
+        assert manager._cold_storage is mock_cold_storage
+
+    @pytest.mark.asyncio
+    async def test_load_snapshot_prefers_redis(
+        self, mock_redis_manager, mock_cold_storage
+    ):
+        """AC4: Redis should be preferred over TimescaleDB when both exist."""
+        redis_snapshot = StateSnapshot(
+            account_id="account-1",
+            timestamp=datetime.now(timezone.utc),
+            positions=[],
+            pending_orders=[],
+            account_balance=Decimal("100000"),
+            equity=Decimal("100000"),
+            peak_balance=Decimal("100000"),
+            daily_starting_balance=Decimal("100000"),
+            checksum="",
+        )
+        redis_snapshot.checksum = redis_snapshot.compute_checksum()
+        mock_redis_manager.get_snapshot.return_value = redis_snapshot
+
+        db_snapshot = StateSnapshot(
+            account_id="account-1",
+            timestamp=datetime.now(timezone.utc),
+            positions=[{"old": "data"}],
+            pending_orders=[],
+            account_balance=Decimal("90000"),
+            equity=Decimal("90000"),
+            peak_balance=Decimal("90000"),
+            daily_starting_balance=Decimal("90000"),
+            checksum="",
+        )
+        db_snapshot.checksum = db_snapshot.compute_checksum()
+        mock_cold_storage.get_latest_snapshot.return_value = db_snapshot
+
+        manager = CrashRecoveryManager(
+            redis_manager=mock_redis_manager,
+            cold_storage_writer=mock_cold_storage,
+        )
+
+        result = await manager._load_account_snapshot("account-1")
+
+        # Redis snapshot should be returned (preferred)
+        assert result is redis_snapshot
+        # TimescaleDB should NOT be queried
+        mock_cold_storage.get_latest_snapshot.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_load_snapshot_fallback_to_timescaledb(
+        self, mock_redis_manager, mock_cold_storage, caplog
+    ):
+        """AC2: Should fallback to TimescaleDB when Redis unavailable."""
+        import logging
+
+        mock_redis_manager.get_snapshot.return_value = None
+
+        db_snapshot = StateSnapshot(
+            account_id="account-1",
+            timestamp=datetime.now(timezone.utc),
+            positions=[],
+            pending_orders=[],
+            account_balance=Decimal("100000"),
+            equity=Decimal("100000"),
+            peak_balance=Decimal("100000"),
+            daily_starting_balance=Decimal("100000"),
+            checksum="",
+        )
+        db_snapshot.checksum = db_snapshot.compute_checksum()
+        mock_cold_storage.get_latest_snapshot.return_value = db_snapshot
+
+        manager = CrashRecoveryManager(
+            redis_manager=mock_redis_manager,
+            cold_storage_writer=mock_cold_storage,
+        )
+
+        with caplog.at_level(logging.INFO):
+            result = await manager._load_account_snapshot("account-1")
+
+        # TimescaleDB snapshot should be returned
+        assert result is db_snapshot
+        mock_cold_storage.get_latest_snapshot.assert_called_once_with("account-1")
+
+        # AC2: Should log the fallback message
+        assert any(
+            "Redis snapshot unavailable, using TimescaleDB fallback" in record.message
+            for record in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_load_snapshot_returns_none_when_both_unavailable(
+        self, mock_redis_manager, mock_cold_storage, caplog
+    ):
+        """Should return None when neither Redis nor TimescaleDB has snapshot."""
+        import logging
+
+        mock_redis_manager.get_snapshot.return_value = None
+        mock_cold_storage.get_latest_snapshot.return_value = None
+
+        manager = CrashRecoveryManager(
+            redis_manager=mock_redis_manager,
+            cold_storage_writer=mock_cold_storage,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = await manager._load_account_snapshot("account-1")
+
+        assert result is None
+        assert any(
+            "No snapshot available for account-1 (Redis or TimescaleDB)" in record.message
+            for record in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_load_snapshot_no_cold_storage(self, mock_redis_manager):
+        """Should return None when Redis unavailable and no cold storage configured."""
+        mock_redis_manager.get_snapshot.return_value = None
+
+        manager = CrashRecoveryManager(
+            redis_manager=mock_redis_manager,
+            cold_storage_writer=None,
+        )
+
+        result = await manager._load_account_snapshot("account-1")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_validate_snapshot_uses_load_account_snapshot(
+        self, mock_redis_manager, mock_cold_storage
+    ):
+        """validate_snapshot_for_recovery should use _load_account_snapshot for fallback."""
+        mock_redis_manager.get_snapshot.return_value = None
+
+        db_snapshot = StateSnapshot(
+            account_id="account-1",
+            timestamp=datetime.now(timezone.utc),
+            positions=[],
+            pending_orders=[],
+            account_balance=Decimal("100000"),
+            equity=Decimal("100000"),
+            peak_balance=Decimal("100000"),
+            daily_starting_balance=Decimal("100000"),
+            checksum="",
+        )
+        db_snapshot.checksum = db_snapshot.compute_checksum()
+        mock_cold_storage.get_latest_snapshot.return_value = db_snapshot
+
+        manager = CrashRecoveryManager(
+            redis_manager=mock_redis_manager,
+            cold_storage_writer=mock_cold_storage,
+        )
+
+        is_valid, result = await manager.validate_snapshot_for_recovery("account-1")
+
+        # Should get the TimescaleDB snapshot via fallback
+        assert is_valid is True
+        assert result is db_snapshot
+
+    @pytest.mark.asyncio
+    async def test_cold_storage_allows_7_day_old_snapshots(
+        self, mock_redis_manager, mock_cold_storage
+    ):
+        """Cold storage snapshots should be valid up to 7 days old."""
+        from datetime import timedelta
+
+        mock_redis_manager.get_snapshot.return_value = None
+
+        # Create snapshot from 5 days ago (within 7-day limit for cold storage)
+        old_timestamp = datetime.now(timezone.utc) - timedelta(days=5)
+        db_snapshot = StateSnapshot(
+            account_id="account-1",
+            timestamp=old_timestamp,
+            positions=[],
+            pending_orders=[],
+            account_balance=Decimal("100000"),
+            equity=Decimal("100000"),
+            peak_balance=Decimal("100000"),
+            daily_starting_balance=Decimal("100000"),
+            checksum="",
+        )
+        db_snapshot.checksum = db_snapshot.compute_checksum()
+        mock_cold_storage.get_latest_snapshot.return_value = db_snapshot
+
+        manager = CrashRecoveryManager(
+            redis_manager=mock_redis_manager,
+            cold_storage_writer=mock_cold_storage,
+        )
+
+        is_valid, result = await manager.validate_snapshot_for_recovery("account-1")
+
+        # 5-day-old snapshot from TimescaleDB should be valid
+        assert is_valid is True
+        assert result is db_snapshot
+
+    @pytest.mark.asyncio
+    async def test_cold_storage_rejects_snapshots_older_than_7_days(
+        self, mock_redis_manager, mock_cold_storage
+    ):
+        """Cold storage snapshots older than 7 days should be rejected."""
+        from datetime import timedelta
+
+        mock_redis_manager.get_snapshot.return_value = None
+
+        # Create snapshot from 8 days ago (exceeds 7-day limit)
+        old_timestamp = datetime.now(timezone.utc) - timedelta(days=8)
+        db_snapshot = StateSnapshot(
+            account_id="account-1",
+            timestamp=old_timestamp,
+            positions=[],
+            pending_orders=[],
+            account_balance=Decimal("100000"),
+            equity=Decimal("100000"),
+            peak_balance=Decimal("100000"),
+            daily_starting_balance=Decimal("100000"),
+            checksum="",
+        )
+        db_snapshot.checksum = db_snapshot.compute_checksum()
+        mock_cold_storage.get_latest_snapshot.return_value = db_snapshot
+
+        manager = CrashRecoveryManager(
+            redis_manager=mock_redis_manager,
+            cold_storage_writer=mock_cold_storage,
+        )
+
+        is_valid, result = await manager.validate_snapshot_for_recovery("account-1")
+
+        # 8-day-old snapshot should be rejected
+        assert is_valid is False
+        assert result is None

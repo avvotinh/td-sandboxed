@@ -238,14 +238,47 @@ ALTER TABLE audit_logs ADD CONSTRAINT fk_audit_account
 ALTER TABLE audit_logs ADD CONSTRAINT fk_audit_trade
     FOREIGN KEY (trade_id) REFERENCES trades(trade_id) ON DELETE SET NULL;
 
+-- ==================== STATE PERSISTENCE TABLES ====================
+
+-- State Snapshots (for crash recovery fallback) - Hypertable
+-- Cold storage backup for Redis snapshots - 60 second interval, 7-day retention
+CREATE TABLE state_snapshots (
+    id UUID DEFAULT gen_random_uuid(),
+    account_id VARCHAR(50) NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    positions JSONB NOT NULL,
+    pending_orders JSONB NOT NULL,
+    account_balance DECIMAL(18, 2) NOT NULL,
+    equity DECIMAL(18, 2) NOT NULL,
+    peak_balance DECIMAL(18, 2) NOT NULL,
+    daily_starting_balance DECIMAL(18, 2) NOT NULL,
+    checksum VARCHAR(64) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Convert to hypertable BEFORE adding constraints (required pattern)
+SELECT create_hypertable('state_snapshots', 'timestamp');
+
+-- Create indexes
+CREATE UNIQUE INDEX idx_state_snapshots_id ON state_snapshots (id, timestamp);
+CREATE INDEX idx_state_snapshots_account ON state_snapshots (account_id, timestamp DESC);
+
+-- Add foreign key AFTER hypertable creation (matches rule_violations pattern)
+ALTER TABLE state_snapshots ADD CONSTRAINT fk_state_snapshots_account
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE;
+
+-- Add 7-day retention policy
+SELECT add_retention_policy('state_snapshots', INTERVAL '7 days');
+
 -- ==================== VERIFICATION ====================
 
 -- Log successful schema creation
 DO $$
 BEGIN
     RAISE NOTICE 'TimescaleDB schema initialization complete';
-    RAISE NOTICE 'Tables created: prop_firms, accounts, account_snapshots, performance_metrics, candles, trades, rule_violations, audit_logs';
-    RAISE NOTICE 'Hypertables: candles, rule_violations, audit_logs';
-    RAISE NOTICE 'Indexes: 20 explicit + 5 PK indexes + 1 unique constraint = 26 total';
-    RAISE NOTICE 'FK constraints: 9 with ON DELETE behavior (CASCADE/SET NULL)';
+    RAISE NOTICE 'Tables created: prop_firms, accounts, account_snapshots, performance_metrics, candles, trades, rule_violations, audit_logs, state_snapshots';
+    RAISE NOTICE 'Hypertables: candles, rule_violations, audit_logs, state_snapshots';
+    RAISE NOTICE 'Indexes: 22 explicit + 5 PK indexes + 1 unique constraint = 28 total';
+    RAISE NOTICE 'FK constraints: 10 with ON DELETE behavior (CASCADE/SET NULL)';
+    RAISE NOTICE 'Retention policies: state_snapshots (7 days)';
 END $$;

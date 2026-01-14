@@ -94,7 +94,7 @@ development_status:
   5-4-daily-pnl-recalculation: done
   5-5-trading-resume-after-recovery: done
   5-6-graceful-shutdown-with-state-persistence: done
-  5-7-timescaledb-cold-storage-backup: backlog
+  5-7-timescaledb-cold-storage-backup: done 
   epic-5-retrospective: optional
 
   # Epic 6: Notifications & Emergency Control (6 stories)

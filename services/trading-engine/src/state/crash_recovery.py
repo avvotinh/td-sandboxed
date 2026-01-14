@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .cold_storage_writer import ColdStorageWriter
     from .redis_state import RedisStateManager
     from .snapshot import StateSnapshot
 
@@ -115,6 +116,7 @@ class CrashRecoveryManager:
         self,
         redis_manager: RedisStateManager,
         on_lock_lost: LockLostCallback | None = None,
+        cold_storage_writer: ColdStorageWriter | None = None,
     ) -> None:
         """Initialize CrashRecoveryManager.
 
@@ -122,8 +124,12 @@ class CrashRecoveryManager:
             redis_manager: Redis state manager for persistence operations
             on_lock_lost: Optional callback invoked when process lock is lost.
                          Use this to trigger emergency engine shutdown.
+            cold_storage_writer: Optional TimescaleDB writer for fallback recovery.
+                                When provided, snapshots are loaded from TimescaleDB
+                                if Redis snapshot is unavailable.
         """
         self._redis = redis_manager
+        self._cold_storage = cold_storage_writer
         self._recovery_mode = False
         self._heartbeat_running = False
         self._heartbeat_task: asyncio.Task[None] | None = None
@@ -383,6 +389,45 @@ class CrashRecoveryManager:
 
     # Maximum age for snapshots to be considered valid for recovery (1 hour)
     SNAPSHOT_MAX_AGE_SECONDS = 3600
+    # Maximum age for TimescaleDB snapshots (7 days - matches retention policy)
+    COLD_STORAGE_MAX_AGE_SECONDS = 7 * 24 * 3600
+
+    async def _load_account_snapshot(self, account_id: str) -> StateSnapshot | None:
+        """Load snapshot from Redis, fallback to TimescaleDB if unavailable.
+
+        Recovery priority:
+        1. Redis snapshot (preferred - more recent, 5-second intervals)
+        2. TimescaleDB snapshot (fallback - 60-second intervals, 7-day retention)
+
+        Args:
+            account_id: Account to load snapshot for
+
+        Returns:
+            StateSnapshot if found in either source, None if unavailable
+        """
+        # Try Redis first (preferred - more recent)
+        redis_snapshot = await self._redis.get_snapshot(account_id)
+        if redis_snapshot is not None:
+            logger.debug("Loaded snapshot from Redis for %s", account_id)
+            return redis_snapshot
+
+        # Fallback to TimescaleDB
+        if self._cold_storage is not None:
+            logger.info(
+                "Redis snapshot unavailable, using TimescaleDB fallback for %s",
+                account_id,
+            )
+            db_snapshot = await self._cold_storage.get_latest_snapshot(account_id)
+            if db_snapshot is not None:
+                logger.info(
+                    "Loaded snapshot from TimescaleDB for %s (timestamp: %s)",
+                    account_id,
+                    db_snapshot.timestamp.isoformat(),
+                )
+                return db_snapshot
+
+        logger.warning("No snapshot available for %s (Redis or TimescaleDB)", account_id)
+        return None
 
     async def validate_snapshot_for_recovery(
         self, account_id: str
@@ -390,9 +435,9 @@ class CrashRecoveryManager:
         """Validate snapshot is usable for recovery.
 
         Checks:
-        - Snapshot exists
+        - Snapshot exists (Redis or TimescaleDB fallback)
         - Checksum is valid
-        - Timestamp is recent enough (within 1 hour)
+        - Timestamp is recent enough (within 1 hour for Redis, 7 days for TimescaleDB)
 
         Args:
             account_id: Account to validate snapshot for
@@ -400,7 +445,7 @@ class CrashRecoveryManager:
         Returns:
             (is_valid, snapshot) tuple
         """
-        snapshot = await self._redis.get_snapshot(account_id)
+        snapshot = await self._load_account_snapshot(account_id)
         if snapshot is None:
             return False, None
 
@@ -411,13 +456,22 @@ class CrashRecoveryManager:
             )
             return False, None
 
-        # Check timestamp recency (within 1 hour)
+        # Check timestamp recency
+        # Use longer threshold for TimescaleDB snapshots (checked by source)
         age_seconds = (datetime.now(timezone.utc) - snapshot.timestamp).total_seconds()
-        if age_seconds > self.SNAPSHOT_MAX_AGE_SECONDS:
+        max_age = self.SNAPSHOT_MAX_AGE_SECONDS
+
+        # If from cold storage (no Redis snapshot available), allow 7-day-old snapshots
+        redis_snapshot = await self._redis.get_snapshot(account_id)
+        if redis_snapshot is None and self._cold_storage is not None:
+            max_age = self.COLD_STORAGE_MAX_AGE_SECONDS
+
+        if age_seconds > max_age:
             logger.warning(
-                "Snapshot too old for %s (%.0f seconds), will need fresh state",
+                "Snapshot too old for %s (%.0f seconds, max %.0f), will need fresh state",
                 account_id,
                 age_seconds,
+                max_age,
             )
             return False, None
 
