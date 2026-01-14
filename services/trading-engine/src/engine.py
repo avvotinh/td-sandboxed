@@ -17,8 +17,10 @@ if TYPE_CHECKING:
     from .adapters.zmq_adapter import ZmqAdapter
     from .state.crash_recovery import CrashRecoveryManager, RecoveryResult
     from .state.daily_pnl_recalculator import DailyPnLRecalculator, RecalculationResult
+    from .state.graceful_shutdown import GracefulShutdown, ShutdownResult
     from .state.position_reconciler import PositionReconciler, ReconciliationResult
     from .state.redis_state import RedisStateManager
+    from .state.snapshot_service import SnapshotService
     from .state.trading_resumer import ResumeResult, TradingResumer
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,7 @@ class TradingEngine:
         risk_registry: RiskStateRegistry | None = None,
         pnl_registry: PnLTrackerRegistry | None = None,
         account_manager: AccountManager | None = None,
+        snapshot_service: SnapshotService | None = None,
     ) -> None:
         """Initialize the trading engine.
 
@@ -62,6 +65,8 @@ class TradingEngine:
                          Required for P&L recalculation during recovery.
             account_manager: Optional AccountManager for starting account tasks.
                             Required for trading resume during recovery.
+            snapshot_service: Optional SnapshotService for state snapshots.
+                            Required for graceful shutdown final snapshot.
         """
         self._running = False
         self._shutdown_event = asyncio.Event()
@@ -71,6 +76,7 @@ class TradingEngine:
         self._risk_registry = risk_registry
         self._pnl_registry = pnl_registry
         self._account_manager = account_manager
+        self._snapshot_service = snapshot_service
         self._crash_recovery: CrashRecoveryManager | None = None
         self._recovery_result: RecoveryResult | None = None
         self._reconciliation_results: dict[str, ReconciliationResult] | None = None
@@ -79,6 +85,8 @@ class TradingEngine:
         self._pnl_recalculator: DailyPnLRecalculator | None = None
         self._trading_resumer: TradingResumer | None = None
         self._resume_result: ResumeResult | None = None
+        self._graceful_shutdown: GracefulShutdown | None = None
+        self._shutdown_result: ShutdownResult | None = None
 
     @property
     def is_running(self) -> bool:
@@ -126,6 +134,15 @@ class TradingEngine:
             ResumeResult if trading resume ran, None otherwise.
         """
         return self._resume_result
+
+    @property
+    def shutdown_result(self) -> ShutdownResult | None:
+        """Get the graceful shutdown result.
+
+        Returns:
+            ShutdownResult if graceful shutdown ran, None otherwise.
+        """
+        return self._shutdown_result
 
     def _on_lock_lost(self) -> None:
         """Handle loss of process lock by triggering emergency shutdown.
@@ -401,12 +418,36 @@ class TradingEngine:
             recovery_start_time=recovery_start_time,
         )
 
+    def _initialize_graceful_shutdown(self) -> None:
+        """Initialize graceful shutdown handler.
+
+        Called after all engine components are initialized.
+        Registers signal handlers for SIGTERM/SIGINT.
+        """
+        if self._redis_manager is None or self._account_manager is None:
+            logger.warning(
+                "Graceful shutdown requires redis_manager and account_manager"
+            )
+            return
+
+        from .state.graceful_shutdown import GracefulShutdown
+
+        self._graceful_shutdown = GracefulShutdown(
+            redis_manager=self._redis_manager,
+            account_manager=self._account_manager,
+            snapshot_service=self._snapshot_service,
+            zmq_adapter=self._zmq_adapter,
+            crash_recovery=self._crash_recovery,
+        )
+        self._graceful_shutdown.register_signal_handlers()
+        logger.info("Graceful shutdown handler initialized")
+
     async def run(self) -> None:
         """Start the trading engine main loop.
 
         This placeholder demonstrates the async pattern that will be
         used for the actual implementation. Now includes crash recovery
-        detection and process locking.
+        detection, process locking, and graceful shutdown handling.
 
         Raises:
             RuntimeError: If another engine instance is already running.
@@ -414,35 +455,55 @@ class TradingEngine:
         # Initialize crash recovery FIRST before other components
         self._recovery_result = await self._initialize_crash_recovery()
 
-        logger.info("Trading Engine v0.1.0 initialized")
+        # Initialize graceful shutdown after crash recovery
+        self._initialize_graceful_shutdown()
+
+        logger.info("Trading Engine v0.1.0 running")
         self._running = True
 
-        # Placeholder: Wait for shutdown signal
-        # In Epic 2+, this will run the NautilusTrader event loop
-        try:
-            await self._shutdown_event.wait()
-        except asyncio.CancelledError:
-            logger.info("Engine run loop cancelled")
+        # Wait for shutdown signal (via SIGTERM, SIGINT, or shutdown())
+        if self._graceful_shutdown is not None:
+            try:
+                self._shutdown_result = (
+                    await self._graceful_shutdown.wait_for_shutdown_signal()
+                )
+                if not self._shutdown_result.success:
+                    logger.error("Shutdown completed with errors")
+            except asyncio.CancelledError:
+                logger.info("Engine run loop cancelled")
+        else:
+            # Fallback to simple event wait (no graceful shutdown)
+            try:
+                await self._shutdown_event.wait()
+            except asyncio.CancelledError:
+                logger.info("Engine run loop cancelled")
 
-        logger.info("Trading Engine run loop exited")
+        self._running = False
+        logger.info("Trading Engine stopped")
 
     async def shutdown(self) -> None:
         """Gracefully shutdown the trading engine.
 
-        Ensures all resources are properly released and state is persisted.
-        Runs crash recovery shutdown sequence to set clean shutdown flag.
+        Triggers the graceful shutdown sequence which:
+        1. Stops signal processing
+        2. Waits for pending orders (30s timeout)
+        3. Persists final state snapshot
+        4. Sets clean shutdown flag
+        5. Closes all connections
+
+        Exit code is 0 on success.
         """
         if not self._running:
             return
 
-        logger.info("Initiating graceful shutdown...")
-        self._running = False
-        self._shutdown_event.set()
+        logger.info("Shutdown requested via Engine.shutdown()")
 
-        # Future: Close adapters, persist state, cleanup resources
-
-        # Run crash recovery shutdown sequence LAST
-        if self._crash_recovery is not None:
-            await self._crash_recovery.shutdown_sequence()
-
-        logger.info("Shutdown complete")
+        if self._graceful_shutdown is not None:
+            self._graceful_shutdown.trigger_shutdown()
+            # The actual shutdown is handled by run() waiting on the event
+        else:
+            # Fallback for backward compatibility
+            self._running = False
+            self._shutdown_event.set()
+            if self._crash_recovery is not None:
+                await self._crash_recovery.shutdown_sequence()

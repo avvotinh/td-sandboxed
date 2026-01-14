@@ -560,3 +560,31 @@ class ZmqAdapter:
             Number of position queries awaiting results
         """
         return len(self._pending_positions)
+
+    async def close(self) -> None:
+        """Close ZMQ sockets gracefully.
+
+        Closes all sockets with linger=0 to avoid blocking.
+        Safe to call multiple times.
+
+        Note: Does not terminate the ZMQ context since we use
+        Context.instance() (singleton) which may be shared.
+        """
+        if not self._state.connected:
+            return
+
+        logger.info("Closing ZMQ adapter...")
+
+        # Close sockets first
+        for socket in [self._sub_socket, self._pub_socket]:
+            if socket is not None:
+                try:
+                    socket.close(linger=0)
+                except Exception as e:
+                    logger.warning("Error closing ZMQ socket: %s", e)
+
+        self._sub_socket = None
+        self._pub_socket = None
+        self._state.connected = False
+
+        logger.info("ZMQ adapter closed")

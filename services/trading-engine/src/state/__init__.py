@@ -7,6 +7,7 @@ This module handles:
 - Account status persistence
 - Daily P&L recalculation after recovery
 - Trading resume after recovery
+- Graceful shutdown with state persistence
 
 Exports:
 - RedisStateManager: Async Redis state persistence
@@ -25,6 +26,9 @@ Exports:
 - TradingResumer: Resumes trading after crash recovery
 - AccountResumeResult: Result of resuming a single account
 - ResumeResult: Full result of trading resume operation
+- GracefulShutdown: Orchestrates graceful shutdown sequence
+- ShutdownPhase: Phases of the shutdown sequence
+- ShutdownResult: Result of graceful shutdown operation
 """
 
 from .crash_recovery import CrashIndicatorResult, CrashRecoveryManager, RecoveryResult
@@ -33,6 +37,7 @@ from .daily_pnl_recalculator import (
     RecalculatedPnL,
     RecalculationResult,
 )
+from .graceful_shutdown import GracefulShutdown, ShutdownPhase, ShutdownResult
 from .position_reconciler import (
     DiscrepancyType,
     PositionDiscrepancy,
@@ -50,6 +55,7 @@ __all__ = [
     "CrashRecoveryManager",
     "DailyPnLRecalculator",
     "DiscrepancyType",
+    "GracefulShutdown",
     "PositionDiscrepancy",
     "PositionReconciler",
     "RecalculatedPnL",
@@ -58,6 +64,8 @@ __all__ = [
     "RecoveryResult",
     "RedisStateManager",
     "ResumeResult",
+    "ShutdownPhase",
+    "ShutdownResult",
     "SnapshotService",
     "StateSnapshot",
     "TradingResumer",
