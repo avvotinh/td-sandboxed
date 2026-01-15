@@ -377,6 +377,228 @@ func TestBotIntegration_ValidateChatID_NotConfigured(t *testing.T) {
 	}
 }
 
+// Test 4.8: Integration test - Route risk_blocked event to handler, verify Telegram output (AC#1)
+func TestRouter_RiskBlockedNotification(t *testing.T) {
+	notifier := &mockNotifier{}
+	router := subscriber.NewRouter(notifier,
+		handlers.NewTradeHandler(),
+		handlers.NewRiskHandler(),
+		handlers.NewSystemHandler(),
+		handlers.NewEmergencyHandler(),
+	)
+
+	// Simulate Redis message for risk blocked
+	channel := "alerts:risk:ftmo-gold-001"
+	payload := `{
+		"type": "risk_blocked",
+		"account_id": "ftmo-gold-001",
+		"account_name": "FTMO Gold Challenge",
+		"rule_name": "Daily Loss Limit",
+		"rule_type": "blocked",
+		"current": 4.8,
+		"threshold": 5.0,
+		"trade": "BUY 0.10 XAUUSD",
+		"reason": "Trade would exceed daily loss limit",
+		"action": "Trade rejected",
+		"timestamp": "2026-01-15T14:32:15Z"
+	}`
+
+	// Route the message
+	router.Route(channel, payload)
+
+	// Wait for goroutine (fire-and-forget)
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify notification was sent
+	messages := notifier.getMessages()
+	if len(messages) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(messages))
+	}
+
+	msg := messages[0]
+
+	// AC#1: Verify format
+	expectedFields := []string{
+		"🔴", "*TRADE BLOCKED*",
+		"FTMO Gold Challenge",
+		"Daily Loss Limit",
+		"4.8% of 5.0% limit",
+		"BUY 0.10 XAUUSD",
+		"Trade rejected",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(msg, field) {
+			t.Errorf("Expected message to contain '%s'\n\nGot:\n%s", field, msg)
+		}
+	}
+}
+
+// Test 4.8: Integration test - Route risk_warning event (AC#2)
+func TestRouter_RiskWarningNotification(t *testing.T) {
+	notifier := &mockNotifier{}
+	router := subscriber.NewRouter(notifier,
+		handlers.NewTradeHandler(),
+		handlers.NewRiskHandler(),
+		handlers.NewSystemHandler(),
+		handlers.NewEmergencyHandler(),
+	)
+
+	// Simulate Redis message for risk warning
+	channel := "alerts:risk:ftmo-gold-001"
+	payload := `{
+		"type": "risk_warning",
+		"account_id": "ftmo-gold-001",
+		"account_name": "FTMO Gold Challenge",
+		"rule_name": "Daily Loss Limit",
+		"rule_type": "warning",
+		"current": 4.0,
+		"threshold": 5.0,
+		"warning_level": 80,
+		"remaining_dollars": 1000.00,
+		"action": "Trading continues, monitor closely",
+		"timestamp": "2026-01-15T14:32:15Z"
+	}`
+
+	router.Route(channel, payload)
+	time.Sleep(100 * time.Millisecond)
+
+	messages := notifier.getMessages()
+	if len(messages) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(messages))
+	}
+
+	msg := messages[0]
+
+	// AC#2: Verify format with dollar + percentage
+	expectedFields := []string{
+		"🟡", "*RISK WARNING*",
+		"FTMO Gold Challenge",
+		"80% of limit reached",
+		"$1000 (1.0%)",
+		"Trading continues, monitor closely",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(msg, field) {
+			t.Errorf("Expected message to contain '%s'\n\nGot:\n%s", field, msg)
+		}
+	}
+}
+
+// Test 4.8: Integration test - Route trading_halted event (AC#3)
+func TestRouter_TradingHaltedNotification(t *testing.T) {
+	notifier := &mockNotifier{}
+	router := subscriber.NewRouter(notifier,
+		handlers.NewTradeHandler(),
+		handlers.NewRiskHandler(),
+		handlers.NewSystemHandler(),
+		handlers.NewEmergencyHandler(),
+	)
+
+	// Simulate Redis message for trading halted
+	channel := "alerts:risk:ftmo-gold-001"
+	payload := `{
+		"type": "trading_halted",
+		"account_id": "ftmo-gold-001",
+		"account_name": "FTMO Gold Challenge",
+		"rule_name": "Max Drawdown",
+		"rule_type": "halted",
+		"status": "10% limit reached",
+		"action": "All trading paused for this account",
+		"required_action": "Manual review before resuming",
+		"timestamp": "2026-01-15T14:32:15Z"
+	}`
+
+	router.Route(channel, payload)
+	time.Sleep(100 * time.Millisecond)
+
+	messages := notifier.getMessages()
+	if len(messages) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(messages))
+	}
+
+	msg := messages[0]
+
+	// AC#3: Verify format
+	expectedFields := []string{
+		"🔴", "*TRADING HALTED*",
+		"FTMO Gold Challenge",
+		"Max Drawdown",
+		"10% limit reached",
+		"All trading paused for this account",
+		"Manual review before resuming",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(msg, field) {
+			t.Errorf("Expected message to contain '%s'\n\nGot:\n%s", field, msg)
+		}
+	}
+}
+
+// Test 4.9: Fire-and-forget - Risk notification failure does NOT block trading
+func TestRouter_RiskAlert_FireAndForget(t *testing.T) {
+	notifier := &mockNotifier{}
+	router := subscriber.NewRouter(notifier,
+		handlers.NewTradeHandler(),
+		handlers.NewRiskHandler(),
+		handlers.NewSystemHandler(),
+		handlers.NewEmergencyHandler(),
+	)
+
+	channel := "alerts:risk:ftmo-gold-001"
+	payload := `{
+		"type": "risk_blocked",
+		"account_id": "ftmo-gold-001",
+		"account_name": "FTMO Gold Challenge",
+		"rule_name": "Daily Loss Limit",
+		"rule_type": "blocked",
+		"current": 4.8,
+		"threshold": 5.0,
+		"trade": "BUY 0.10 XAUUSD",
+		"reason": "Trade would exceed daily loss limit",
+		"action": "Trade rejected",
+		"timestamp": "2026-01-15T14:32:15Z"
+	}`
+
+	// Route should return immediately (fire-and-forget)
+	start := time.Now()
+	router.Route(channel, payload)
+	elapsed := time.Since(start)
+
+	// Route MUST complete immediately (< 5ms)
+	if elapsed > 5*time.Millisecond {
+		t.Errorf("Route blocked for %v (should be < 5ms for fire-and-forget)", elapsed)
+	}
+}
+
+// Test risk alert with invalid JSON - should not crash
+func TestRouter_RiskAlert_InvalidJSON(t *testing.T) {
+	notifier := &mockNotifier{}
+	router := subscriber.NewRouter(notifier,
+		handlers.NewTradeHandler(),
+		handlers.NewRiskHandler(),
+		handlers.NewSystemHandler(),
+		handlers.NewEmergencyHandler(),
+	)
+
+	channel := "alerts:risk:ftmo-gold-001"
+	payload := `not valid json`
+
+	// Should not panic
+	router.Route(channel, payload)
+
+	// Wait for potential goroutine
+	time.Sleep(50 * time.Millisecond)
+
+	// No message should be sent
+	messages := notifier.getMessages()
+	if len(messages) != 0 {
+		t.Errorf("Expected 0 messages for invalid JSON, got %d", len(messages))
+	}
+}
+
 // Integration test: Full trade notification with real Telegram (skipped without env vars)
 func TestIntegration_TradeNotification_RealTelegram(t *testing.T) {
 	token := os.Getenv("TELEGRAM_BOT_TOKEN")

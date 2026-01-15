@@ -296,17 +296,227 @@ func TestNewRiskHandler(t *testing.T) {
 	}
 }
 
-func TestRiskHandler_Handle(t *testing.T) {
+// Test 4.1: Unit tests for JSON parsing of risk_blocked events (AC#1)
+func TestRiskHandler_Handle_RiskBlocked(t *testing.T) {
 	handler := NewRiskHandler()
 
-	// Scaffold mode just logs, should not error
-	msg, err := handler.Handle("ftmo-001", []byte(`{"rule":"daily_loss","current":4.5}`))
+	payload := []byte(`{
+		"type": "risk_blocked",
+		"account_id": "ftmo-gold-001",
+		"account_name": "FTMO Gold Challenge",
+		"rule_name": "Daily Loss Limit",
+		"rule_type": "blocked",
+		"current": 4.8,
+		"threshold": 5.0,
+		"trade": "BUY 0.10 XAUUSD",
+		"reason": "Trade would exceed daily loss limit",
+		"action": "Trade rejected",
+		"timestamp": "2026-01-15T14:32:15Z"
+	}`)
+
+	msg, err := handler.Handle("ftmo-gold-001", payload)
 	if err != nil {
-		t.Errorf("Expected no error, got: %v", err)
+		t.Fatalf("Expected no error, got: %v", err)
 	}
-	// Scaffold returns empty string (no notification sent)
+	if msg == "" {
+		t.Error("Expected formatted message, got empty string")
+	}
+
+	// AC#1: Verify required fields in output
+	expectedFields := []string{
+		"🔴", "*TRADE BLOCKED*",
+		"FTMO Gold Challenge",
+		"Daily Loss Limit",
+		"4.8% of 5.0% limit",
+		"BUY 0.10 XAUUSD",
+		"Trade would exceed daily loss limit",
+		"Trade rejected",
+		"14:32:15 UTC",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(msg, field) {
+			t.Errorf("Expected message to contain '%s', got:\n%s", field, msg)
+		}
+	}
+}
+
+// Test 4.2: Unit tests for JSON parsing of risk_warning events (AC#2)
+func TestRiskHandler_Handle_RiskWarning(t *testing.T) {
+	handler := NewRiskHandler()
+
+	payload := []byte(`{
+		"type": "risk_warning",
+		"account_id": "ftmo-gold-001",
+		"account_name": "FTMO Gold Challenge",
+		"rule_name": "Daily Loss Limit",
+		"rule_type": "warning",
+		"current": 4.0,
+		"threshold": 5.0,
+		"warning_level": 80,
+		"remaining_dollars": 1000.00,
+		"action": "Trading continues, monitor closely",
+		"timestamp": "2026-01-15T14:32:15Z"
+	}`)
+
+	msg, err := handler.Handle("ftmo-gold-001", payload)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if msg == "" {
+		t.Error("Expected formatted message, got empty string")
+	}
+
+	// AC#2: Verify required fields in output
+	expectedFields := []string{
+		"🟡", "*RISK WARNING*",
+		"FTMO Gold Challenge",
+		"Daily Loss Limit",
+		"80% of limit reached",
+		"4.0% of 5.0% limit",
+		"$1000 (1.0%)",
+		"Trading continues, monitor closely",
+		"14:32:15 UTC",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(msg, field) {
+			t.Errorf("Expected message to contain '%s', got:\n%s", field, msg)
+		}
+	}
+}
+
+// Test 4.3: Unit tests for JSON parsing of trading_halted events (AC#3)
+func TestRiskHandler_Handle_TradingHalted(t *testing.T) {
+	handler := NewRiskHandler()
+
+	payload := []byte(`{
+		"type": "trading_halted",
+		"account_id": "ftmo-gold-001",
+		"account_name": "FTMO Gold Challenge",
+		"rule_name": "Max Drawdown",
+		"rule_type": "halted",
+		"status": "10% limit reached",
+		"action": "All trading paused for this account",
+		"required_action": "Manual review before resuming",
+		"timestamp": "2026-01-15T14:32:15Z"
+	}`)
+
+	msg, err := handler.Handle("ftmo-gold-001", payload)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if msg == "" {
+		t.Error("Expected formatted message, got empty string")
+	}
+
+	// AC#3: Verify required fields in output
+	expectedFields := []string{
+		"🔴", "*TRADING HALTED*",
+		"FTMO Gold Challenge",
+		"Max Drawdown",
+		"10% limit reached",
+		"All trading paused for this account",
+		"Manual review before resuming",
+		"14:32:15 UTC",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(msg, field) {
+			t.Errorf("Expected message to contain '%s', got:\n%s", field, msg)
+		}
+	}
+}
+
+// Test 4.7: Unit tests for invalid JSON handling (graceful error)
+func TestRiskHandler_Handle_InvalidJSON(t *testing.T) {
+	handler := NewRiskHandler()
+
+	testCases := []struct {
+		name    string
+		payload []byte
+	}{
+		{
+			name:    "completely invalid JSON",
+			payload: []byte(`not valid json at all`),
+		},
+		{
+			name:    "truncated JSON",
+			payload: []byte(`{"type": "risk_blocked", "account_id":`),
+		},
+		{
+			name:    "empty payload",
+			payload: []byte(``),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg, err := handler.Handle("ftmo-001", tc.payload)
+			if err == nil {
+				t.Error("Expected error for invalid JSON, got nil")
+			}
+			if msg != "" {
+				t.Errorf("Expected empty message on error, got: %s", msg)
+			}
+			// Should wrap with ErrMessageParseError
+			if !errors.Is(err, notifyerrors.ErrMessageParseError) {
+				t.Errorf("Expected ErrMessageParseError, got: %v", err)
+			}
+		})
+	}
+}
+
+// Test unknown risk event type handling
+func TestRiskHandler_Handle_UnknownEventType(t *testing.T) {
+	handler := NewRiskHandler()
+
+	payload := []byte(`{
+		"type": "risk_unknown",
+		"account_id": "ftmo-gold-001"
+	}`)
+
+	msg, err := handler.Handle("ftmo-gold-001", payload)
+	if err == nil {
+		t.Error("Expected error for unknown event type, got nil")
+	}
 	if msg != "" {
-		t.Errorf("Expected empty message in scaffold mode, got: %s", msg)
+		t.Errorf("Expected empty message on error, got: %s", msg)
+	}
+	// Should wrap with ErrUnknownEventType
+	if !errors.Is(err, notifyerrors.ErrUnknownEventType) {
+		t.Errorf("Expected ErrUnknownEventType, got: %v", err)
+	}
+}
+
+// Test risk handler returns immediately (fire-and-forget support)
+func TestRiskHandler_Handle_ReturnsImmediately(t *testing.T) {
+	handler := NewRiskHandler()
+
+	payload := []byte(`{
+		"type": "risk_blocked",
+		"account_id": "ftmo-gold-001",
+		"account_name": "FTMO Gold Challenge",
+		"rule_name": "Daily Loss Limit",
+		"rule_type": "blocked",
+		"current": 4.8,
+		"threshold": 5.0,
+		"trade": "BUY 0.10 XAUUSD",
+		"reason": "Trade would exceed daily loss limit",
+		"action": "Trade rejected",
+		"timestamp": "2026-01-15T14:32:15Z"
+	}`)
+
+	// Handler should return quickly (< 10ms for formatting)
+	start := time.Now()
+	_, err := handler.Handle("ftmo-gold-001", payload)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if elapsed > 10*time.Millisecond {
+		t.Errorf("Handler took too long: %v (expected < 10ms)", elapsed)
 	}
 }
 

@@ -9,18 +9,47 @@ import (
 	"time"
 )
 
-// RiskAlert represents a risk warning or violation.
-type RiskAlert struct {
+// RiskBlockedEvent represents a trade blocked by risk rule.
+type RiskBlockedEvent struct {
+	Type        string  `json:"type"`         // "risk_blocked"
 	AccountID   string  `json:"account_id"`
 	AccountName string  `json:"account_name"`
 	RuleName    string  `json:"rule_name"`
-	RuleType    string  `json:"rule_type"` // warning, blocked
+	RuleType    string  `json:"rule_type"`    // "blocked"
 	Current     float64 `json:"current"`
 	Threshold   float64 `json:"threshold"`
-	Trade       string  `json:"trade,omitempty"`
+	Trade       string  `json:"trade"`
 	Reason      string  `json:"reason"`
 	Action      string  `json:"action"`
 	Timestamp   string  `json:"timestamp"`
+}
+
+// RiskWarningEvent represents a risk warning threshold reached.
+type RiskWarningEvent struct {
+	Type             string  `json:"type"`              // "risk_warning"
+	AccountID        string  `json:"account_id"`
+	AccountName      string  `json:"account_name"`
+	RuleName         string  `json:"rule_name"`
+	RuleType         string  `json:"rule_type"`         // "warning"
+	Current          float64 `json:"current"`
+	Threshold        float64 `json:"threshold"`
+	WarningLevel     int     `json:"warning_level"`     // 80 for 80% of limit
+	RemainingDollars float64 `json:"remaining_dollars"` // Dollar amount remaining
+	Action           string  `json:"action"`            // "Trading continues, monitor closely"
+	Timestamp        string  `json:"timestamp"`
+}
+
+// TradingHaltedEvent represents trading halted due to critical limit breach.
+type TradingHaltedEvent struct {
+	Type           string `json:"type"`            // "trading_halted"
+	AccountID      string `json:"account_id"`
+	AccountName    string `json:"account_name"`
+	RuleName       string `json:"rule_name"`
+	RuleType       string `json:"rule_type"`       // "halted"
+	Status         string `json:"status"`          // "10% limit reached"
+	Action         string `json:"action"`          // "All trading paused for this account"
+	RequiredAction string `json:"required_action"` // "Manual review before resuming"
+	Timestamp      string `json:"timestamp"`
 }
 
 // SystemAlert represents a system-level alert.
@@ -40,26 +69,30 @@ func NewAlertFormatter() *AlertFormatter {
 	return &AlertFormatter{}
 }
 
-// FormatRiskWarning formats a risk warning alert.
-func (f *AlertFormatter) FormatRiskWarning(a *RiskAlert) string {
-	return fmt.Sprintf(`*RISK WARNING*
+// FormatRiskWarning formats a risk warning alert with emoji.
+func (f *AlertFormatter) FormatRiskWarning(e *RiskWarningEvent) string {
+	remaining := e.Threshold - e.Current
+
+	return fmt.Sprintf(`🟡 *RISK WARNING*
 Account: %s
 Rule: %s
-Status: %.0f%% of limit reached
+Status: %d%% of limit reached
 Current: %.1f%% of %.1f%% limit
-Remaining: %.1f%%
+Remaining: $%.0f (%.1f%%)
+Action: %s
 Time: %s`,
-		a.AccountName,
-		a.RuleName,
-		(a.Current/a.Threshold)*100,
-		a.Current, a.Threshold,
-		a.Threshold-a.Current,
-		time.Now().UTC().Format("15:04:05 UTC"))
+		e.AccountName,
+		e.RuleName,
+		e.WarningLevel,
+		e.Current, e.Threshold,
+		e.RemainingDollars, remaining,
+		e.Action,
+		formatAlertTimestamp(e.Timestamp))
 }
 
-// FormatRiskBlocked formats a trade blocked alert.
-func (f *AlertFormatter) FormatRiskBlocked(a *RiskAlert) string {
-	return fmt.Sprintf(`*TRADE BLOCKED*
+// FormatRiskBlocked formats a trade blocked alert with emoji.
+func (f *AlertFormatter) FormatRiskBlocked(e *RiskBlockedEvent) string {
+	return fmt.Sprintf(`🔴 *TRADE BLOCKED*
 Account: %s
 Rule: %s
 Current: %.1f%% of %.1f%% limit
@@ -67,13 +100,30 @@ Trade: %s
 Reason: %s
 Action: %s
 Time: %s`,
-		a.AccountName,
-		a.RuleName,
-		a.Current, a.Threshold,
-		a.Trade,
-		a.Reason,
-		a.Action,
-		time.Now().UTC().Format("15:04:05 UTC"))
+		e.AccountName,
+		e.RuleName,
+		e.Current, e.Threshold,
+		e.Trade,
+		e.Reason,
+		e.Action,
+		formatAlertTimestamp(e.Timestamp))
+}
+
+// FormatTradingHalted formats a trading halted alert with emoji.
+func (f *AlertFormatter) FormatTradingHalted(e *TradingHaltedEvent) string {
+	return fmt.Sprintf(`🔴 *TRADING HALTED*
+Account: %s
+Rule: %s
+Status: %s
+Action: %s
+Required: %s
+Time: %s`,
+		e.AccountName,
+		e.RuleName,
+		e.Status,
+		e.Action,
+		e.RequiredAction,
+		formatAlertTimestamp(e.Timestamp))
 }
 
 // FormatSystemAlert formats a system alert.
@@ -91,7 +141,16 @@ Message: %s`,
 		msg += fmt.Sprintf("\nAction: %s", a.Action)
 	}
 
-	msg += fmt.Sprintf("\nTime: %s", time.Now().UTC().Format("15:04:05 UTC"))
+	msg += fmt.Sprintf("\nTime: %s", formatAlertTimestamp(a.Timestamp))
 
 	return msg
+}
+
+// formatAlertTimestamp formats ISO timestamp to readable UTC format.
+func formatAlertTimestamp(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return ts // Return original if parse fails
+	}
+	return t.UTC().Format("15:04:05 UTC")
 }

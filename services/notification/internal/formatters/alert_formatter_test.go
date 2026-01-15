@@ -9,53 +9,111 @@ import (
 func TestAlertFormatter_FormatRiskWarning(t *testing.T) {
 	formatter := NewAlertFormatter()
 
-	alert := &RiskAlert{
-		AccountID:   "ftmo-001",
-		AccountName: "FTMO Gold",
-		RuleName:    "Daily Loss Limit",
-		RuleType:    "warning",
-		Current:     4.2,
-		Threshold:   5.0,
+	event := &RiskWarningEvent{
+		Type:             "risk_warning",
+		AccountID:        "ftmo-gold-001",
+		AccountName:      "FTMO Gold Challenge",
+		RuleName:         "Daily Loss Limit",
+		RuleType:         "warning",
+		Current:          4.0,
+		Threshold:        5.0,
+		WarningLevel:     80,
+		RemainingDollars: 1000.00,
+		Action:           "Trading continues, monitor closely",
+		Timestamp:        "2026-01-15T14:32:15Z",
 	}
 
-	result := formatter.FormatRiskWarning(alert)
+	result := formatter.FormatRiskWarning(event)
 
-	if !strings.Contains(result, "RISK WARNING") {
-		t.Error("Expected 'RISK WARNING' in output")
+	// AC#2: Verify exact format
+	expectedFields := []string{
+		"🟡", "*RISK WARNING*",
+		"FTMO Gold Challenge",
+		"Daily Loss Limit",
+		"80% of limit reached",
+		"4.0% of 5.0% limit",
+		"$1000 (1.0%)",
+		"Trading continues, monitor closely",
+		"14:32:15 UTC",
 	}
-	if !strings.Contains(result, "FTMO Gold") {
-		t.Error("Expected account name in output")
-	}
-	if !strings.Contains(result, "Daily Loss Limit") {
-		t.Error("Expected rule name in output")
+
+	for _, field := range expectedFields {
+		if !strings.Contains(result, field) {
+			t.Errorf("Expected message to contain '%s'\n\nGot:\n%s", field, result)
+		}
 	}
 }
 
 func TestAlertFormatter_FormatRiskBlocked(t *testing.T) {
 	formatter := NewAlertFormatter()
 
-	alert := &RiskAlert{
-		AccountID:   "ftmo-001",
-		AccountName: "FTMO Gold",
-		RuleName:    "Max Drawdown",
+	event := &RiskBlockedEvent{
+		Type:        "risk_blocked",
+		AccountID:   "ftmo-gold-001",
+		AccountName: "FTMO Gold Challenge",
+		RuleName:    "Daily Loss Limit",
 		RuleType:    "blocked",
-		Current:     10.1,
-		Threshold:   10.0,
-		Trade:       "BUY 0.1 XAUUSD",
-		Reason:      "Drawdown limit exceeded",
+		Current:     4.8,
+		Threshold:   5.0,
+		Trade:       "BUY 0.10 XAUUSD",
+		Reason:      "Trade would exceed daily loss limit",
 		Action:      "Trade rejected",
+		Timestamp:   "2026-01-15T14:32:15Z",
 	}
 
-	result := formatter.FormatRiskBlocked(alert)
+	result := formatter.FormatRiskBlocked(event)
 
-	if !strings.Contains(result, "TRADE BLOCKED") {
-		t.Error("Expected 'TRADE BLOCKED' in output")
+	// AC#1: Verify exact format
+	expectedFields := []string{
+		"🔴", "*TRADE BLOCKED*",
+		"FTMO Gold Challenge",
+		"Daily Loss Limit",
+		"4.8% of 5.0% limit",
+		"BUY 0.10 XAUUSD",
+		"Trade would exceed daily loss limit",
+		"Trade rejected",
+		"14:32:15 UTC",
 	}
-	if !strings.Contains(result, "Max Drawdown") {
-		t.Error("Expected rule name in output")
+
+	for _, field := range expectedFields {
+		if !strings.Contains(result, field) {
+			t.Errorf("Expected message to contain '%s'\n\nGot:\n%s", field, result)
+		}
 	}
-	if !strings.Contains(result, "Trade rejected") {
-		t.Error("Expected action in output")
+}
+
+func TestAlertFormatter_FormatTradingHalted(t *testing.T) {
+	formatter := NewAlertFormatter()
+
+	event := &TradingHaltedEvent{
+		Type:           "trading_halted",
+		AccountID:      "ftmo-gold-001",
+		AccountName:    "FTMO Gold Challenge",
+		RuleName:       "Max Drawdown",
+		RuleType:       "halted",
+		Status:         "10% limit reached",
+		Action:         "All trading paused for this account",
+		RequiredAction: "Manual review before resuming",
+		Timestamp:      "2026-01-15T14:32:15Z",
+	}
+
+	result := formatter.FormatTradingHalted(event)
+
+	// AC#3: Verify exact format
+	expectedFields := []string{
+		"🔴", "*TRADING HALTED*",
+		"FTMO Gold Challenge",
+		"Max Drawdown",
+		"10% limit reached",
+		"All trading paused for this account",
+		"Manual review before resuming",
+		"14:32:15 UTC",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(result, field) {
+			t.Errorf("Expected message to contain '%s'\n\nGot:\n%s", field, result)
+		}
 	}
 }
 
@@ -74,6 +132,7 @@ func TestAlertFormatter_FormatSystemAlert(t *testing.T) {
 				Level:     "error",
 				Message:   "Connection lost",
 				Action:    "Reconnecting",
+				Timestamp: "2026-01-15T14:32:15Z",
 			},
 			expected: "SYSTEM ERROR",
 		},
@@ -83,6 +142,7 @@ func TestAlertFormatter_FormatSystemAlert(t *testing.T) {
 				Component: "Redis",
 				Level:     "warning",
 				Message:   "High memory usage",
+				Timestamp: "2026-01-15T14:32:15Z",
 			},
 			expected: "SYSTEM WARNING",
 		},
@@ -92,6 +152,7 @@ func TestAlertFormatter_FormatSystemAlert(t *testing.T) {
 				Component: "Trading Engine",
 				Level:     "info",
 				Message:   "Started successfully",
+				Timestamp: "2026-01-15T14:32:15Z",
 			},
 			expected: "SYSTEM INFO",
 		},
@@ -118,6 +179,7 @@ func TestAlertFormatter_FormatSystemAlert_WithAction(t *testing.T) {
 		Level:     "error",
 		Message:   "Connection lost",
 		Action:    "Reconnecting in 5s",
+		Timestamp: "2026-01-15T14:32:15Z",
 	}
 
 	result := formatter.FormatSystemAlert(alert)
@@ -134,5 +196,67 @@ func TestNewAlertFormatter(t *testing.T) {
 	formatter := NewAlertFormatter()
 	if formatter == nil {
 		t.Error("Expected formatter to be created, got nil")
+	}
+}
+
+func TestFormatAlertTimestamp(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "valid RFC3339",
+			input:    "2026-01-15T14:32:15Z",
+			expected: "14:32:15 UTC",
+		},
+		{
+			name:     "with timezone offset",
+			input:    "2026-01-15T16:32:15+02:00",
+			expected: "14:32:15 UTC",
+		},
+		{
+			name:     "invalid format",
+			input:    "not a timestamp",
+			expected: "not a timestamp", // Returns original on parse failure
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatAlertTimestamp(tt.input)
+			if result != tt.expected {
+				t.Errorf("Expected '%s', got '%s'", tt.expected, result)
+			}
+		})
+	}
+}
+
+// Test warning percentage remaining calculation
+func TestAlertFormatter_FormatRiskWarning_RemainingCalculation(t *testing.T) {
+	formatter := NewAlertFormatter()
+
+	event := &RiskWarningEvent{
+		Type:             "risk_warning",
+		AccountID:        "ftmo-gold-001",
+		AccountName:      "FTMO Gold Challenge",
+		RuleName:         "Daily Loss Limit",
+		RuleType:         "warning",
+		Current:          4.5,
+		Threshold:        5.0,
+		WarningLevel:     90,
+		RemainingDollars: 500.00,
+		Action:           "Trading continues, monitor closely",
+		Timestamp:        "2026-01-15T14:32:15Z",
+	}
+
+	result := formatter.FormatRiskWarning(event)
+
+	// Should show $500 (0.5%)
+	if !strings.Contains(result, "$500 (0.5%)") {
+		t.Errorf("Expected remaining '$500 (0.5%%)', got:\n%s", result)
+	}
+	if !strings.Contains(result, "90% of limit reached") {
+		t.Errorf("Expected '90%% of limit reached', got:\n%s", result)
 	}
 }
