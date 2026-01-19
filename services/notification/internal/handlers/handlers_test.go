@@ -546,19 +546,151 @@ func TestNewEmergencyHandler(t *testing.T) {
 	if handler == nil {
 		t.Error("Expected handler to be created, got nil")
 	}
+	if handler.formatter == nil {
+		t.Error("Expected formatter to be initialized")
+	}
 }
 
-func TestEmergencyHandler_Handle(t *testing.T) {
+// Test 4.4: EmergencyHandler parses confirmation and returns formatted message
+func TestEmergencyHandler_Handle_Confirmation(t *testing.T) {
 	handler := NewEmergencyHandler()
 
-	// Scaffold mode just logs, should not error
-	msg, err := handler.Handle("", []byte(`{"type":"emergency_stop","source":"user"}`))
+	payload := []byte(`{
+		"type": "emergency_stop_confirmation",
+		"status": "completed",
+		"accounts_paused": 3,
+		"positions_preserved": 5,
+		"orders_cancelled": 2,
+		"timestamp": "2026-01-19T14:32:15Z"
+	}`)
+
+	msg, err := handler.Handle("", payload)
 	if err != nil {
-		t.Errorf("Expected no error, got: %v", err)
+		t.Fatalf("Expected no error, got: %v", err)
 	}
-	// Scaffold returns empty string (no notification sent)
+	if msg == "" {
+		t.Error("Expected formatted message, got empty string")
+	}
+
+	// Verify AC#3 format
+	expectedFields := []string{
+		"🔴", "*EMERGENCY STOP COMPLETE*",
+		"Accounts Paused: 3",
+		"Pending Orders: Cancelled",
+		"Open Positions: 5 (preserved)",
+		"Action: Use /resume_all to restart trading",
+		"14:32:15 UTC",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(msg, field) {
+			t.Errorf("Expected message to contain '%s', got:\n%s", field, msg)
+		}
+	}
+}
+
+// Test EmergencyHandler ignores self-echo (emergency_stop type)
+func TestEmergencyHandler_Handle_SelfEcho(t *testing.T) {
+	handler := NewEmergencyHandler()
+
+	payload := []byte(`{
+		"type": "emergency_stop",
+		"command": "stop_all",
+		"initiator": "telegram",
+		"initiated_by": "@testuser",
+		"chat_id": 123456789,
+		"timestamp": "2026-01-19T14:32:15Z"
+	}`)
+
+	msg, err := handler.Handle("", payload)
+	if err != nil {
+		t.Errorf("Expected no error for self-echo, got: %v", err)
+	}
+	// Self-echo returns empty string (no notification)
 	if msg != "" {
-		t.Errorf("Expected empty message in scaffold mode, got: %s", msg)
+		t.Errorf("Expected empty message for self-echo, got: %s", msg)
+	}
+}
+
+// Test EmergencyHandler with invalid JSON
+func TestEmergencyHandler_Handle_InvalidJSON(t *testing.T) {
+	handler := NewEmergencyHandler()
+
+	testCases := []struct {
+		name    string
+		payload []byte
+	}{
+		{
+			name:    "completely invalid JSON",
+			payload: []byte(`not valid json at all`),
+		},
+		{
+			name:    "truncated JSON",
+			payload: []byte(`{"type": "emergency_stop_confirmation", "accounts_paused":`),
+		},
+		{
+			name:    "empty payload",
+			payload: []byte(``),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg, err := handler.Handle("", tc.payload)
+			if err == nil {
+				t.Error("Expected error for invalid JSON, got nil")
+			}
+			if msg != "" {
+				t.Errorf("Expected empty message on error, got: %s", msg)
+			}
+			// Should wrap with ErrMessageParseError
+			if !errors.Is(err, notifyerrors.ErrMessageParseError) {
+				t.Errorf("Expected ErrMessageParseError, got: %v", err)
+			}
+		})
+	}
+}
+
+// Test EmergencyHandler with unknown event type
+func TestEmergencyHandler_Handle_UnknownEventType(t *testing.T) {
+	handler := NewEmergencyHandler()
+
+	payload := []byte(`{
+		"type": "unknown_emergency_type",
+		"data": "something"
+	}`)
+
+	msg, err := handler.Handle("", payload)
+	// Unknown types return empty without error (logged only)
+	if err != nil {
+		t.Errorf("Expected no error for unknown type, got: %v", err)
+	}
+	if msg != "" {
+		t.Errorf("Expected empty message for unknown type, got: %s", msg)
+	}
+}
+
+// Test confirmation with no orders cancelled
+func TestEmergencyHandler_Handle_Confirmation_NoOrdersCancelled(t *testing.T) {
+	handler := NewEmergencyHandler()
+
+	payload := []byte(`{
+		"type": "emergency_stop_confirmation",
+		"status": "completed",
+		"accounts_paused": 2,
+		"positions_preserved": 3,
+		"orders_cancelled": 0,
+		"timestamp": "2026-01-19T14:32:15Z"
+	}`)
+
+	msg, err := handler.Handle("", payload)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	// Should show "None pending" instead of "Cancelled"
+	if !strings.Contains(msg, "Pending Orders: None pending") {
+		t.Errorf("Expected 'Pending Orders: None pending' for 0 orders, got:\n%s", msg)
 	}
 }
 

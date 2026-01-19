@@ -103,7 +103,7 @@ development_status:
   6-2-redis-alert-subscription: done
   6-3-trade-execution-notifications: done
   6-4-rule-violation-alerts: review
-  6-5-emergency-stop-command: backlog
+  6-5-emergency-stop-command: review
   6-6-resume-trading-command: backlog
   epic-6-retrospective: optional
 

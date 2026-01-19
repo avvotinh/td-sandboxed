@@ -2,10 +2,12 @@
 package telegram
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -59,7 +61,7 @@ func (h *CommandHandler) Handle(msg *tgbotapi.Message) {
 	case "status":
 		response = h.handleStatus()
 	case "stop_all":
-		response = h.handleStopAll()
+		response = h.handleStopAll(msg)
 	case "resume_all":
 		response = h.handleResumeAll()
 	default:
@@ -181,17 +183,45 @@ func (h *CommandHandler) handleStatus() string {
 _Last checked: now_`, botStatus, h.bot.Username(), chatIDStatus, redisStatus, channelInfo)
 }
 
-func (h *CommandHandler) handleStopAll() string {
-	// Scaffold: Return placeholder response
-	log.Println("Emergency stop command received (scaffold mode)")
-	return `*Emergency Stop (Scaffold)*
+func (h *CommandHandler) handleStopAll(msg *tgbotapi.Message) string {
+	// AC#4: Check if already stopped
+	if h.bot.IsStopActive() {
+		return "⚠️ All accounts already stopped"
+	}
 
-This is a scaffold implementation.
-Full emergency stop in Story 6.5.`
+	// Extract user information for logging
+	username := "unknown"
+	if msg.From != nil {
+		username = msg.From.UserName
+		if username == "" {
+			username = fmt.Sprintf("user_%d", msg.From.ID)
+		}
+	}
+
+	log.Printf("EMERGENCY STOP initiated by @%s (chat: %d)", username, msg.Chat.ID)
+
+	// Create context with 500ms timeout per SLA
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	// Publish emergency stop command to Redis
+	if err := h.bot.PublishEmergencyStop(ctx, username, msg.Chat.ID); err != nil {
+		log.Printf("CRITICAL: Emergency stop publish failed: %v", err)
+		return fmt.Sprintf("*EMERGENCY STOP FAILED*\n\nFailed to send stop command.\nError: %s", err.Error())
+	}
+
+	// Mark stop as active
+	h.bot.SetStopActive(true)
+
+	return "🛑 *EMERGENCY STOP INITIATED*\n\nCommand sent to trading engine.\nAwaiting confirmation..."
 }
 
 func (h *CommandHandler) handleResumeAll() string {
 	// Scaffold: Return placeholder response
+	// TODO(Story 6.6): Implement full resume logic including:
+	// - Call h.bot.SetStopActive(false) to reset emergency stop state
+	// - Publish resume command to Redis
+	// - Handle already-resumed case similar to already-stopped in handleStopAll
 	log.Println("Resume command received (scaffold mode)")
 	return `*Resume Trading (Scaffold)*
 

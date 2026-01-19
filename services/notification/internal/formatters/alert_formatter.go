@@ -61,6 +61,16 @@ type SystemAlert struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// EmergencyStopConfirmation represents confirmation from the trading engine.
+type EmergencyStopConfirmation struct {
+	Type               string `json:"type"`                // "emergency_stop_confirmation"
+	Status             string `json:"status"`              // "completed"
+	AccountsPaused     int    `json:"accounts_paused"`
+	PositionsPreserved int    `json:"positions_preserved"`
+	OrdersCancelled    int    `json:"orders_cancelled"`
+	Timestamp          string `json:"timestamp"`
+}
+
 // AlertFormatter formats alert notifications.
 type AlertFormatter struct{}
 
@@ -144,6 +154,25 @@ Message: %s`,
 	msg += fmt.Sprintf("\nTime: %s", formatAlertTimestamp(a.Timestamp))
 
 	return msg
+}
+
+// FormatEmergencyStopConfirmation formats an emergency stop confirmation alert.
+func (f *AlertFormatter) FormatEmergencyStopConfirmation(e *EmergencyStopConfirmation) string {
+	orderStatus := "Cancelled"
+	if e.OrdersCancelled == 0 {
+		orderStatus = "None pending"
+	}
+
+	return fmt.Sprintf(`🔴 *EMERGENCY STOP COMPLETE*
+Accounts Paused: %d
+Pending Orders: %s
+Open Positions: %d (preserved)
+Action: Use /resume_all to restart trading
+Time: %s`,
+		e.AccountsPaused,
+		orderStatus,
+		e.PositionsPreserved,
+		formatAlertTimestamp(e.Timestamp))
 }
 
 // formatAlertTimestamp formats ISO timestamp to readable UTC format.

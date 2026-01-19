@@ -260,3 +260,81 @@ func TestAlertFormatter_FormatRiskWarning_RemainingCalculation(t *testing.T) {
 		t.Errorf("Expected '90%% of limit reached', got:\n%s", result)
 	}
 }
+
+// Test 4.5: FormatEmergencyStopConfirmation output matches AC#3 format
+func TestAlertFormatter_FormatEmergencyStopConfirmation(t *testing.T) {
+	formatter := NewAlertFormatter()
+
+	event := &EmergencyStopConfirmation{
+		Type:               "emergency_stop_confirmation",
+		Status:             "completed",
+		AccountsPaused:     3,
+		PositionsPreserved: 5,
+		OrdersCancelled:    2,
+		Timestamp:          "2026-01-19T14:32:15Z",
+	}
+
+	result := formatter.FormatEmergencyStopConfirmation(event)
+
+	// AC#3: Verify exact format
+	expectedFields := []string{
+		"🔴", "*EMERGENCY STOP COMPLETE*",
+		"Accounts Paused: 3",
+		"Pending Orders: Cancelled",
+		"Open Positions: 5 (preserved)",
+		"Action: Use /resume_all to restart trading",
+		"14:32:15 UTC",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(result, field) {
+			t.Errorf("Expected message to contain '%s'\n\nGot:\n%s", field, result)
+		}
+	}
+}
+
+// Test FormatEmergencyStopConfirmation with 0 orders cancelled shows "None pending"
+func TestAlertFormatter_FormatEmergencyStopConfirmation_NoOrders(t *testing.T) {
+	formatter := NewAlertFormatter()
+
+	event := &EmergencyStopConfirmation{
+		Type:               "emergency_stop_confirmation",
+		Status:             "completed",
+		AccountsPaused:     2,
+		PositionsPreserved: 3,
+		OrdersCancelled:    0,
+		Timestamp:          "2026-01-19T14:32:15Z",
+	}
+
+	result := formatter.FormatEmergencyStopConfirmation(event)
+
+	if !strings.Contains(result, "Pending Orders: None pending") {
+		t.Errorf("Expected 'Pending Orders: None pending' for 0 orders, got:\n%s", result)
+	}
+}
+
+// Test FormatEmergencyStopConfirmation with 1 order cancelled
+func TestAlertFormatter_FormatEmergencyStopConfirmation_SingleOrder(t *testing.T) {
+	formatter := NewAlertFormatter()
+
+	event := &EmergencyStopConfirmation{
+		Type:               "emergency_stop_confirmation",
+		Status:             "completed",
+		AccountsPaused:     1,
+		PositionsPreserved: 0,
+		OrdersCancelled:    1,
+		Timestamp:          "2026-01-19T14:32:15Z",
+	}
+
+	result := formatter.FormatEmergencyStopConfirmation(event)
+
+	if !strings.Contains(result, "Accounts Paused: 1") {
+		t.Errorf("Expected 'Accounts Paused: 1', got:\n%s", result)
+	}
+	if !strings.Contains(result, "Pending Orders: Cancelled") {
+		t.Errorf("Expected 'Pending Orders: Cancelled', got:\n%s", result)
+	}
+	if !strings.Contains(result, "Open Positions: 0 (preserved)") {
+		t.Errorf("Expected 'Open Positions: 0 (preserved)', got:\n%s", result)
+	}
+}

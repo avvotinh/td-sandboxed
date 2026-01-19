@@ -2,9 +2,14 @@
 package telegram
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -33,6 +38,20 @@ func mockBot(username string, chatID int64, healthy bool) *Bot {
 	}
 	b.healthy.Store(healthy)
 	// Set lastHealthCheck to far future so IsHealthy uses cached value (avoids nil api panic)
+	b.lastHealthCheck.Store(9999999999)
+	return b
+}
+
+// mockBotWithPublisher creates a Bot with a Redis publisher for emergency stop testing.
+func mockBotWithPublisher(username string, chatID int64, redisClient *redis.Client) *Bot {
+	b := &Bot{
+		api:       nil, // Not used in handler tests
+		chatID:    chatID,
+		debug:     false,
+		username:  username,
+		publisher: redisClient,
+	}
+	b.healthy.Store(true)
 	b.lastHealthCheck.Store(9999999999)
 	return b
 }
@@ -161,14 +180,189 @@ func TestHandleHelp_Content(t *testing.T) {
 	}
 }
 
-func TestHandleStopAll_ScaffoldResponse(t *testing.T) {
-	handler := NewCommandHandler(mockBot("TestBot", 0, true))
+// Test 4.1: handleStopAll publishes to Redis emergency:stop channel
+func TestHandleStopAll_PublishesToRedis(t *testing.T) {
+	// Start miniredis for testing
+	mr := miniredis.RunT(t)
 
-	response := handler.handleStopAll()
+	// Create Redis client connected to miniredis
+	client := redis.NewClient(&redis.Options{
+		Addr: mr.Addr(),
+	})
+	defer client.Close()
 
-	// Verify scaffold response mentions it's not fully implemented
-	if !strings.Contains(response, "Scaffold") || !strings.Contains(response, "Story 6.5") {
-		t.Errorf("Expected scaffold response with story reference, got:\n%s", response)
+	// Subscribe to emergency:stop channel to capture the message
+	ctx := context.Background()
+	pubsub := client.Subscribe(ctx, "emergency:stop")
+	defer pubsub.Close()
+
+	// Wait for subscription confirmation
+	_, err := pubsub.Receive(ctx)
+	if err != nil {
+		t.Fatalf("Failed to subscribe: %v", err)
+	}
+
+	// Create bot with publisher
+	bot := mockBotWithPublisher("TestBot", 123456789, client)
+	handler := NewCommandHandler(bot)
+
+	// Create message from user
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: &tgbotapi.User{UserName: "testtrader", ID: 987654321},
+	}
+
+	// Execute stop_all
+	response := handler.handleStopAll(msg)
+
+	// Verify response
+	if !strings.Contains(response, "🛑") {
+		t.Errorf("Expected 🛑 emoji in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "EMERGENCY STOP INITIATED") {
+		t.Errorf("Expected 'EMERGENCY STOP INITIATED' in response, got:\n%s", response)
+	}
+
+	// Verify Redis message was published
+	msgCh := pubsub.Channel()
+	select {
+	case redisMsg := <-msgCh:
+		// Verify JSON structure
+		var cmd EmergencyStopCommand
+		if err := json.Unmarshal([]byte(redisMsg.Payload), &cmd); err != nil {
+			t.Fatalf("Failed to unmarshal message: %v", err)
+		}
+		if cmd.Type != "emergency_stop" {
+			t.Errorf("Expected type 'emergency_stop', got '%s'", cmd.Type)
+		}
+		if cmd.Command != "stop_all" {
+			t.Errorf("Expected command 'stop_all', got '%s'", cmd.Command)
+		}
+		if cmd.Initiator != "telegram" {
+			t.Errorf("Expected initiator 'telegram', got '%s'", cmd.Initiator)
+		}
+		if cmd.InitiatedBy != "@testtrader" {
+			t.Errorf("Expected initiated_by '@testtrader', got '%s'", cmd.InitiatedBy)
+		}
+		if cmd.ChatID != 123456789 {
+			t.Errorf("Expected chat_id 123456789, got %d", cmd.ChatID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for Redis message")
+	}
+}
+
+// Test 4.2: handleStopAll returns already stopped message when stop is active (AC#4)
+func TestHandleStopAll_AlreadyStopped(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	bot := mockBotWithPublisher("TestBot", 123456789, client)
+	// Set stop as already active
+	bot.SetStopActive(true)
+
+	handler := NewCommandHandler(bot)
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: &tgbotapi.User{UserName: "testtrader"},
+	}
+
+	response := handler.handleStopAll(msg)
+
+	// Verify already-stopped response
+	if !strings.Contains(response, "⚠️") {
+		t.Errorf("Expected ⚠️ emoji in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "All accounts already stopped") {
+		t.Errorf("Expected 'All accounts already stopped' in response, got:\n%s", response)
+	}
+}
+
+// Test 4.3: EmergencyStopCommand JSON marshalling
+func TestEmergencyStopCommand_JSONMarshal(t *testing.T) {
+	cmd := EmergencyStopCommand{
+		Type:        "emergency_stop",
+		Command:     "stop_all",
+		Initiator:   "telegram",
+		InitiatedBy: "@testuser",
+		ChatID:      123456789,
+		Timestamp:   "2026-01-19T14:32:15Z",
+	}
+
+	data, err := json.Marshal(cmd)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	// Verify JSON structure
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	expectedFields := map[string]interface{}{
+		"type":         "emergency_stop",
+		"command":      "stop_all",
+		"initiator":    "telegram",
+		"initiated_by": "@testuser",
+		"chat_id":      float64(123456789),
+		"timestamp":    "2026-01-19T14:32:15Z",
+	}
+
+	for key, expected := range expectedFields {
+		if result[key] != expected {
+			t.Errorf("Expected %s='%v', got '%v'", key, expected, result[key])
+		}
+	}
+}
+
+// Test handleStopAll with nil user (edge case)
+func TestHandleStopAll_NilUser(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	bot := mockBotWithPublisher("TestBot", 123456789, client)
+	handler := NewCommandHandler(bot)
+
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: nil, // No user info
+	}
+
+	response := handler.handleStopAll(msg)
+
+	// Should still work with "unknown" username
+	if !strings.Contains(response, "EMERGENCY STOP INITIATED") {
+		t.Errorf("Expected 'EMERGENCY STOP INITIATED' even with nil user, got:\n%s", response)
+	}
+}
+
+// Test handleStopAll sets stopActive to true
+func TestHandleStopAll_SetsStopActive(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	bot := mockBotWithPublisher("TestBot", 123456789, client)
+	handler := NewCommandHandler(bot)
+
+	// Verify initially not active
+	if bot.IsStopActive() {
+		t.Error("Expected stopActive to be false initially")
+	}
+
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: &tgbotapi.User{UserName: "testtrader"},
+	}
+
+	handler.handleStopAll(msg)
+
+	// Verify now active
+	if !bot.IsStopActive() {
+		t.Error("Expected stopActive to be true after handleStopAll")
 	}
 }
 
@@ -180,6 +374,76 @@ func TestHandleResumeAll_ScaffoldResponse(t *testing.T) {
 	// Verify scaffold response mentions it's not fully implemented
 	if !strings.Contains(response, "Scaffold") || !strings.Contains(response, "Story 6.6") {
 		t.Errorf("Expected scaffold response with story reference, got:\n%s", response)
+	}
+}
+
+// Test handleStopAll with nil publisher returns error message
+func TestHandleStopAll_NilPublisher(t *testing.T) {
+	// Create bot without publisher (nil)
+	bot := mockBot("TestBot", 123456789, true)
+	// bot.publisher is nil by default from mockBot
+
+	handler := NewCommandHandler(bot)
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: &tgbotapi.User{UserName: "testtrader"},
+	}
+
+	response := handler.handleStopAll(msg)
+
+	// Should return error message since publisher is nil
+	if !strings.Contains(response, "FAILED") {
+		t.Errorf("Expected 'FAILED' in response for nil publisher, got:\n%s", response)
+	}
+	if !strings.Contains(response, "not initialized") {
+		t.Errorf("Expected 'not initialized' error message, got:\n%s", response)
+	}
+}
+
+// Test handleStopAll with empty username (but user exists with ID)
+func TestHandleStopAll_EmptyUsername(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	// Subscribe to capture the message
+	ctx := context.Background()
+	pubsub := client.Subscribe(ctx, "emergency:stop")
+	defer pubsub.Close()
+	_, _ = pubsub.Receive(ctx)
+
+	bot := mockBotWithPublisher("TestBot", 123456789, client)
+	handler := NewCommandHandler(bot)
+
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: &tgbotapi.User{
+			UserName: "", // Empty username
+			ID:       987654321,
+		},
+	}
+
+	response := handler.handleStopAll(msg)
+
+	// Should still succeed
+	if !strings.Contains(response, "EMERGENCY STOP INITIATED") {
+		t.Errorf("Expected 'EMERGENCY STOP INITIATED', got:\n%s", response)
+	}
+
+	// Verify the initiated_by field uses user_ID fallback
+	msgCh := pubsub.Channel()
+	select {
+	case redisMsg := <-msgCh:
+		var cmd EmergencyStopCommand
+		if err := json.Unmarshal([]byte(redisMsg.Payload), &cmd); err != nil {
+			t.Fatalf("Failed to unmarshal: %v", err)
+		}
+		// Should use user_ID format when username is empty
+		if cmd.InitiatedBy != "@user_987654321" {
+			t.Errorf("Expected initiated_by '@user_987654321', got '%s'", cmd.InitiatedBy)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for Redis message")
 	}
 }
 

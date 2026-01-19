@@ -3,11 +3,13 @@ package telegram
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync/atomic"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/user/sandboxed/services/notification/internal/config"
@@ -17,6 +19,16 @@ import (
 // healthCheckTTL defines how long a health check result is cached.
 const healthCheckTTL = 30 * time.Second
 
+// EmergencyStopCommand represents a stop command sent to the trading engine.
+type EmergencyStopCommand struct {
+	Type        string `json:"type"`
+	Command     string `json:"command"`
+	Initiator   string `json:"initiator"`
+	InitiatedBy string `json:"initiated_by"`
+	ChatID      int64  `json:"chat_id"`
+	Timestamp   string `json:"timestamp"`
+}
+
 // Bot represents the Telegram bot client.
 type Bot struct {
 	api             *tgbotapi.BotAPI
@@ -25,6 +37,8 @@ type Bot struct {
 	username        string
 	healthy         atomic.Bool
 	lastHealthCheck atomic.Int64 // Unix timestamp of last health check
+	publisher       *redis.Client // Redis client for publishing commands
+	stopActive      atomic.Bool   // Track if emergency stop is active
 }
 
 // NewBot creates a new Telegram bot client with exponential backoff retry.
@@ -49,11 +63,25 @@ func NewBotWithContext(ctx context.Context, cfg *config.Config) (*Bot, error) {
 
 	log.Printf("Telegram bot connected: @%s (ID: %d)", user.UserName, user.ID)
 
+	// Initialize Redis publisher for emergency commands
+	publisher := redis.NewClient(&redis.Options{
+		Addr:     cfg.RedisURL,
+		Password: cfg.RedisPassword,
+	})
+
+	// Verify Redis connection
+	if err := publisher.Ping(ctx).Err(); err != nil {
+		log.Printf("Warning: Redis publisher ping failed: %v (commands may fail)", err)
+	} else {
+		log.Printf("Redis publisher connected: %s", cfg.RedisURL)
+	}
+
 	bot := &Bot{
-		api:      api,
-		chatID:   cfg.TelegramChatID,
-		debug:    cfg.Debug,
-		username: user.UserName,
+		api:       api,
+		chatID:    cfg.TelegramChatID,
+		debug:     cfg.Debug,
+		username:  user.UserName,
+		publisher: publisher,
 	}
 	bot.healthy.Store(true)
 	bot.lastHealthCheck.Store(time.Now().Unix())
@@ -126,9 +154,12 @@ func (b *Bot) Start(ctx context.Context) error {
 	}
 }
 
-// Stop gracefully stops the bot.
+// Stop gracefully stops the bot and closes all connections.
 func (b *Bot) Stop() {
 	b.api.StopReceivingUpdates()
+	if err := b.ClosePublisher(); err != nil {
+		log.Printf("Warning: failed to close Redis publisher: %v", err)
+	}
 	log.Println("Telegram bot stopped")
 }
 
@@ -206,4 +237,59 @@ func (b *Bot) ValidateChatID() error {
 // ChatID returns the configured chat ID.
 func (b *Bot) ChatID() int64 {
 	return b.chatID
+}
+
+// IsStopActive returns whether emergency stop is currently active.
+func (b *Bot) IsStopActive() bool {
+	return b.stopActive.Load()
+}
+
+// SetStopActive sets the emergency stop state.
+func (b *Bot) SetStopActive(active bool) {
+	b.stopActive.Store(active)
+}
+
+// PublishEmergencyStop publishes an emergency stop command to Redis.
+// Returns error if publish fails. Logs warning if publish exceeds 100ms SLA.
+func (b *Bot) PublishEmergencyStop(ctx context.Context, username string, chatID int64) error {
+	if b.publisher == nil {
+		return fmt.Errorf("Redis publisher not initialized")
+	}
+
+	cmd := EmergencyStopCommand{
+		Type:        "emergency_stop",
+		Command:     "stop_all",
+		Initiator:   "telegram",
+		InitiatedBy: "@" + username,
+		ChatID:      chatID,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+
+	payload, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal emergency stop command: %w", err)
+	}
+
+	start := time.Now()
+	err = b.publisher.Publish(ctx, "emergency:stop", payload).Err()
+	elapsed := time.Since(start)
+
+	if elapsed > 100*time.Millisecond {
+		log.Printf("WARNING: Emergency stop publish exceeded 100ms SLA: %v", elapsed)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to publish emergency stop: %w", err)
+	}
+
+	log.Printf("Emergency stop published in %v", elapsed)
+	return nil
+}
+
+// ClosePublisher closes the Redis publisher connection.
+func (b *Bot) ClosePublisher() error {
+	if b.publisher != nil {
+		return b.publisher.Close()
+	}
+	return nil
 }
