@@ -102,9 +102,9 @@ development_status:
   6-1-notification-service-setup: done
   6-2-redis-alert-subscription: done
   6-3-trade-execution-notifications: done
-  6-4-rule-violation-alerts: review
-  6-5-emergency-stop-command: review
-  6-6-resume-trading-command: backlog
+  6-4-rule-violation-alerts: done
+  6-5-emergency-stop-command: done
+  6-6-resume-trading-command: done
   epic-6-retrospective: optional
 
   # Epic 7: Audit & Compliance Logging (6 stories)

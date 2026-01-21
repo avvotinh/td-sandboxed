@@ -247,6 +247,34 @@ func TestRouterRoute_EmergencyChannel(t *testing.T) {
 	}
 }
 
+func TestRouterRoute_EmergencyResumeChannel(t *testing.T) {
+	notifier := newMockNotifier()
+	tradeHandler := newMockHandler("", nil)
+	riskHandler := newMockHandler("", nil)
+	systemHandler := newMockHandler("", nil)
+	emergencyHandler := newMockHandler("TRADING RESUMED", nil)
+
+	router := NewRouter(notifier, tradeHandler, riskHandler, systemHandler, emergencyHandler)
+
+	router.Route("emergency:resume", `{"type":"resume_confirmation"}`)
+
+	// Give goroutine time to send
+	time.Sleep(50 * time.Millisecond)
+
+	calls := emergencyHandler.getCalls()
+	if len(calls) != 1 {
+		t.Errorf("expected 1 call to emergency handler, got %d", len(calls))
+	}
+
+	messages := notifier.getMessages()
+	if len(messages) != 1 {
+		t.Errorf("expected 1 message sent, got %d", len(messages))
+	}
+	if len(messages) > 0 && messages[0] != "TRADING RESUMED" {
+		t.Errorf("expected message 'TRADING RESUMED', got %q", messages[0])
+	}
+}
+
 func TestRouterRoute_UnknownChannel(t *testing.T) {
 	notifier := newMockNotifier()
 	tradeHandler := newMockHandler("", nil)
@@ -330,7 +358,7 @@ func TestSubscriberNew(t *testing.T) {
 	}
 
 	channels := sub.Channels()
-	expectedChannels := []string{"alerts:trade:*", "alerts:risk:*", "alerts:system", "emergency:stop"}
+	expectedChannels := []string{"alerts:trade:*", "alerts:risk:*", "alerts:system", "emergency:stop", "emergency:resume"}
 	if len(channels) != len(expectedChannels) {
 		t.Errorf("expected %d channels, got %d", len(expectedChannels), len(channels))
 	}
@@ -432,8 +460,8 @@ func TestSubscriberIntegration(t *testing.T) {
 
 	// Verify channels
 	channels := sub.Channels()
-	if len(channels) != 4 {
-		t.Errorf("expected 4 channels, got %d", len(channels))
+	if len(channels) != 5 {
+		t.Errorf("expected 5 channels, got %d", len(channels))
 	}
 
 	// Cleanup

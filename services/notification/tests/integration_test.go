@@ -62,6 +62,7 @@ func TestSubscriberChannels(t *testing.T) {
 		"alerts:risk:*",
 		"alerts:system",
 		"emergency:stop",
+		"emergency:resume",
 	}
 
 	if len(channels) != len(expectedChannels) {
@@ -781,6 +782,85 @@ func TestEmergencyStop_RedisPublishPerformance(t *testing.T) {
 	}
 
 	t.Logf("Redis publish completed in %v", elapsed)
+}
+
+// Test 6.8: Integration test - Route resume_confirmation event, verify Telegram output (AC#3)
+func TestRouter_ResumeConfirmation(t *testing.T) {
+	notifier := &mockNotifier{}
+	router := subscriber.NewRouter(notifier,
+		handlers.NewTradeHandler(),
+		handlers.NewRiskHandler(),
+		handlers.NewSystemHandler(),
+		handlers.NewEmergencyHandler(),
+	)
+
+	// Simulate confirmation from trading engine on emergency:resume channel
+	channel := "emergency:resume"
+	payload := `{
+		"type": "resume_confirmation",
+		"status": "completed",
+		"accounts_restarted": 3,
+		"timestamp": "2026-01-20T14:32:20Z"
+	}`
+
+	// Route the message
+	router.Route(channel, payload)
+
+	// Wait for goroutine
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify notification was sent
+	messages := notifier.getMessages()
+	if len(messages) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(messages))
+	}
+
+	msg := messages[0]
+
+	// AC#3: Verify format
+	expectedFields := []string{
+		"🟢", "*TRADING RESUMED*",
+		"Accounts Restarted: 3",
+		"Status: Normal operation",
+		"14:32:20 UTC",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(msg, field) {
+			t.Errorf("Expected message to contain '%s'\n\nGot:\n%s", field, msg)
+		}
+	}
+}
+
+// Test resume_command self-echo is ignored (no notification)
+func TestRouter_ResumeCommandSelfEcho(t *testing.T) {
+	notifier := &mockNotifier{}
+	router := subscriber.NewRouter(notifier,
+		handlers.NewTradeHandler(),
+		handlers.NewRiskHandler(),
+		handlers.NewSystemHandler(),
+		handlers.NewEmergencyHandler(),
+	)
+
+	// Simulate self-echo of resume_command
+	channel := "emergency:resume"
+	payload := `{
+		"type": "resume_command",
+		"command": "resume_all",
+		"initiator": "telegram",
+		"initiated_by": "@testuser",
+		"chat_id": 123456789,
+		"timestamp": "2026-01-20T14:32:20Z"
+	}`
+
+	router.Route(channel, payload)
+	time.Sleep(100 * time.Millisecond)
+
+	// No message should be sent (self-echo is ignored)
+	messages := notifier.getMessages()
+	if len(messages) != 0 {
+		t.Errorf("Expected 0 messages for self-echo, got %d", len(messages))
+	}
 }
 
 // Test 4.8: Performance test - Full round-trip < 500ms (mock trading engine response)

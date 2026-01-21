@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,6 +30,26 @@ type EmergencyStopCommand struct {
 	Timestamp   string `json:"timestamp"`
 }
 
+// ResumeCommand represents a resume command sent to the trading engine.
+type ResumeCommand struct {
+	Type        string   `json:"type"`
+	Command     string   `json:"command"`
+	Initiator   string   `json:"initiator"`
+	InitiatedBy string   `json:"initiated_by"`
+	ChatID      int64    `json:"chat_id"`
+	Accounts    []string `json:"accounts,omitempty"` // Empty = all accounts
+	Timestamp   string   `json:"timestamp"`
+}
+
+// pendingConfirmation tracks a pending resume confirmation request.
+type pendingConfirmation struct {
+	mu        sync.Mutex
+	timestamp time.Time
+	username  string
+	chatID    int64
+	active    bool
+}
+
 // Bot represents the Telegram bot client.
 type Bot struct {
 	api             *tgbotapi.BotAPI
@@ -36,9 +57,10 @@ type Bot struct {
 	debug           bool
 	username        string
 	healthy         atomic.Bool
-	lastHealthCheck atomic.Int64 // Unix timestamp of last health check
-	publisher       *redis.Client // Redis client for publishing commands
-	stopActive      atomic.Bool   // Track if emergency stop is active
+	lastHealthCheck atomic.Int64         // Unix timestamp of last health check
+	publisher       *redis.Client        // Redis client for publishing commands
+	stopActive      atomic.Bool          // Track if emergency stop is active
+	pendingResume   pendingConfirmation  // Track pending /resume_all confirmation
 }
 
 // NewBot creates a new Telegram bot client with exponential backoff retry.
@@ -291,5 +313,77 @@ func (b *Bot) ClosePublisher() error {
 	if b.publisher != nil {
 		return b.publisher.Close()
 	}
+	return nil
+}
+
+// SetPendingResume stores a pending resume confirmation request with timestamp.
+func (b *Bot) SetPendingResume(username string, chatID int64) {
+	b.pendingResume.mu.Lock()
+	defer b.pendingResume.mu.Unlock()
+	b.pendingResume.timestamp = time.Now()
+	b.pendingResume.username = username
+	b.pendingResume.chatID = chatID
+	b.pendingResume.active = true
+}
+
+// GetPendingResume retrieves the pending resume confirmation if valid (within 60s timeout).
+// Returns the username, chatID, and whether the confirmation is still valid.
+func (b *Bot) GetPendingResume() (username string, chatID int64, valid bool) {
+	b.pendingResume.mu.Lock()
+	defer b.pendingResume.mu.Unlock()
+	if !b.pendingResume.active {
+		return "", 0, false
+	}
+	// Check 60-second timeout
+	if time.Since(b.pendingResume.timestamp) > 60*time.Second {
+		b.pendingResume.active = false
+		return "", 0, false
+	}
+	return b.pendingResume.username, b.pendingResume.chatID, true
+}
+
+// ClearPendingResume clears the pending resume confirmation state.
+func (b *Bot) ClearPendingResume() {
+	b.pendingResume.mu.Lock()
+	defer b.pendingResume.mu.Unlock()
+	b.pendingResume.active = false
+}
+
+// PublishResumeCommand publishes a resume command to Redis.
+// If accounts is empty/nil, resumes all accounts. Otherwise resumes specific accounts.
+func (b *Bot) PublishResumeCommand(ctx context.Context, username string, chatID int64, accounts []string) error {
+	if b.publisher == nil {
+		return fmt.Errorf("Redis publisher not initialized")
+	}
+
+	command := "resume_all"
+	if len(accounts) > 0 {
+		command = "resume"
+	}
+
+	cmd := ResumeCommand{
+		Type:        "resume_command",
+		Command:     command,
+		Initiator:   "telegram",
+		InitiatedBy: "@" + username,
+		ChatID:      chatID,
+		Accounts:    accounts,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+
+	payload, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal resume command: %w", err)
+	}
+
+	start := time.Now()
+	err = b.publisher.Publish(ctx, "emergency:resume", payload).Err()
+	elapsed := time.Since(start)
+
+	if err != nil {
+		return fmt.Errorf("failed to publish resume command: %w", err)
+	}
+
+	log.Printf("Resume command published in %v (accounts: %v)", elapsed, accounts)
 	return nil
 }

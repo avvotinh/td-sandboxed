@@ -51,6 +51,19 @@ func (h *EmergencyHandler) Handle(accountID string, payload []byte) (string, err
 			event.AccountsPaused, event.PositionsPreserved)
 		return h.formatter.FormatEmergencyStopConfirmation(&event), nil
 
+	case "resume_command":
+		// Self-echo of our command, ignore
+		log.Printf("Ignoring self-echo of resume_command")
+		return "", nil
+
+	case "resume_confirmation":
+		var event formatters.ResumeConfirmation
+		if err := json.Unmarshal(payload, &event); err != nil {
+			return "", errors.Wrap("Handle", errors.ErrMessageParseError, err.Error())
+		}
+		log.Printf("Resume confirmed: %d accounts restarted", event.AccountsRestarted)
+		return h.formatter.FormatResumeConfirmation(&event), nil
+
 	default:
 		log.Printf("Unknown emergency event type: %s", base.Type)
 		return "", nil

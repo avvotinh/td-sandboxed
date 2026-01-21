@@ -338,3 +338,49 @@ func TestAlertFormatter_FormatEmergencyStopConfirmation_SingleOrder(t *testing.T
 		t.Errorf("Expected 'Open Positions: 0 (preserved)', got:\n%s", result)
 	}
 }
+
+// Test 6.6: FormatResumeConfirmation output matches AC#3 format
+func TestAlertFormatter_FormatResumeConfirmation(t *testing.T) {
+	formatter := NewAlertFormatter()
+
+	event := &ResumeConfirmation{
+		Type:              "resume_confirmation",
+		Status:            "completed",
+		AccountsRestarted: 3,
+		Timestamp:         "2026-01-20T14:32:20Z",
+	}
+
+	result := formatter.FormatResumeConfirmation(event)
+
+	// AC#3: Verify exact format
+	expectedFields := []string{
+		"🟢", "*TRADING RESUMED*",
+		"Accounts Restarted: 3",
+		"Status: Normal operation",
+		"14:32:20 UTC",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(result, field) {
+			t.Errorf("Expected message to contain '%s'\n\nGot:\n%s", field, result)
+		}
+	}
+}
+
+// Test FormatResumeConfirmation with 1 account restarted
+func TestAlertFormatter_FormatResumeConfirmation_SingleAccount(t *testing.T) {
+	formatter := NewAlertFormatter()
+
+	event := &ResumeConfirmation{
+		Type:              "resume_confirmation",
+		Status:            "completed",
+		AccountsRestarted: 1,
+		Timestamp:         "2026-01-20T14:32:20Z",
+	}
+
+	result := formatter.FormatResumeConfirmation(event)
+
+	if !strings.Contains(result, "Accounts Restarted: 1") {
+		t.Errorf("Expected 'Accounts Restarted: 1', got:\n%s", result)
+	}
+}

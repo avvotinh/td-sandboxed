@@ -694,6 +694,63 @@ func TestEmergencyHandler_Handle_Confirmation_NoOrdersCancelled(t *testing.T) {
 	}
 }
 
+// Test 6.6: EmergencyHandler ignores self-echo of resume_command
+func TestEmergencyHandler_Handle_ResumeCommandSelfEcho(t *testing.T) {
+	handler := NewEmergencyHandler()
+
+	payload := []byte(`{
+		"type": "resume_command",
+		"command": "resume_all",
+		"initiator": "telegram",
+		"initiated_by": "@testuser",
+		"chat_id": 123456789,
+		"timestamp": "2026-01-20T14:32:20Z"
+	}`)
+
+	msg, err := handler.Handle("", payload)
+	if err != nil {
+		t.Errorf("Expected no error for self-echo, got: %v", err)
+	}
+	// Self-echo returns empty string (no notification)
+	if msg != "" {
+		t.Errorf("Expected empty message for self-echo, got: %s", msg)
+	}
+}
+
+// Test EmergencyHandler processes resume_confirmation correctly (AC#3)
+func TestEmergencyHandler_Handle_ResumeConfirmation(t *testing.T) {
+	handler := NewEmergencyHandler()
+
+	payload := []byte(`{
+		"type": "resume_confirmation",
+		"status": "completed",
+		"accounts_restarted": 3,
+		"timestamp": "2026-01-20T14:32:20Z"
+	}`)
+
+	msg, err := handler.Handle("", payload)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if msg == "" {
+		t.Error("Expected formatted message, got empty string")
+	}
+
+	// AC#3: Verify format
+	expectedFields := []string{
+		"🟢", "*TRADING RESUMED*",
+		"Accounts Restarted: 3",
+		"Status: Normal operation",
+		"14:32:20 UTC",
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(msg, field) {
+			t.Errorf("Expected message to contain '%s', got:\n%s", field, msg)
+		}
+	}
+}
+
 func TestNewHealthHandler(t *testing.T) {
 	handler := NewHealthHandler()
 	if handler == nil {

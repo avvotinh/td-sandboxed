@@ -366,14 +366,430 @@ func TestHandleStopAll_SetsStopActive(t *testing.T) {
 	}
 }
 
-func TestHandleResumeAll_ScaffoldResponse(t *testing.T) {
+// Test 6.1: handleResumeAll returns already-active message when stop is NOT active (AC#5)
+func TestHandleResumeAll_AlreadyActive(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	bot := mockBotWithPublisher("TestBot", 123456789, client)
+	// Stop is NOT active (default is false)
+	handler := NewCommandHandler(bot)
+
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: &tgbotapi.User{UserName: "testtrader"},
+	}
+
+	response := handler.handleResumeAll(msg)
+
+	// AC#5: Should return already-active message
+	if !strings.Contains(response, "⚠️") {
+		t.Errorf("Expected ⚠️ emoji in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "Trading is already active") {
+		t.Errorf("Expected 'Trading is already active' in response, got:\n%s", response)
+	}
+}
+
+// Test 6.2: handleResumeAll returns confirmation prompt when stop is active (AC#1)
+func TestHandleResumeAll_ConfirmationPrompt(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	bot := mockBotWithPublisher("TestBot", 123456789, client)
+	// Set stop as active
+	bot.SetStopActive(true)
+
+	handler := NewCommandHandler(bot)
+
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: &tgbotapi.User{UserName: "testtrader"},
+	}
+
+	response := handler.handleResumeAll(msg)
+
+	// AC#1: Should return confirmation prompt
+	if !strings.Contains(response, "⚠️") {
+		t.Errorf("Expected ⚠️ emoji in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "Resume trading for all accounts") {
+		t.Errorf("Expected confirmation prompt, got:\n%s", response)
+	}
+	if !strings.Contains(response, "/confirm_resume") {
+		t.Errorf("Expected '/confirm_resume' in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "60 seconds") {
+		t.Errorf("Expected '60 seconds' timeout mention, got:\n%s", response)
+	}
+}
+
+// Test 6.3: handleConfirmResume publishes to Redis and resets stopActive (AC#2)
+func TestHandleConfirmResume_PublishesAndResets(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	// Subscribe to emergency:resume channel to capture the message
+	ctx := context.Background()
+	pubsub := client.Subscribe(ctx, "emergency:resume")
+	defer pubsub.Close()
+	_, err := pubsub.Receive(ctx)
+	if err != nil {
+		t.Fatalf("Failed to subscribe: %v", err)
+	}
+
+	bot := mockBotWithPublisher("TestBot", 123456789, client)
+	bot.SetStopActive(true) // Start with stop active
+
+	// Set up pending resume confirmation
+	bot.SetPendingResume("testtrader", 123456789)
+
+	handler := NewCommandHandler(bot)
+
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: &tgbotapi.User{UserName: "testtrader"},
+	}
+
+	response := handler.handleConfirmResume(msg)
+
+	// AC#2: Verify response
+	if !strings.Contains(response, "🟢") {
+		t.Errorf("Expected 🟢 emoji in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "TRADING RESUME INITIATED") {
+		t.Errorf("Expected 'TRADING RESUME INITIATED' in response, got:\n%s", response)
+	}
+
+	// Verify stopActive reset
+	if bot.IsStopActive() {
+		t.Error("Expected stopActive to be false after confirm_resume")
+	}
+
+	// Verify Redis message was published
+	msgCh := pubsub.Channel()
+	select {
+	case redisMsg := <-msgCh:
+		var cmd ResumeCommand
+		if err := json.Unmarshal([]byte(redisMsg.Payload), &cmd); err != nil {
+			t.Fatalf("Failed to unmarshal message: %v", err)
+		}
+		if cmd.Type != "resume_command" {
+			t.Errorf("Expected type 'resume_command', got '%s'", cmd.Type)
+		}
+		if cmd.Command != "resume_all" {
+			t.Errorf("Expected command 'resume_all', got '%s'", cmd.Command)
+		}
+		if cmd.InitiatedBy != "@testtrader" {
+			t.Errorf("Expected initiated_by '@testtrader', got '%s'", cmd.InitiatedBy)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for Redis message")
+	}
+}
+
+// Test 6.4: handleConfirmResume rejects expired confirmation (AC#6)
+func TestHandleConfirmResume_RejectsExpired(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	bot := mockBotWithPublisher("TestBot", 123456789, client)
+	// No pending resume set (or expired)
+
+	handler := NewCommandHandler(bot)
+
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: &tgbotapi.User{UserName: "testtrader"},
+	}
+
+	response := handler.handleConfirmResume(msg)
+
+	// AC#6: Should reject with message about no pending request
+	if !strings.Contains(response, "⚠️") {
+		t.Errorf("Expected ⚠️ emoji in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "No pending resume request") {
+		t.Errorf("Expected 'No pending resume request' in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "/resume_all first") {
+		t.Errorf("Expected '/resume_all first' instruction, got:\n%s", response)
+	}
+}
+
+// Test 6.5: ResumeCommand JSON marshalling
+func TestResumeCommand_JSONMarshal(t *testing.T) {
+	cmd := ResumeCommand{
+		Type:        "resume_command",
+		Command:     "resume_all",
+		Initiator:   "telegram",
+		InitiatedBy: "@testuser",
+		ChatID:      123456789,
+		Accounts:    nil,
+		Timestamp:   "2026-01-20T14:32:20Z",
+	}
+
+	data, err := json.Marshal(cmd)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	// Verify JSON structure
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	expectedFields := map[string]interface{}{
+		"type":         "resume_command",
+		"command":      "resume_all",
+		"initiator":    "telegram",
+		"initiated_by": "@testuser",
+		"chat_id":      float64(123456789),
+		"timestamp":    "2026-01-20T14:32:20Z",
+	}
+
+	for key, expected := range expectedFields {
+		if result[key] != expected {
+			t.Errorf("Expected %s='%v', got '%v'", key, expected, result[key])
+		}
+	}
+
+	// Accounts should be omitted when nil
+	if _, ok := result["accounts"]; ok {
+		t.Error("Expected 'accounts' to be omitted when nil")
+	}
+}
+
+// Test 6.5b: ResumeCommand with accounts marshalling
+func TestResumeCommand_JSONMarshal_WithAccounts(t *testing.T) {
+	cmd := ResumeCommand{
+		Type:        "resume_command",
+		Command:     "resume",
+		Initiator:   "telegram",
+		InitiatedBy: "@testuser",
+		ChatID:      123456789,
+		Accounts:    []string{"ftmo-gold-001"},
+		Timestamp:   "2026-01-20T14:32:20Z",
+	}
+
+	data, err := json.Marshal(cmd)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	// Verify accounts is included
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	accounts, ok := result["accounts"].([]interface{})
+	if !ok {
+		t.Fatal("Expected 'accounts' to be an array")
+	}
+	if len(accounts) != 1 || accounts[0] != "ftmo-gold-001" {
+		t.Errorf("Expected accounts=['ftmo-gold-001'], got %v", accounts)
+	}
+}
+
+// Test 6.7: handleResume publishes for single account (AC#4)
+func TestHandleResume_SingleAccount(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	// Subscribe to emergency:resume channel
+	ctx := context.Background()
+	pubsub := client.Subscribe(ctx, "emergency:resume")
+	defer pubsub.Close()
+	_, err := pubsub.Receive(ctx)
+	if err != nil {
+		t.Fatalf("Failed to subscribe: %v", err)
+	}
+
+	bot := mockBotWithPublisher("TestBot", 123456789, client)
+	handler := NewCommandHandler(bot)
+
+	// Create message with arguments
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: &tgbotapi.User{UserName: "testtrader"},
+		Text: "/resume ftmo-gold-001",
+		Entities: []tgbotapi.MessageEntity{
+			{Type: "bot_command", Offset: 0, Length: 7},
+		},
+	}
+
+	response := handler.handleResume(msg)
+
+	// Verify response
+	if !strings.Contains(response, "🟢") {
+		t.Errorf("Expected 🟢 emoji in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "RESUME INITIATED") {
+		t.Errorf("Expected 'RESUME INITIATED' in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "ftmo-gold-001") {
+		t.Errorf("Expected account ID in response, got:\n%s", response)
+	}
+
+	// Verify Redis message
+	msgCh := pubsub.Channel()
+	select {
+	case redisMsg := <-msgCh:
+		var cmd ResumeCommand
+		if err := json.Unmarshal([]byte(redisMsg.Payload), &cmd); err != nil {
+			t.Fatalf("Failed to unmarshal message: %v", err)
+		}
+		if cmd.Type != "resume_command" {
+			t.Errorf("Expected type 'resume_command', got '%s'", cmd.Type)
+		}
+		if cmd.Command != "resume" {
+			t.Errorf("Expected command 'resume', got '%s'", cmd.Command)
+		}
+		if len(cmd.Accounts) != 1 || cmd.Accounts[0] != "ftmo-gold-001" {
+			t.Errorf("Expected accounts=['ftmo-gold-001'], got %v", cmd.Accounts)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for Redis message")
+	}
+}
+
+// Test handleResume with no account ID
+func TestHandleResume_NoAccountID(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	bot := mockBotWithPublisher("TestBot", 123456789, client)
+	handler := NewCommandHandler(bot)
+
+	// Message with no arguments
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 123456789},
+		From: &tgbotapi.User{UserName: "testtrader"},
+		Text: "/resume",
+		Entities: []tgbotapi.MessageEntity{
+			{Type: "bot_command", Offset: 0, Length: 7},
+		},
+	}
+
+	response := handler.handleResume(msg)
+
+	// Should return usage instructions
+	if !strings.Contains(response, "⚠️") {
+		t.Errorf("Expected ⚠️ emoji in response, got:\n%s", response)
+	}
+	if !strings.Contains(response, "specify an account ID") {
+		t.Errorf("Expected usage instructions, got:\n%s", response)
+	}
+}
+
+// Test pending resume timeout
+func TestBot_PendingResume_Timeout(t *testing.T) {
+	bot := mockBot("TestBot", 123456789, true)
+
+	// Set pending resume
+	bot.SetPendingResume("testuser", 123456789)
+
+	// Should be valid immediately
+	username, chatID, valid := bot.GetPendingResume()
+	if !valid {
+		t.Error("Expected pending resume to be valid immediately")
+	}
+	if username != "testuser" {
+		t.Errorf("Expected username 'testuser', got '%s'", username)
+	}
+	if chatID != 123456789 {
+		t.Errorf("Expected chatID 123456789, got %d", chatID)
+	}
+
+	// Clear it
+	bot.ClearPendingResume()
+
+	// Should not be valid now
+	_, _, valid = bot.GetPendingResume()
+	if valid {
+		t.Error("Expected pending resume to be invalid after clear")
+	}
+}
+
+// Test 6.9: Confirmation timeout expires after 60 seconds (AC#6)
+func TestBot_PendingResume_TimeoutExpiration(t *testing.T) {
+	bot := mockBot("TestBot", 123456789, true)
+
+	// Set pending resume
+	bot.SetPendingResume("testuser", 123456789)
+
+	// Manipulate timestamp to simulate 61 seconds ago
+	bot.pendingResume.mu.Lock()
+	bot.pendingResume.timestamp = time.Now().Add(-61 * time.Second)
+	bot.pendingResume.mu.Unlock()
+
+	// Should NOT be valid after timeout
+	_, _, valid := bot.GetPendingResume()
+	if valid {
+		t.Error("Expected pending resume to be invalid after 60-second timeout")
+	}
+
+	// Verify active was set to false by GetPendingResume
+	bot.pendingResume.mu.Lock()
+	active := bot.pendingResume.active
+	bot.pendingResume.mu.Unlock()
+	if active {
+		t.Error("Expected active to be false after timeout check")
+	}
+}
+
+// Test timeout at exactly 60 seconds boundary
+func TestBot_PendingResume_TimeoutBoundary(t *testing.T) {
+	bot := mockBot("TestBot", 123456789, true)
+
+	// Set pending resume
+	bot.SetPendingResume("testuser", 123456789)
+
+	// At exactly 59 seconds - should still be valid
+	bot.pendingResume.mu.Lock()
+	bot.pendingResume.timestamp = time.Now().Add(-59 * time.Second)
+	bot.pendingResume.mu.Unlock()
+
+	_, _, valid := bot.GetPendingResume()
+	if !valid {
+		t.Error("Expected pending resume to still be valid at 59 seconds")
+	}
+
+	// At 61 seconds - should be invalid
+	bot.pendingResume.mu.Lock()
+	bot.pendingResume.timestamp = time.Now().Add(-61 * time.Second)
+	bot.pendingResume.mu.Unlock()
+
+	_, _, valid = bot.GetPendingResume()
+	if valid {
+		t.Error("Expected pending resume to be invalid at 61 seconds")
+	}
+}
+
+// Test handleHelp includes new resume commands
+func TestHandleHelp_IncludesResumeCommands(t *testing.T) {
 	handler := NewCommandHandler(mockBot("TestBot", 0, true))
 
-	response := handler.handleResumeAll()
+	response := handler.handleHelp()
 
-	// Verify scaffold response mentions it's not fully implemented
-	if !strings.Contains(response, "Scaffold") || !strings.Contains(response, "Story 6.6") {
-		t.Errorf("Expected scaffold response with story reference, got:\n%s", response)
+	expectedCommands := []string{
+		"/resume_all",
+		"/confirm_resume",
+		"/resume <id>",
+	}
+
+	for _, cmd := range expectedCommands {
+		if !strings.Contains(response, cmd) {
+			t.Errorf("Expected help to contain '%s', got:\n%s", cmd, response)
+		}
 	}
 }
 

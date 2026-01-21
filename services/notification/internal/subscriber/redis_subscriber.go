@@ -62,6 +62,8 @@ func (r *Router) Route(channel, payload string) {
 		msg, err = r.systemHandler.Handle("", []byte(payload))
 	case channel == "emergency:stop":
 		msg, err = r.emergencyHandler.Handle("", []byte(payload))
+	case channel == "emergency:resume":
+		msg, err = r.emergencyHandler.Handle("", []byte(payload))
 	default:
 		log.Printf("Unknown channel: %s", channel)
 		return
@@ -114,6 +116,7 @@ func New(cfg *config.Config, router *Router) *Subscriber {
 			"alerts:risk:*",
 			"alerts:system",
 			"emergency:stop",
+			"emergency:resume",
 		},
 	}
 }

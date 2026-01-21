@@ -63,7 +63,11 @@ func (h *CommandHandler) Handle(msg *tgbotapi.Message) {
 	case "stop_all":
 		response = h.handleStopAll(msg)
 	case "resume_all":
-		response = h.handleResumeAll()
+		response = h.handleResumeAll(msg)
+	case "confirm_resume":
+		response = h.handleConfirmResume(msg)
+	case "resume":
+		response = h.handleResume(msg)
 	default:
 		response = "Unknown command. Use /help for available commands."
 	}
@@ -134,10 +138,10 @@ func (h *CommandHandler) handleHelp() string {
 
 /status - Show current system status
 /stop_all - Emergency stop all accounts
-/resume_all - Resume trading after stop
-/help - Show this help message
-
-*Note:* This is a scaffold. Full functionality in Epic 6.`
+/resume_all - Resume trading after stop (requires confirmation)
+/confirm_resume - Confirm resume after /resume_all
+/resume <id> - Resume single account (e.g., /resume ftmo-gold-001)
+/help - Show this help message`
 }
 
 func (h *CommandHandler) handleStatus() string {
@@ -216,15 +220,89 @@ func (h *CommandHandler) handleStopAll(msg *tgbotapi.Message) string {
 	return "🛑 *EMERGENCY STOP INITIATED*\n\nCommand sent to trading engine.\nAwaiting confirmation..."
 }
 
-func (h *CommandHandler) handleResumeAll() string {
-	// Scaffold: Return placeholder response
-	// TODO(Story 6.6): Implement full resume logic including:
-	// - Call h.bot.SetStopActive(false) to reset emergency stop state
-	// - Publish resume command to Redis
-	// - Handle already-resumed case similar to already-stopped in handleStopAll
-	log.Println("Resume command received (scaffold mode)")
-	return `*Resume Trading (Scaffold)*
+func (h *CommandHandler) handleResumeAll(msg *tgbotapi.Message) string {
+	// AC#5: Check if stop is NOT active (already trading)
+	if !h.bot.IsStopActive() {
+		return "⚠️ Trading is already active - no emergency stop to resume from"
+	}
 
-This is a scaffold implementation.
-Full resume functionality in Story 6.6.`
+	// Extract user information
+	username := "unknown"
+	if msg.From != nil {
+		username = msg.From.UserName
+		if username == "" {
+			username = fmt.Sprintf("user_%d", msg.From.ID)
+		}
+	}
+
+	log.Printf("RESUME ALL requested by @%s (chat: %d) - awaiting confirmation", username, msg.Chat.ID)
+
+	// Store pending confirmation with 60-second timeout
+	h.bot.SetPendingResume(username, msg.Chat.ID)
+
+	return "⚠️ *Resume trading for all accounts?*\n\nReply /confirm_resume within 60 seconds to proceed.\n\n_This will restart all previously active accounts._"
+}
+
+func (h *CommandHandler) handleConfirmResume(msg *tgbotapi.Message) string {
+	// Check pending confirmation
+	username, chatID, valid := h.bot.GetPendingResume()
+	if !valid {
+		return "⚠️ No pending resume request.\n\nUse /resume_all first, then /confirm_resume within 60 seconds."
+	}
+
+	log.Printf("RESUME CONFIRMED by @%s (chat: %d)", username, chatID)
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	// Publish resume command
+	if err := h.bot.PublishResumeCommand(ctx, username, chatID, nil); err != nil {
+		log.Printf("CRITICAL: Resume command publish failed: %v", err)
+		return fmt.Sprintf("*RESUME FAILED*\n\nFailed to send resume command.\nError: %s", err.Error())
+	}
+
+	// Reset stop state
+	h.bot.SetStopActive(false)
+
+	// Clear pending confirmation
+	h.bot.ClearPendingResume()
+
+	return "🟢 *TRADING RESUME INITIATED*\n\nCommand sent to trading engine.\nAwaiting confirmation..."
+}
+
+func (h *CommandHandler) handleResume(msg *tgbotapi.Message) string {
+	// Parse account_id from arguments
+	accountID := strings.TrimSpace(msg.CommandArguments())
+	if accountID == "" {
+		return "⚠️ Please specify an account ID.\n\nUsage: /resume <account_id>\nExample: /resume ftmo-gold-001"
+	}
+
+	// Extract user information
+	username := "unknown"
+	if msg.From != nil {
+		username = msg.From.UserName
+		if username == "" {
+			username = fmt.Sprintf("user_%d", msg.From.ID)
+		}
+	}
+
+	// Log warning if no emergency stop is active (account-specific resume still allowed)
+	if !h.bot.IsStopActive() {
+		log.Printf("WARNING: RESUME SINGLE ACCOUNT requested by @%s for %s but no emergency stop is active", username, accountID)
+	} else {
+		log.Printf("RESUME SINGLE ACCOUNT requested by @%s for %s", username, accountID)
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	// Publish resume command for single account
+	if err := h.bot.PublishResumeCommand(ctx, username, msg.Chat.ID, []string{accountID}); err != nil {
+		log.Printf("CRITICAL: Resume command publish failed: %v", err)
+		return fmt.Sprintf("*RESUME FAILED*\n\nFailed to send resume command.\nError: %s", err.Error())
+	}
+
+	return fmt.Sprintf("🟢 *RESUME INITIATED*\n\nAccount: %s\nCommand sent to trading engine.", accountID)
 }

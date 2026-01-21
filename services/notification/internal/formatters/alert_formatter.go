@@ -71,6 +71,14 @@ type EmergencyStopConfirmation struct {
 	Timestamp          string `json:"timestamp"`
 }
 
+// ResumeConfirmation represents a resume confirmation from the trading engine.
+type ResumeConfirmation struct {
+	Type              string `json:"type"`               // "resume_confirmation"
+	Status            string `json:"status"`             // "completed"
+	AccountsRestarted int    `json:"accounts_restarted"`
+	Timestamp         string `json:"timestamp"`
+}
+
 // AlertFormatter formats alert notifications.
 type AlertFormatter struct{}
 
@@ -172,6 +180,16 @@ Time: %s`,
 		e.AccountsPaused,
 		orderStatus,
 		e.PositionsPreserved,
+		formatAlertTimestamp(e.Timestamp))
+}
+
+// FormatResumeConfirmation formats a resume confirmation alert.
+func (f *AlertFormatter) FormatResumeConfirmation(e *ResumeConfirmation) string {
+	return fmt.Sprintf(`🟢 *TRADING RESUMED*
+Accounts Restarted: %d
+Status: Normal operation
+Time: %s`,
+		e.AccountsRestarted,
 		formatAlertTimestamp(e.Timestamp))
 }
 
