@@ -10,7 +10,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from src.adapters.zmq_adapter import ZmqAdapter
 from src.adapters.zmq_models import Order, OrderResult, OrderSide
@@ -18,6 +18,10 @@ from src.orders.order import InternalOrder, OrderState
 from src.orders.position_tracker import PositionTracker
 from src.orders.signal import Signal, SignalType
 from src.orders.trade import Trade
+from src.rules.audit_logger import audit_task_done_callback
+
+if TYPE_CHECKING:
+    from src.orders.trade_db_writer import TradeDBWriter
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,7 @@ class OrderExecutionService:
         zmq_adapter: ZmqAdapter,
         position_tracker: PositionTracker,
         order_timeout: float = 5.0,
+        trade_db_writer: Optional["TradeDBWriter"] = None,
     ) -> None:
         """Initialize the order execution service.
 
@@ -78,12 +83,15 @@ class OrderExecutionService:
             zmq_adapter: ZMQ adapter for order communication
             position_tracker: Position tracker for managing positions
             order_timeout: Timeout for order execution in seconds
+            trade_db_writer: Optional writer for persisting trades to TimescaleDB
         """
         self._zmq = zmq_adapter
         self._positions = position_tracker
         self._order_timeout = order_timeout
+        self._trade_db_writer = trade_db_writer
         self._pending_order_ids: set[str] = set()
         self._trades: list[Trade] = []
+        self._signals_by_order: dict[str, Signal] = {}
 
     @property
     def position_tracker(self) -> PositionTracker:
@@ -124,6 +132,9 @@ class OrderExecutionService:
         """
         # Create order from signal
         order = self._create_order(signal, account_id, volume, price, sl, tp)
+
+        # Store signal keyed by order_id for use in _handle_entry_fill (concurrency-safe)
+        self._signals_by_order[order.order_id] = signal
 
         # Idempotency check
         if order.order_id in self._pending_order_ids:
@@ -179,6 +190,8 @@ class OrderExecutionService:
 
         finally:
             self._pending_order_ids.discard(order.order_id)
+            # Clean up signal mapping on error (successful path pops in _handle_entry_fill)
+            self._signals_by_order.pop(order.order_id, None)
 
         return order
 
@@ -301,6 +314,7 @@ class OrderExecutionService:
         """Handle entry order fill (BUY/SELL).
 
         Opens a new position and creates an open trade record.
+        Also persists trade to TimescaleDB via fire-and-forget pattern.
 
         Args:
             order: The filled entry order
@@ -321,6 +335,25 @@ class OrderExecutionService:
         )
         self._trades.append(trade)
 
+        # Fire-and-forget DB write using order-keyed Signal (concurrency-safe)
+        signal = self._signals_by_order.pop(order.order_id, None)
+        if self._trade_db_writer and signal and signal.strategy_name:
+            task = asyncio.create_task(
+                self._trade_db_writer.write_trade_entry(
+                    trade,
+                    strategy_name=signal.strategy_name,
+                    signal_reason=signal.metadata.get("reason") if signal.metadata else None,
+                    signal_metadata=signal.metadata,
+                ),
+                name=f"trade_write_{trade.trade_id[:8]}",
+            )
+            task.add_done_callback(audit_task_done_callback)
+        elif self._trade_db_writer and (not signal or not signal.strategy_name):
+            logger.warning(
+                "Skipping trade DB write for %s: missing signal or strategy_name",
+                trade.trade_id[:8],
+            )
+
         logger.debug(
             "Trade opened: %s %s @ %.4f",
             trade.side.value,
@@ -331,7 +364,8 @@ class OrderExecutionService:
     def _handle_close_fill(self, order: InternalOrder) -> None:
         """Handle close order fill.
 
-        Closes the position and creates a closed trade with PnL.
+        Closes the position and updates the existing trade with exit details and PnL.
+        Also persists exit updates to TimescaleDB via fire-and-forget pattern.
 
         Args:
             order: The filled close order
@@ -351,6 +385,7 @@ class OrderExecutionService:
 
         # Calculate PnL
         exit_price = order.fill_price or order.price
+        exit_time = order.filled_at or datetime.now(timezone.utc)
         price_diff = exit_price - closed_position.entry_price
         if closed_position.side == OrderSide.SELL:
             price_diff = -price_diff  # Short position
@@ -361,23 +396,49 @@ class OrderExecutionService:
             else 0
         )
 
-        # Create closed trade
-        trade = Trade(
-            trade_id=str(uuid.uuid4()),
-            order_id=closed_position.order_id,  # Original entry order
-            account_id=order.account_id,
-            symbol=order.symbol,
-            side=closed_position.side,
-            quantity=closed_position.quantity,
-            entry_price=closed_position.entry_price,
-            entry_time=closed_position.entry_time,
-            exit_price=exit_price,
-            exit_time=order.filled_at,
-            pnl_dollars=pnl_dollars,
-            pnl_percent=pnl_percent,
-            slippage=order.slippage,
-        )
-        self._trades.append(trade)
+        # Find existing entry trade and update it (or create new if not found)
+        entry_trade = self.get_trade_by_order_id(closed_position.order_id)
+
+        if entry_trade:
+            # Update existing trade with exit details
+            entry_trade.close(exit_price, exit_time, order.slippage)
+            trade = entry_trade
+
+            # Fire-and-forget DB update for exit
+            if self._trade_db_writer:
+                task = asyncio.create_task(
+                    self._trade_db_writer.update_trade_exit(
+                        trade_id=trade.trade_id,
+                        exit_price=exit_price,
+                        exit_time=exit_time,
+                        pnl_dollars=pnl_dollars,
+                        pnl_percent=pnl_percent,
+                    ),
+                    name=f"trade_exit_{trade.trade_id[:8]}",
+                )
+                task.add_done_callback(audit_task_done_callback)
+        else:
+            # Fallback: create new trade record (for positions opened before DB writer)
+            logger.warning(
+                "Entry trade not found for order %s, creating closed trade record",
+                closed_position.order_id[:8],
+            )
+            trade = Trade(
+                trade_id=str(uuid.uuid4()),
+                order_id=closed_position.order_id,
+                account_id=order.account_id,
+                symbol=order.symbol,
+                side=closed_position.side,
+                quantity=closed_position.quantity,
+                entry_price=closed_position.entry_price,
+                entry_time=closed_position.entry_time,
+                exit_price=exit_price,
+                exit_time=exit_time,
+                pnl_dollars=pnl_dollars,
+                pnl_percent=pnl_percent,
+                slippage=order.slippage,
+            )
+            self._trades.append(trade)
 
         logger.info(
             "Position CLOSED: %s %s PnL: $%.2f (%.2f%%)",
