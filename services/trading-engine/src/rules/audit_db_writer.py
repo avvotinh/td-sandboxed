@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import AsyncGenerator
 
-from sqlalchemy import Column, DateTime, Numeric, String
+from sqlalchemy import Column, DateTime, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -37,18 +37,23 @@ class Base(DeclarativeBase):
 class AuditLogModel(Base):
     """SQLAlchemy model for audit_logs hypertable.
 
-    Maps to the TimescaleDB audit_logs table as defined in architecture:
+    Maps to the TimescaleDB audit_logs table as defined in init.sql:
 
     CREATE TABLE audit_logs (
-        log_id UUID PRIMARY KEY,
-        account_id VARCHAR(50) REFERENCES accounts(id),
+        log_id UUID DEFAULT gen_random_uuid(),
         timestamp TIMESTAMPTZ NOT NULL,
+        account_id VARCHAR(50),
         event_type VARCHAR(50) NOT NULL,
+        event_subtype VARCHAR(50),
+        source VARCHAR(50) NOT NULL,
+        level VARCHAR(20) DEFAULT 'INFO' CHECK (level IN ('DEBUG','INFO','WARNING','ERROR','CRITICAL')),
+        message TEXT,
         rule_name VARCHAR(100),
         rule_result VARCHAR(20),
         current_value DECIMAL(18, 4),
         threshold_value DECIMAL(18, 4),
-        order_id UUID,
+        trade_id UUID,
+        order_id VARCHAR(50),
         context JSONB,
         created_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -57,15 +62,19 @@ class AuditLogModel(Base):
     __tablename__ = "audit_logs"
 
     log_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    account_id = Column(String(50), nullable=False, index=True)
     timestamp = Column(DateTime(timezone=True), nullable=False)
+    account_id = Column(String(50), nullable=True)
     event_type = Column(String(50), nullable=False)
-    rule_type = Column(String(50), nullable=True)
+    event_subtype = Column(String(50), nullable=True)
+    source = Column(String(50), nullable=False, default="rule-engine")
+    level = Column(String(20), nullable=False, default="INFO")
+    message = Column(Text, nullable=True)
     rule_name = Column(String(100), nullable=True)
     rule_result = Column(String(20), nullable=True)
     current_value = Column(Numeric(18, 4), nullable=True)
     threshold_value = Column(Numeric(18, 4), nullable=True)
-    order_id = Column(UUID(as_uuid=True), nullable=True)
+    trade_id = Column(UUID(as_uuid=True), nullable=True)
+    order_id = Column(String(50), nullable=True)
     context = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -79,27 +88,22 @@ class AuditLogModel(Base):
         Returns:
             AuditLogModel instance.
         """
-        # Convert order_id string to UUID if present
-        order_uuid = None
-        if entry.order_id:
-            try:
-                order_uuid = uuid.UUID(entry.order_id)
-            except (ValueError, TypeError):
-                # If order_id is not a valid UUID, store as None
-                logger.debug("Order ID %s is not a valid UUID, storing as None", entry.order_id)
-
         return cls(
             log_id=uuid.uuid4(),
-            account_id=entry.account_id,
             timestamp=entry.timestamp,
+            account_id=entry.account_id,
             event_type=entry.event_type,
-            rule_type=entry.rule_type,
-            rule_name=entry.rule_name,
-            rule_result=entry.rule_result,
+            event_subtype=entry.event_subtype,
+            source=entry.source,
+            level=entry.level,
+            message=entry.message,
+            rule_name=entry.rule_name or None,
+            rule_result=entry.rule_result or None,
             current_value=Decimal(str(entry.current_value)) if entry.current_value is not None else None,
             threshold_value=Decimal(str(entry.threshold_value)) if entry.threshold_value is not None else None,
-            order_id=order_uuid,
-            context=entry.context,
+            trade_id=uuid.UUID(entry.trade_id) if entry.trade_id else None,
+            order_id=entry.order_id,
+            context=entry.context or None,
         )
 
 

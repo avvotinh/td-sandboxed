@@ -21,6 +21,7 @@ from src.orders.trade import Trade
 from src.rules.audit_logger import audit_task_done_callback
 
 if TYPE_CHECKING:
+    from src.audit.audit_service import AuditService
     from src.orders.trade_db_writer import TradeDBWriter
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,7 @@ class OrderExecutionService:
         position_tracker: PositionTracker,
         order_timeout: float = 5.0,
         trade_db_writer: Optional["TradeDBWriter"] = None,
+        audit_service: Optional["AuditService"] = None,
     ) -> None:
         """Initialize the order execution service.
 
@@ -84,11 +86,13 @@ class OrderExecutionService:
             position_tracker: Position tracker for managing positions
             order_timeout: Timeout for order execution in seconds
             trade_db_writer: Optional writer for persisting trades to TimescaleDB
+            audit_service: Optional AuditService for comprehensive audit logging
         """
         self._zmq = zmq_adapter
         self._positions = position_tracker
         self._order_timeout = order_timeout
         self._trade_db_writer = trade_db_writer
+        self._audit_service = audit_service
         self._pending_order_ids: set[str] = set()
         self._trades: list[Trade] = []
         self._signals_by_order: dict[str, Signal] = {}
@@ -354,6 +358,23 @@ class OrderExecutionService:
                 trade.trade_id[:8],
             )
 
+        # Fire-and-forget audit log (AFTER trade write to ensure FK ordering)
+        if self._audit_service:
+            audit_task = asyncio.create_task(
+                self._audit_service.log_trade_executed(
+                    account_id=order.account_id,
+                    trade_id=trade.trade_id,
+                    symbol=trade.symbol,
+                    side=order.action.value,
+                    quantity=trade.quantity,
+                    entry_price=trade.entry_price,
+                    strategy_name=signal.strategy_name if signal else "unknown",
+                    order_id=order.order_id,
+                ),
+                name=f"audit_trade_{trade.trade_id[:8]}",
+            )
+            audit_task.add_done_callback(audit_task_done_callback)
+
         logger.debug(
             "Trade opened: %s %s @ %.4f",
             trade.side.value,
@@ -439,6 +460,22 @@ class OrderExecutionService:
                 slippage=order.slippage,
             )
             self._trades.append(trade)
+
+        # Fire-and-forget audit log for position close
+        if self._audit_service:
+            audit_task = asyncio.create_task(
+                self._audit_service.log_position_closed(
+                    account_id=order.account_id,
+                    trade_id=trade.trade_id,
+                    symbol=order.symbol,
+                    side=closed_position.side.value,
+                    exit_price=exit_price,
+                    pnl_dollars=pnl_dollars,
+                    order_id=order.order_id,
+                ),
+                name=f"audit_close_{trade.trade_id[:8]}",
+            )
+            audit_task.add_done_callback(audit_task_done_callback)
 
         logger.info(
             "Position CLOSED: %s %s PnL: $%.2f (%.2f%%)",

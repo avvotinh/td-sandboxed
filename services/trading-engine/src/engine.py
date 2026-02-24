@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from .rules.audit_logger import audit_task_done_callback
+
 if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -15,6 +17,7 @@ if TYPE_CHECKING:
     from .accounts.pnl_registry import PnLTrackerRegistry
     from .accounts.risk_registry import RiskStateRegistry
     from .adapters.zmq_adapter import ZmqAdapter
+    from .audit.audit_service import AuditService
     from .state.cold_storage_service import ColdStorageService
     from .state.cold_storage_writer import ColdStorageWriter
     from .state.crash_recovery import CrashRecoveryManager, RecoveryResult
@@ -52,6 +55,7 @@ class TradingEngine:
         account_manager: AccountManager | None = None,
         snapshot_service: SnapshotService | None = None,
         database_url: str | None = None,
+        audit_service: AuditService | None = None,
     ) -> None:
         """Initialize the trading engine.
 
@@ -96,6 +100,7 @@ class TradingEngine:
         self._shutdown_result: ShutdownResult | None = None
         self._cold_storage_writer: ColdStorageWriter | None = None
         self._cold_storage_service: ColdStorageService | None = None
+        self._audit_service = audit_service
 
     @property
     def is_running(self) -> bool:
@@ -160,6 +165,21 @@ class TradingEngine:
         This typically means another instance acquired the lock or Redis issue.
         """
         logger.critical("Process lock lost! Triggering emergency shutdown.")
+
+        # Audit: log lock loss as critical system event
+        if self._audit_service:
+
+            task = asyncio.create_task(
+                self._audit_service.log_system_event(
+                    event_subtype="lock_lost",
+                    message="Process lock lost - emergency shutdown triggered",
+                    level="ERROR",
+                    context={"trigger": "heartbeat_failure"},
+                ),
+                name="audit_lock_lost",
+            )
+            task.add_done_callback(audit_task_done_callback)
+
         self._running = False
         self._shutdown_event.set()
 
@@ -232,6 +252,20 @@ class TradingEngine:
                 "Entering recovery mode for %d accounts",
                 len(result.accounts_needing_recovery),
             )
+
+            # Audit: log crash recovery event
+            if self._audit_service:
+    
+                task = asyncio.create_task(
+                    self._audit_service.log_system_event(
+                        event_subtype="crash_recovery",
+                        message=f"Crash recovery initiated for {len(result.accounts_needing_recovery)} accounts",
+                        level="WARNING",
+                        context={"accounts": result.accounts_needing_recovery},
+                    ),
+                    name="audit_crash_recovery",
+                )
+                task.add_done_callback(audit_task_done_callback)
 
             # Run position reconciliation if ZMQ adapter is available
             if self._zmq_adapter is not None:
@@ -507,6 +541,23 @@ class TradingEngine:
         logger.info("Trading Engine v0.1.0 running")
         self._running = True
 
+        # Audit: log engine start
+        if self._audit_service:
+
+            start_context: dict = {"version": "0.1.0"}
+            if self._recovery_result and self._recovery_result.recovery_mode:
+                start_context["recovery_mode"] = True
+                start_context["accounts_recovered"] = self._recovery_result.accounts_needing_recovery
+            task = asyncio.create_task(
+                self._audit_service.log_system_event(
+                    event_subtype="engine_start",
+                    message="Trading Engine started",
+                    context=start_context,
+                ),
+                name="audit_engine_start",
+            )
+            task.add_done_callback(audit_task_done_callback)
+
         # Wait for shutdown signal (via SIGTERM, SIGINT, or shutdown())
         if self._graceful_shutdown is not None:
             try:
@@ -523,6 +574,29 @@ class TradingEngine:
                 await self._shutdown_event.wait()
             except asyncio.CancelledError:
                 logger.info("Engine run loop cancelled")
+
+        # Audit: log shutdown completion with result
+        if self._audit_service:
+
+            shutdown_success = self._shutdown_result.success if self._shutdown_result else True
+            task = asyncio.create_task(
+                self._audit_service.log_system_event(
+                    event_subtype="engine_stopped",
+                    message="Trading Engine stopped",
+                    level="INFO" if shutdown_success else "ERROR",
+                    context={
+                        "graceful": self._graceful_shutdown is not None,
+                        "success": shutdown_success,
+                    },
+                ),
+                name="audit_engine_stopped",
+            )
+            task.add_done_callback(audit_task_done_callback)
+            # Brief wait to allow the audit entry to be buffered before engine teardown
+            try:
+                await asyncio.wait_for(task, timeout=2.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
 
         self._running = False
         logger.info("Trading Engine stopped")
@@ -543,6 +617,19 @@ class TradingEngine:
             return
 
         logger.info("Shutdown requested via Engine.shutdown()")
+
+        # Audit: log engine stop
+        if self._audit_service:
+
+            task = asyncio.create_task(
+                self._audit_service.log_system_event(
+                    event_subtype="engine_stop",
+                    message="Trading Engine shutdown requested",
+                    context={"graceful": self._graceful_shutdown is not None},
+                ),
+                name="audit_engine_stop",
+            )
+            task.add_done_callback(audit_task_done_callback)
 
         if self._graceful_shutdown is not None:
             self._graceful_shutdown.trigger_shutdown()

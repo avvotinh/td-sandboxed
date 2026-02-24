@@ -36,40 +36,54 @@ class AuditEventType(str, Enum):
         RULE_CHECK: Standard rule evaluation (ALLOW result).
         TRADE_BLOCKED: Trade was blocked by a rule (BLOCK result).
         WARNING_TRIGGERED: Warning threshold was crossed (WARN result).
+        TRADE_EXECUTED: Trade confirmation event.
+        POSITION_CLOSED: Position exit event.
+        SYSTEM_EVENT: Engine lifecycle event (startup, shutdown, recovery).
     """
 
     RULE_CHECK = "rule_check"
     TRADE_BLOCKED = "trade_blocked"
     WARNING_TRIGGERED = "warning_triggered"
+    TRADE_EXECUTED = "trade_executed"
+    POSITION_CLOSED = "position_closed"
+    SYSTEM_EVENT = "system_event"
 
 
 @dataclass
 class AuditEntry:
-    """Represents a single audit log entry for a rule check.
+    """Represents a single audit log entry.
 
     Attributes:
-        timestamp: When the rule was evaluated.
-        account_id: Account the rule was evaluated for.
-        event_type: Type of event (rule_check, trade_blocked, warning_triggered).
-        rule_type: Rule type identifier (e.g., daily_loss_limit).
-        rule_name: Human-readable rule name.
-        rule_result: Result of the evaluation (ALLOW, WARN, BLOCK).
-        current_value: Current value of the metric being checked.
-        threshold_value: Threshold value that triggered the result.
+        timestamp: When the event occurred.
+        account_id: Account context (None for system events).
+        event_type: Type of event (rule_check, trade_blocked, etc.).
+        rule_name: Rule name (empty string for non-rule events).
+        rule_result: Result of evaluation (empty string for non-rule events).
+        current_value: Current metric value.
+        threshold_value: Threshold that triggered the result.
         order_id: ID of the order being validated.
-        context: Additional context (signal, symbol, size, etc.).
+        context: Additional context (signal, symbol, size, rule_type, etc.).
+        event_subtype: Sub-classification (e.g., engine_start, entry_fill).
+        source: Origin service (rule-engine, execution-service, trading-engine).
+        level: Severity (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+        message: Human-readable event description.
+        trade_id: FK to trades table (UUID string).
     """
 
     timestamp: datetime
-    account_id: str
-    event_type: str  # 'rule_check', 'trade_blocked', 'warning_triggered'
-    rule_type: str
+    account_id: str | None
+    event_type: str
     rule_name: str
-    rule_result: str  # 'ALLOW', 'WARN', 'BLOCK'
+    rule_result: str
     current_value: float | None = None
     threshold_value: float | None = None
     order_id: str | None = None
     context: dict[str, Any] = field(default_factory=dict)
+    event_subtype: str | None = None
+    source: str = "rule-engine"
+    level: str = "INFO"
+    message: str | None = None
+    trade_id: str | None = None
 
     def to_redis_key(self) -> str:
         """Generate Redis key for this audit entry.
@@ -79,7 +93,8 @@ class AuditEntry:
         """
         ts = self.timestamp.isoformat()
         unique_id = uuid.uuid4().hex[:8]
-        return f"audit:{self.account_id}:{ts}:{unique_id}"
+        account = self.account_id or "system"
+        return f"audit:{account}:{ts}:{unique_id}"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict for Redis storage.
@@ -91,13 +106,17 @@ class AuditEntry:
             "timestamp": self.timestamp.isoformat(),
             "account_id": self.account_id,
             "event_type": self.event_type,
-            "rule_type": self.rule_type,
             "rule_name": self.rule_name,
             "rule_result": self.rule_result,
             "current_value": self.current_value,
             "threshold_value": self.threshold_value,
             "order_id": self.order_id,
             "context": self.context,
+            "event_subtype": self.event_subtype,
+            "source": self.source,
+            "level": self.level,
+            "message": self.message,
+            "trade_id": self.trade_id,
         }
 
     @classmethod
@@ -112,15 +131,19 @@ class AuditEntry:
         """
         return cls(
             timestamp=datetime.fromisoformat(data["timestamp"]),
-            account_id=data["account_id"],
+            account_id=data.get("account_id"),
             event_type=data["event_type"],
-            rule_type=data["rule_type"],
-            rule_name=data["rule_name"],
-            rule_result=data["rule_result"],
+            rule_name=data.get("rule_name", ""),
+            rule_result=data.get("rule_result", ""),
             current_value=data.get("current_value"),
             threshold_value=data.get("threshold_value"),
             order_id=data.get("order_id"),
             context=data.get("context", {}),
+            event_subtype=data.get("event_subtype"),
+            source=data.get("source", "rule-engine"),
+            level=data.get("level", "INFO"),
+            message=data.get("message"),
+            trade_id=data.get("trade_id"),
         )
 
 
@@ -195,15 +218,19 @@ class AuditLogger:
         Returns:
             AuditEntry with all fields populated.
         """
-        # Determine event type based on result action
+        # Determine event type and level based on result action
         event_type = AuditEventType.RULE_CHECK
+        level = "INFO"
         if result.action.value == "block":
             event_type = AuditEventType.TRADE_BLOCKED
+            level = "WARNING"
         elif result.action.value == "warn":
             event_type = AuditEventType.WARNING_TRIGGERED
+            level = "WARNING"
 
-        # Build context with blocking reason if applicable
+        # Build context with rule_type (moved from field to context dict) and blocking reason
         entry_context = context.copy() if context else {}
+        entry_context["rule_type"] = rule.rule_type
         if result.action.value == "block" and result.message:
             entry_context["blocking_reason"] = result.message
 
@@ -211,13 +238,14 @@ class AuditLogger:
             timestamp=datetime.now(timezone.utc),
             account_id=self._account_id,
             event_type=event_type.value,
-            rule_type=rule.rule_type,
             rule_name=rule.name,
             rule_result=result.action.value.upper(),
             current_value=result.current_value,
             threshold_value=result.threshold_value,
             order_id=order_id,
             context=entry_context,
+            source="rule-engine",
+            level=level,
         )
 
     async def _write_to_redis(self, entry: AuditEntry) -> None:

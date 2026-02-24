@@ -68,7 +68,6 @@ class TestAuditEntry:
             timestamp=timestamp,
             account_id="ftmo-gold-001",
             event_type="rule_check",
-            rule_type="daily_loss_limit",
             rule_name="Daily Loss Limit 5%",
             rule_result="ALLOW",
             current_value=3.5,
@@ -80,7 +79,6 @@ class TestAuditEntry:
         assert entry.timestamp == timestamp
         assert entry.account_id == "ftmo-gold-001"
         assert entry.event_type == "rule_check"
-        assert entry.rule_type == "daily_loss_limit"
         assert entry.rule_name == "Daily Loss Limit 5%"
         assert entry.rule_result == "ALLOW"
         assert entry.current_value == 3.5
@@ -95,7 +93,6 @@ class TestAuditEntry:
             timestamp=timestamp,
             account_id="ftmo-gold-001",
             event_type="rule_check",
-            rule_type="daily_loss_limit",
             rule_name="Daily Loss Limit 5%",
             rule_result="ALLOW",
             current_value=3.5,
@@ -109,7 +106,6 @@ class TestAuditEntry:
         assert result["timestamp"] == "2025-12-03T14:32:15+00:00"
         assert result["account_id"] == "ftmo-gold-001"
         assert result["event_type"] == "rule_check"
-        assert result["rule_type"] == "daily_loss_limit"
         assert result["rule_name"] == "Daily Loss Limit 5%"
         assert result["rule_result"] == "ALLOW"
         assert result["current_value"] == 3.5
@@ -123,7 +119,6 @@ class TestAuditEntry:
             timestamp=datetime.now(timezone.utc),
             account_id="ftmo-gold-001",
             event_type="rule_check",
-            rule_type="daily_loss_limit",
             rule_name="Daily Loss Limit 5%",
             rule_result="ALLOW",
             current_value=3.5,
@@ -147,7 +142,6 @@ class TestAuditEntry:
             timestamp=timestamp,
             account_id="ftmo-gold-001",
             event_type="rule_check",
-            rule_type="daily_loss_limit",
             rule_name="Daily Loss Limit 5%",
             rule_result="ALLOW",
         )
@@ -171,7 +165,6 @@ class TestAuditEntry:
             "timestamp": "2025-12-03T14:32:15+00:00",
             "account_id": "ftmo-gold-001",
             "event_type": "trade_blocked",
-            "rule_type": "daily_loss_limit",
             "rule_name": "Daily Loss Limit 5%",
             "rule_result": "BLOCK",
             "current_value": 5.5,
@@ -194,7 +187,6 @@ class TestAuditEntry:
             "timestamp": "2025-12-03T14:32:15+00:00",
             "account_id": "ftmo-gold-001",
             "event_type": "rule_check",
-            "rule_type": "test_rule",
             "rule_name": "Test Rule",
             "rule_result": "ALLOW",
         }
@@ -212,7 +204,6 @@ class TestAuditEntry:
             timestamp=datetime.now(timezone.utc),
             account_id="test",
             event_type="rule_check",
-            rule_type="test",
             rule_name="Test",
             rule_result="ALLOW",
         )
@@ -552,7 +543,6 @@ class TestAuditDBWriter:
             timestamp=datetime.now(timezone.utc),
             account_id="test",
             event_type="rule_check",
-            rule_type="test",
             rule_name="Test",
             rule_result="ALLOW",
         )
@@ -571,7 +561,6 @@ class TestAuditDBWriter:
                 timestamp=datetime.now(timezone.utc),
                 account_id="test",
                 event_type="rule_check",
-                rule_type="test",
                 rule_name=f"Test {i}",
                 rule_result="ALLOW",
             )
@@ -592,7 +581,6 @@ class TestAuditLogModel:
             timestamp=datetime.now(timezone.utc),
             account_id="ftmo-gold-001",
             event_type="rule_check",
-            rule_type="daily_loss_limit",
             rule_name="Daily Loss Limit 5%",
             rule_result="ALLOW",
             current_value=3.5,
@@ -605,26 +593,26 @@ class TestAuditLogModel:
 
         assert model.account_id == "ftmo-gold-001"
         assert model.event_type == "rule_check"
-        assert model.rule_type == "daily_loss_limit"
         assert model.rule_name == "Daily Loss Limit 5%"
         assert model.rule_result == "ALLOW"
         assert model.context == {"signal": "BUY"}
+        assert model.source == "rule-engine"
+        assert model.level == "INFO"
 
-    def test_from_audit_entry_invalid_order_id(self):
-        """Test that invalid order_id is handled gracefully."""
+    def test_from_audit_entry_order_id_stored_as_string(self):
+        """Test that order_id is stored as string (not UUID)."""
         entry = AuditEntry(
             timestamp=datetime.now(timezone.utc),
             account_id="test",
             event_type="rule_check",
-            rule_type="test",
             rule_name="Test",
             rule_result="ALLOW",
-            order_id="not-a-uuid",  # Invalid UUID
+            order_id="ORDER-12345",
         )
 
         model = AuditLogModel.from_audit_entry(entry)
 
-        assert model.order_id is None
+        assert model.order_id == "ORDER-12345"
 
 
 class TestNonBlockingBehavior:

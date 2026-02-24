@@ -110,7 +110,7 @@ development_status:
   # Epic 7: Audit & Compliance Logging (6 stories)
   epic-7: in-progress
   7-1-trade-execution-audit-logging: review
-  7-2-comprehensive-audit-log-table: backlog
+  7-2-comprehensive-audit-log-table: review
   7-3-rule-violation-tracking: backlog
   7-4-daily-account-snapshots: backlog
   7-5-cli-audit-query-commands: backlog
