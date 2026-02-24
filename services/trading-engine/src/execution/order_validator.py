@@ -22,10 +22,12 @@ from typing import Any
 from redis.asyncio import Redis
 
 from ..adapters.zmq_models import Order
+from ..rules.audit_logger import audit_task_done_callback
 from ..rules.audit_registry import AuditLoggerRegistry
-from ..rules.base_rule import BaseRule, RuleResult
+from ..rules.base_rule import BaseRule, RuleAction, RuleResult
 from ..rules.context_builder import RuleContextBuilder
 from ..rules.engine import RuleEngine, RuleValidationError
+from ..rules.violation_service import ViolationService
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +112,7 @@ class OrderValidator:
         rule_engine: RuleEngine,
         redis_client: Redis,
         audit_registry: AuditLoggerRegistry | None = None,
+        violation_service: ViolationService | None = None,
     ) -> None:
         """Initialize OrderValidator.
 
@@ -117,10 +120,12 @@ class OrderValidator:
             rule_engine: RuleEngine instance for rule validation.
             redis_client: Redis client for notification publishing.
             audit_registry: AuditLoggerRegistry for rule check logging (optional).
+            violation_service: ViolationService for recording BLOCK/WARN violations (optional).
         """
         self._rule_engine = rule_engine
         self._redis = redis_client
         self._audit_registry = audit_registry
+        self._violation_service = violation_service
         self._context_builder = RuleContextBuilder()
 
     async def validate_order(
@@ -167,8 +172,8 @@ class OrderValidator:
             # Log performance warnings
             self._log_performance(evaluation_time_ms)
 
-            # Fire-and-forget audit logging for all rule results
-            if self._audit_registry is not None:
+            # Fire-and-forget audit + violation logging for all rule results
+            if self._audit_registry is not None or self._violation_service is not None:
                 self._log_rule_results_to_audit(
                     engine_result.all_results,
                     order,
@@ -433,37 +438,65 @@ class OrderValidator:
         order: Order,
         account_state: dict[str, Any],
     ) -> None:
-        """Log all rule results to audit (fire-and-forget).
+        """Log all rule results to audit and record violations (fire-and-forget).
 
         This method creates asyncio tasks for each rule result to log
-        them to the audit system. Each task is fire-and-forget with
-        error handling via done_callback.
+        them to the audit system. For BLOCK/WARN results, also records
+        violations to TimescaleDB via ViolationService.
 
         Args:
             all_results: List of (rule, result) tuples from RuleEngine.
             order: The order being validated.
             account_state: Current account state for context.
         """
-        if self._audit_registry is None:
+        if self._audit_registry is None and self._violation_service is None:
             return
 
         # Build context for audit entries
         audit_context = {
+            "order_id": order.order_id,
             "signal": order.action.value if hasattr(order.action, "value") else str(order.action),
             "symbol": order.symbol,
             "size": order.volume,
             "price": order.price,
         }
 
-        # Fire-and-forget logging for each rule result
         for rule, result in all_results:
-            self._audit_registry.log_all_fire_and_forget(
-                account_id=order.account_id,
-                rule=rule,
-                result=result,
-                order_id=order.order_id,
-                context=audit_context,
-            )
+            # Existing: fire-and-forget Redis audit logging
+            if self._audit_registry is not None:
+                self._audit_registry.log_all_fire_and_forget(
+                    account_id=order.account_id,
+                    rule=rule,
+                    result=result,
+                    order_id=order.order_id,
+                    context=audit_context,
+                )
+
+            # Violation recording for BLOCK/WARN results
+            if self._violation_service is not None:
+                if result.action == RuleAction.BLOCK:
+                    task = asyncio.create_task(
+                        self._violation_service.record_block(
+                            rule=rule,
+                            result=result,
+                            account_id=order.account_id,
+                            signal_context=audit_context,
+                        ),
+                        name=f"violation_block_{rule.rule_type}",
+                    )
+                    task.add_done_callback(audit_task_done_callback)
+                elif result.action == RuleAction.WARN:
+                    task = asyncio.create_task(
+                        self._violation_service.record_warning(
+                            rule=rule,
+                            result=result,
+                            account_id=order.account_id,
+                            trade_id=None,
+                            signal_context=audit_context,
+                        ),
+                        name=f"violation_warn_{rule.rule_type}",
+                    )
+                    task.add_done_callback(audit_task_done_callback)
 
     def _audit_task_done(self, task: asyncio.Task) -> None:
         """Callback for audit logging tasks to log errors.

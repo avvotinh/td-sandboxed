@@ -111,7 +111,7 @@ development_status:
   epic-7: in-progress
   7-1-trade-execution-audit-logging: review
   7-2-comprehensive-audit-log-table: review
-  7-3-rule-violation-tracking: backlog
+  7-3-rule-violation-tracking: review
   7-4-daily-account-snapshots: backlog
   7-5-cli-audit-query-commands: backlog
   7-6-compliance-report-generation: backlog
