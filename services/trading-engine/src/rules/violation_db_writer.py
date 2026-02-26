@@ -78,6 +78,28 @@ class RuleViolationModel(Base):
             acknowledged_at=violation.acknowledged_at,
         )
 
+    def to_dict(self) -> dict[str, object]:
+        """Serialize to dict with financial fields as strings for precision."""
+        return {
+            "id": str(self.id) if self.id else None,
+            "account_id": self.account_id,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "rule_type": self.rule_type,
+            "rule_name": self.rule_name,
+            "severity": self.severity,
+            "current_value": str(self.current_value) if self.current_value is not None else None,
+            "threshold_value": str(self.threshold_value) if self.threshold_value is not None else None,
+            "threshold_percent": str(self.threshold_percent) if self.threshold_percent is not None else None,
+            "action_taken": self.action_taken,
+            "trade_id": str(self.trade_id) if self.trade_id else None,
+            "order_blocked": self.order_blocked,
+            "message": self.message,
+            "context": self.context,
+            "acknowledged": self.acknowledged,
+            "acknowledged_at": self.acknowledged_at.isoformat() if self.acknowledged_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
 
 class ViolationDBWriter:
     """Batched writer for persisting rule violations to TimescaleDB.

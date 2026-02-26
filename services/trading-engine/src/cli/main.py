@@ -18,6 +18,7 @@ from ..config.loader import ConfigLoader, ConfigValidationError, ConfigSyntaxErr
 from ..rules.audit_logger import AuditEntry
 from ..state.redis_state import RedisStateManager
 from .accounts import accounts_app
+from .audit import audit_app
 from .config import config_app
 from .constants import ENGINE_STATE_KEY, ENGINE_START_TIME_KEY, STATUS_COLORS
 
@@ -76,6 +77,7 @@ app = typer.Typer(
 
 # Add subcommand groups
 app.add_typer(accounts_app, name="accounts")
+app.add_typer(audit_app, name="audit")
 app.add_typer(config_app, name="config")
 
 

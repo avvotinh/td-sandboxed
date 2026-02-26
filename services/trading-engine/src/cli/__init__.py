@@ -11,7 +11,8 @@ Exports:
 - config_app: Configuration subcommands
 """
 
+from .audit import audit_app
 from .config import config_app
 from .main import app
 
-__all__ = ["app", "config_app"]
+__all__ = ["app", "audit_app", "config_app"]

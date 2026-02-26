@@ -113,6 +113,6 @@ development_status:
   7-2-comprehensive-audit-log-table: review
   7-3-rule-violation-tracking: review
   7-4-daily-account-snapshots: done
-  7-5-cli-audit-query-commands: backlog
+  7-5-cli-audit-query-commands: review
   7-6-compliance-report-generation: backlog
   epic-7-retrospective: optional
