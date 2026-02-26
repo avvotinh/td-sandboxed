@@ -90,10 +90,12 @@ class ViolationDBWriter:
         database_url: str,
         batch_size: int = 100,
         flush_interval: float = 60.0,
+        max_buffer_size: int = 10_000,
     ) -> None:
         self._database_url = database_url
         self._batch_size = batch_size
         self._flush_interval = flush_interval
+        self._max_buffer_size = max_buffer_size
         self._buffer: list[RuleViolationModel] = []
         self._buffer_lock = asyncio.Lock()
 
@@ -191,7 +193,16 @@ class ViolationDBWriter:
         except Exception:
             logger.exception("Failed to flush %d violations, re-adding to buffer", len(entries_to_flush))
             async with self._buffer_lock:
-                self._buffer = entries_to_flush + self._buffer
+                combined = entries_to_flush + self._buffer
+                if len(combined) > self._max_buffer_size:
+                    dropped = len(combined) - self._max_buffer_size
+                    combined = combined[-self._max_buffer_size:]
+                    logger.critical(
+                        "Violation buffer overflow: dropped %d oldest entries (max=%d)",
+                        dropped,
+                        self._max_buffer_size,
+                    )
+                self._buffer = combined
 
     @property
     def buffer_size(self) -> int:

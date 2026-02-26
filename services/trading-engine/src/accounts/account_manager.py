@@ -579,6 +579,14 @@ class AccountManager:
             statuses[account_id] = status or "unknown"
         return statuses
 
+    def get_active_account_ids(self) -> list[str]:
+        """Get IDs of accounts with 'active' config status.
+
+        Returns:
+            List of active account IDs.
+        """
+        return [aid for aid, acc in self._accounts.items() if acc.status == "active"]
+
     def get_all_accounts(self) -> list[str]:
         """Get all registered account IDs.
 

@@ -1,6 +1,6 @@
 # Story 7.2: Comprehensive Audit Log Table
 
-Status: review
+Status: done
 
 ## Story
 
@@ -733,8 +733,9 @@ N/A - Story context creation phase.
 
 - All 4 Acceptance Criteria implemented and verified
 - ORM model matches init.sql schema exactly (15 columns, rule_type removed)
-- 72 tests passing (26 unit for AuditService, 30 unit for AuditLogger, 16 integration)
+- 75 tests passing (29 unit for AuditService, 30 unit for AuditLogger, 16 integration)
 - Code review fixes applied: H1 (order_id on position close), H2 (lock_lost audit), H3 (shutdown completion audit), M2 (execution service audit integration tests), M3 (module-level import cleanup), M4 (context None-check fix)
+- Second review fixes applied: H1 (AuditService.stop() + engine shutdown flush), M1 (from_audit_entry context or→if not None), M2 (engine shutdown audit exception logging)
 
 ### File List
 
@@ -747,7 +748,7 @@ N/A - Story context creation phase.
 | `services/trading-engine/src/orders/execution_service.py` | Modified | Injected audit_service, fire-and-forget audit in _handle_entry_fill and _handle_close_fill |
 | `services/trading-engine/src/engine.py` | Modified | Added audit_service injection, lifecycle audit (start/stop/crash_recovery/lock_lost/stopped) |
 | `infra/timescaledb/migrations/007_audit_retention_and_aggregate.sql` | Created | Retention (90d), continuous aggregate, refresh policy, compression |
-| `services/trading-engine/tests/unit/test_audit_service.py` | Created | 26 unit tests for AuditService, AuditEntry compat, AuditLogModel columns |
+| `services/trading-engine/tests/unit/test_audit_service.py` | Created | 29 unit tests for AuditService (incl. stop(), context handling), AuditEntry compat, AuditLogModel columns |
 | `services/trading-engine/tests/unit/test_audit_logger.py` | Modified | Updated existing tests for rule_type→context migration |
 | `services/trading-engine/tests/integration/test_comprehensive_audit.py` | Created | 16 integration tests including ExecutionService audit fire-and-forget path |
 | `docs/sprint-artifacts/sprint-status.yaml` | Modified | Updated story status to in-progress |
@@ -759,3 +760,4 @@ N/A - Story context creation phase.
 | 2026-01-24 | Story context created with comprehensive developer guide. Used Context7 for TimescaleDB continuous aggregates, retention policies, compression, and hypertable constraints. Analyzed existing codebase patterns from audit_db_writer.py, audit_logger.py, and init.sql. Identified ORM-to-DB schema gap (5 missing columns). | Claude Opus 4.5 |
 | 2026-01-24 | Validation review applied: (1) Fixed account_id=None for system events instead of empty string, (2) Added order_id type correction UUID→String(50), (3) Added account_id nullable correction, (4) Removed rule_type column/field (not in DB schema), (5) Added from_audit_entry() implementation code, (6) Fixed migration ordering (retention→aggregate→compression), (7) Added compress_orderby, (8) Added FK race condition prevention guidance, (9) Added error handling delegation note, (10) Flagged architecture.md staleness. | Claude Opus 4.5 (Validation) |
 | 2026-02-24 | Code review (adversarial): Found 3 HIGH, 4 MEDIUM, 2 LOW issues. Fixed: (H1) Added order_id param to log_position_closed + caller, (H2) Added lock_lost audit event in _on_lock_lost, (H3) Added engine_stopped audit after shutdown completion, (M2) Added OrderExecutionService audit integration tests, (M3) Moved audit_task_done_callback to module-level import in engine.py, (M4) Fixed context or→context if not None pattern. Updated all task checkboxes, File List, and Completion Notes. 72 tests passing. | Claude Opus 4.6 (Review) |
+| 2026-02-26 | Second code review (adversarial): Found 1 HIGH, 3 MEDIUM, 2 LOW issues. Fixed: (H1) Added AuditService.stop() and engine shutdown flush to prevent losing buffered entries, (M1) Fixed incomplete context or→if not None in from_audit_entry(), (M2) Replaced silent exception swallowing with warning log in engine shutdown audit. Added 3 tests (stop delegation, empty context preservation, None context). 75 tests passing. M3 (DB filtering tests) deferred - requires test DB infrastructure. | Claude Opus 4.6 (Review 2) |

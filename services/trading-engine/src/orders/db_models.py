@@ -55,7 +55,7 @@ class TradeRecord(Base):
     __tablename__ = "trades"
 
     trade_id = Column(UUID, primary_key=True)
-    account_id = Column(String(50), nullable=False, index=True)
+    account_id = Column(String(50), nullable=False)
     strategy_name = Column(String(100), nullable=False)
     symbol = Column(String(20), nullable=False)
     side = Column(String(4), nullable=False)
@@ -67,11 +67,16 @@ class TradeRecord(Base):
     exit_time = Column(TIMESTAMP(timezone=True), nullable=True)
     pnl_dollars = Column(DECIMAL(18, 2), nullable=True)
     pnl_percent = Column(DECIMAL(8, 4), nullable=True)
+    # NOTE: DB column is named slippage_pips but stores raw price difference
+    # from Trade.slippage (e.g., 0.02 for XAUUSD), NOT converted to pip units.
+    # A future migration should rename the DB column to slippage_price or add
+    # proper pip conversion logic per instrument.
     slippage_pips = Column("slippage_pips", DECIMAL(18, 2), nullable=True)
     signal_reason = Column(String, nullable=True)
     signal_metadata = Column("metadata", JSONB, nullable=True)
     status = Column(String(20), default="open", nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint("side IN ('BUY', 'SELL')", name="check_side"),

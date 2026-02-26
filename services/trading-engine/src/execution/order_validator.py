@@ -498,23 +498,3 @@ class OrderValidator:
                     )
                     task.add_done_callback(audit_task_done_callback)
 
-    def _audit_task_done(self, task: asyncio.Task) -> None:
-        """Callback for audit logging tasks to log errors.
-
-        This is called when a fire-and-forget audit task completes.
-        It logs any exceptions without affecting validation.
-
-        Args:
-            task: The completed task.
-        """
-        if task.cancelled():
-            logger.debug("Audit task %s was cancelled", task.get_name())
-            return
-
-        exception = task.exception()
-        if exception is not None:
-            logger.warning(
-                "Audit task %s failed: %s",
-                task.get_name(),
-                exception,
-            )

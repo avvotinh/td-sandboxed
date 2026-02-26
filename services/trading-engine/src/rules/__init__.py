@@ -67,6 +67,9 @@ from .preset_loader import PresetNotFoundError, RulePresetLoader
 from .types.drawdown import DailyLossLimitRule, MaxDrawdownRule
 from .types.position import MaxPositionSizeRule
 from .types.targets import MinTradingDaysRule, ProfitTargetRule
+from .violation import RuleViolation
+from .violation_db_writer import RuleViolationModel, ViolationDBWriter
+from .violation_service import ViolationService
 
 __all__ = [
     # Base types
@@ -102,6 +105,11 @@ __all__ = [
     "AuditLogModel",
     "audit_task_done_callback",
     "AUDIT_TTL_SECONDS",
+    # Violation tracking (Story 7.3)
+    "RuleViolation",
+    "RuleViolationModel",
+    "ViolationDBWriter",
+    "ViolationService",
     # Exceptions
     "PresetNotFoundError",
     "RulesFileNotFoundError",

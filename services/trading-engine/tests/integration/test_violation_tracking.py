@@ -17,30 +17,8 @@ from src.rules.violation import RuleViolation
 from src.rules.violation_db_writer import ViolationDBWriter
 from src.rules.violation_service import ViolationService
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-class FakeRule:
-    """Minimal rule satisfying BaseRule protocol."""
-
-    def __init__(self, rule_type="daily_loss_limit", name="FTMO Daily Loss 5%", priority=1):
-        self.rule_type = rule_type
-        self.name = name
-        self.priority = priority
-
-    def validate(self, context):
-        return RuleResult()
-
-    def get_current_value(self, context):
-        return 0.0
-
-    def get_threshold(self):
-        return 5.0
-
-    def get_warning_thresholds(self):
-        return [70.0, 80.0, 90.0]
+# FakeRule and fake_rule fixture provided by tests/conftest.py
+from tests.conftest import FakeRule
 
 
 class FakeOrder:

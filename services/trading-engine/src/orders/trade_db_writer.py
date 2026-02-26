@@ -14,7 +14,7 @@ import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
@@ -201,6 +201,7 @@ class TradeDBWriter:
                             pnl_dollars=Decimal(str(pnl_dollars)),
                             pnl_percent=Decimal(str(pnl_percent)),
                             status="closed",
+                            updated_at=datetime.now(timezone.utc),
                         )
                     )
                     result = await session.execute(stmt)

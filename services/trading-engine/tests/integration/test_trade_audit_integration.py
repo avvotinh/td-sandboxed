@@ -288,6 +288,62 @@ class TestTradeAuditIntegration:
         assert elapsed_ms < 50, f"Order execution took {elapsed_ms:.2f}ms, expected < 50ms"
 
     @pytest.mark.asyncio
+    async def test_concurrent_signals_preserve_correct_metadata(
+        self, execution_service, mock_zmq_adapter, mock_trade_db_writer
+    ):
+        """Test that concurrent signal execution preserves correct per-order metadata.
+
+        Verifies the _signals_by_order dict correctly isolates signals for
+        concurrent orders, preventing strategy_name/metadata cross-contamination.
+        """
+
+        async def mock_send(order, timeout=5.0):
+            await asyncio.sleep(0.01)  # Simulate network latency
+            return OrderResult(
+                order_id=order.order_id,
+                status=OrderStatus.FILLED,
+                fill_price=order.price,
+                slippage=0.01,
+            )
+
+        mock_zmq_adapter.send_order_and_wait = mock_send
+
+        signal_a = Signal(
+            signal_type=SignalType.BUY,
+            symbol="XAUUSD",
+            strategy_name="strategy_a",
+            metadata={"reason": "Signal A reason"},
+        )
+        signal_b = Signal(
+            signal_type=SignalType.BUY,
+            symbol="EURUSD",
+            strategy_name="strategy_b",
+            metadata={"reason": "Signal B reason"},
+        )
+
+        # Execute concurrently
+        await asyncio.gather(
+            execution_service.execute_signal(
+                signal=signal_a, account_id="acct-001", volume=0.1, price=1850.0,
+            ),
+            execution_service.execute_signal(
+                signal=signal_b, account_id="acct-002", volume=0.1, price=1.1000,
+            ),
+        )
+
+        await asyncio.sleep(0.05)
+
+        # Verify both writes happened with correct, non-mixed strategy names
+        assert mock_trade_db_writer.write_trade_entry.call_count == 2
+        calls = mock_trade_db_writer.write_trade_entry.call_args_list
+        strategy_names = {call.kwargs["strategy_name"] for call in calls}
+        assert strategy_names == {"strategy_a", "strategy_b"}
+
+        # Verify signal reasons weren't cross-contaminated
+        reasons = {call.kwargs["signal_reason"] for call in calls}
+        assert reasons == {"Signal A reason", "Signal B reason"}
+
+    @pytest.mark.asyncio
     async def test_no_db_write_without_writer(
         self, mock_zmq_adapter, position_tracker
     ):

@@ -103,7 +103,7 @@ class AuditLogModel(Base):
             threshold_value=Decimal(str(entry.threshold_value)) if entry.threshold_value is not None else None,
             trade_id=uuid.UUID(entry.trade_id) if entry.trade_id else None,
             order_id=entry.order_id,
-            context=entry.context or None,
+            context=entry.context if entry.context is not None else None,
         )
 
 

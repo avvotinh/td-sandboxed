@@ -24,6 +24,10 @@ class AuditService:
     def __init__(self, db_writer: AuditDBWriter) -> None:
         self._db_writer = db_writer
 
+    async def stop(self) -> None:
+        """Stop the underlying DB writer, flushing any buffered entries."""
+        await self._db_writer.stop()
+
     async def log_trade_executed(
         self,
         account_id: str,

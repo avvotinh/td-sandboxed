@@ -489,3 +489,55 @@ class TestAuditServiceLogSystemEvent:
         assert entry.rule_result == ""
         assert entry.trade_id is None
         assert entry.order_id is None
+
+
+class TestAuditServiceStop:
+    """Tests for AuditService.stop()."""
+
+    @pytest.fixture
+    def mock_db_writer(self):
+        writer = AsyncMock()
+        writer.stop = AsyncMock()
+        return writer
+
+    @pytest.fixture
+    def audit_service(self, mock_db_writer):
+        return AuditService(mock_db_writer)
+
+    @pytest.mark.asyncio
+    async def test_stop_delegates_to_db_writer(self, audit_service, mock_db_writer):
+        """stop() calls db_writer.stop() to flush and shutdown."""
+        await audit_service.stop()
+        mock_db_writer.stop.assert_called_once()
+
+
+class TestFromAuditEntryContextHandling:
+    """Tests for from_audit_entry() context None vs empty dict handling."""
+
+    def test_empty_context_preserved_as_empty_dict(self):
+        """Empty dict context is preserved, not converted to None."""
+        entry = AuditEntry(
+            timestamp=datetime.now(timezone.utc),
+            account_id="test",
+            event_type="system_event",
+            rule_name="",
+            rule_result="",
+            context={},
+        )
+
+        model = AuditLogModel.from_audit_entry(entry)
+        assert model.context == {}
+
+    def test_none_context_stays_none(self):
+        """None context is stored as None."""
+        entry = AuditEntry(
+            timestamp=datetime.now(timezone.utc),
+            account_id="test",
+            event_type="system_event",
+            rule_name="",
+            rule_result="",
+            context=None,
+        )
+
+        model = AuditLogModel.from_audit_entry(entry)
+        assert model.context is None

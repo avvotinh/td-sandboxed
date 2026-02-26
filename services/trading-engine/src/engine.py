@@ -18,6 +18,11 @@ if TYPE_CHECKING:
     from .accounts.risk_registry import RiskStateRegistry
     from .adapters.zmq_adapter import ZmqAdapter
     from .audit.audit_service import AuditService
+    from .orders.trade_db_writer import TradeDBWriter
+    from .rules.violation_db_writer import ViolationDBWriter
+    from .rules.violation_service import ViolationService
+    from .snapshots.daily_snapshot_service import DailySnapshotService
+    from .snapshots.snapshot_db_writer import SnapshotDBWriter as SnapshotDBWriterType
     from .state.cold_storage_service import ColdStorageService
     from .state.cold_storage_writer import ColdStorageWriter
     from .state.crash_recovery import CrashRecoveryManager, RecoveryResult
@@ -100,6 +105,11 @@ class TradingEngine:
         self._shutdown_result: ShutdownResult | None = None
         self._cold_storage_writer: ColdStorageWriter | None = None
         self._cold_storage_service: ColdStorageService | None = None
+        self._daily_snapshot_writer: SnapshotDBWriterType | None = None
+        self._daily_snapshot_service: DailySnapshotService | None = None
+        self._trade_db_writer: TradeDBWriter | None = None
+        self._violation_db_writer: ViolationDBWriter | None = None
+        self._violation_service: ViolationService | None = None
         self._audit_service = audit_service
 
     @property
@@ -207,6 +217,84 @@ class TradingEngine:
         )
         await self._cold_storage_service.start()
         logger.info("Cold storage service initialized")
+
+    async def _initialize_trade_audit(self) -> None:
+        """Initialize TradeDBWriter for trade execution audit logging.
+
+        Requires database_url. Creates the writer and starts its flush timer.
+        The writer should be passed to OrderExecutionService instances via
+        the trade_db_writer property.
+        """
+        if self._database_url is None:
+            logger.warning("No database URL — trade audit logging disabled")
+            return
+
+        from .orders.trade_db_writer import TradeDBWriter
+
+        self._trade_db_writer = TradeDBWriter(self._database_url)
+        await self._trade_db_writer.start()
+        logger.info("Trade audit writer initialized")
+
+    @property
+    def trade_db_writer(self) -> TradeDBWriter | None:
+        """Get the TradeDBWriter for injection into OrderExecutionService."""
+        return self._trade_db_writer
+
+    async def _initialize_violation_tracking(self) -> None:
+        """Initialize ViolationDBWriter and ViolationService.
+
+        Requires database_url. Creates the writer, starts its flush timer,
+        and wraps it in ViolationService for use by OrderValidator.
+        """
+        if self._database_url is None:
+            logger.warning("No database URL — violation tracking disabled")
+            return
+
+        from .rules.violation_db_writer import ViolationDBWriter
+        from .rules.violation_service import ViolationService
+
+        self._violation_db_writer = ViolationDBWriter(self._database_url)
+        await self._violation_db_writer.start()
+
+        self._violation_service = ViolationService(self._violation_db_writer)
+        logger.info("Violation tracking service initialized")
+
+    async def _initialize_daily_snapshots(self) -> None:
+        """Initialize the daily account snapshot scheduler.
+
+        Requires database_url, redis_manager, account_manager, and db_session_factory.
+        """
+        if self._database_url is None:
+            logger.warning("No database URL — daily snapshots disabled")
+            return
+
+        if (
+            self._redis_manager is None
+            or self._account_manager is None
+            or self._db_session_factory is None
+        ):
+            logger.warning(
+                "Daily snapshots require redis_manager, account_manager, "
+                "and db_session_factory"
+            )
+            return
+
+        from .snapshots.snapshot_db_writer import SnapshotDBWriter
+
+        self._daily_snapshot_writer = SnapshotDBWriter(self._database_url)
+        await self._daily_snapshot_writer.start()
+
+        from .snapshots.daily_snapshot_service import DailySnapshotService
+
+        self._daily_snapshot_service = DailySnapshotService(
+            db_writer=self._daily_snapshot_writer,
+            redis_state=self._redis_manager,
+            account_manager=self._account_manager,
+            db_session_factory=self._db_session_factory,
+            audit_service=self._audit_service,
+        )
+        await self._daily_snapshot_service.start()
+        logger.info("Daily snapshot service initialized")
 
     async def _initialize_crash_recovery(self) -> RecoveryResult | None:
         """Initialize crash recovery manager and run startup sequence.
@@ -535,6 +623,15 @@ class TradingEngine:
         # (uses the writer that was created in crash recovery)
         await self._initialize_cold_storage()
 
+        # Initialize trade audit writer (TradeDBWriter for Story 7.1)
+        await self._initialize_trade_audit()
+
+        # Initialize violation tracking (ViolationDBWriter + ViolationService)
+        await self._initialize_violation_tracking()
+
+        # Initialize daily snapshot service (midnight UTC scheduler)
+        await self._initialize_daily_snapshots()
+
         # Initialize graceful shutdown after crash recovery
         self._initialize_graceful_shutdown()
 
@@ -595,8 +692,26 @@ class TradingEngine:
             # Brief wait to allow the audit entry to be buffered before engine teardown
             try:
                 await asyncio.wait_for(task, timeout=2.0)
-            except (asyncio.TimeoutError, Exception):
-                pass
+            except Exception:
+                logger.warning("Failed to buffer engine_stopped audit entry", exc_info=True)
+
+        # Stop daily snapshot service
+        if self._daily_snapshot_service:
+            await self._daily_snapshot_service.stop()
+        if self._daily_snapshot_writer:
+            await self._daily_snapshot_writer.stop()
+
+        # Stop trade audit writer
+        if self._trade_db_writer:
+            await self._trade_db_writer.stop()
+
+        # Stop violation tracking
+        if self._violation_db_writer:
+            await self._violation_db_writer.stop()
+
+        # Stop audit service (flushes buffered entries including engine_stopped)
+        if self._audit_service:
+            await self._audit_service.stop()
 
         self._running = False
         logger.info("Trading Engine stopped")

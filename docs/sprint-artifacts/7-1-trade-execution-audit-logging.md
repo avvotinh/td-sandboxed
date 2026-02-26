@@ -85,7 +85,7 @@ Task 1 (TradeDBWriter setup) → Task 2 (TradeAuditModel) → Task 3 (Integratio
 ### Review Follow-ups (AI)
 
 - [ ] [AI-Review][MEDIUM] Add true database integration tests using PostgreSQL test container to verify AC #3 (SELECT queries returning complete records)
-- [ ] [AI-Review][LOW] Remove redundant `index=True` on `account_id` column (composite index `idx_trades_account_time` already covers single-column lookups)
+- [x] [AI-Review][LOW] Remove redundant `index=True` on `account_id` column (composite index `idx_trades_account_time` already covers single-column lookups) — Fixed in Review 2
 - [ ] [AI-Review][LOW] Document that `pnl_percent` is stored as percentage*100 (e.g., 10% = 10.0) and DECIMAL(8,4) limits to ±9999.9999%
 
 ## Dev Notes
@@ -612,13 +612,15 @@ N/A - Story context creation phase.
 
 **Created:**
 - `services/trading-engine/src/orders/trade_db_writer.py` - TradeDBWriter class with batch buffer pattern
-- `services/trading-engine/tests/unit/test_trade_db_writer.py` - Unit tests (19 tests)
-- `services/trading-engine/tests/integration/test_trade_audit_integration.py` - Service-level integration tests (12 tests)
+- `services/trading-engine/tests/unit/test_trade_db_writer.py` - Unit tests (20 tests)
+- `services/trading-engine/tests/integration/test_trade_audit_integration.py` - Service-level integration tests (13 tests)
 - `infra/timescaledb/migrations/006_add_trades_strategy_index.sql` - Migration for strategy+time index
+- `docs/sprint-artifacts/validation-report-7-1-2026-01-22.md` - Validation report
 
 **Modified:**
 - `services/trading-engine/src/orders/db_models.py` - Extended TradeRecord with missing columns, factory methods, order_type, fixed slippage_pips column name
 - `services/trading-engine/src/orders/execution_service.py` - Integrated TradeDBWriter, concurrency-safe signal mapping, fire-and-forget DB writes
+- `services/trading-engine/src/engine.py` - Added TradeDBWriter lifecycle management (init/start/stop)
 - `docs/sprint-artifacts/sprint-status.yaml` - Sprint status update
 
 ## Change Log
@@ -629,3 +631,4 @@ N/A - Story context creation phase.
 | 2026-01-22 | Validation improvements applied: (1) Clarified signal_reason comes from signal.metadata.get('reason'), (2) Made strategy_name NOT NULL with ValueError on missing, (3) Fixed implementation guide to use Signal object directly instead of non-existent InternalOrder fields, (4) Added idx_trades_strategy index, (5) Added complete imports to code examples, (6) Aligned batch_size/flush_interval with AuditDBWriter defaults (100/60s). | Bob (SM Validation) |
 | 2026-01-22 | Implementation complete. Created TradeDBWriter with batch buffer pattern, extended TradeRecord ORM model, integrated with OrderExecutionService using fire-and-forget pattern. Note: `metadata` column renamed to `signal_metadata` in Python due to SQLAlchemy reserved attribute (DB column still named `metadata`). All 31 tests pass (19 unit + 12 integration). | Claude Opus 4.5 |
 | 2026-01-23 | **Code Review Fixes (7 issues):** (1) Fixed race condition: replaced shared `_current_signal` with order-keyed `_signals_by_order` dict for concurrency safety. (2) Fixed buffer race: `update_trade_exit()` now flushes buffer before UPDATE to prevent silent data loss on quick close. (3) Added guard for empty `strategy_name` with warning log. (4) Fixed `to_dict()` Decimal-to-float precision loss (now uses str). (5) Fixed ORM-to-DB schema mismatch: added `order_type` column (NOT NULL in DB), renamed `slippage` to `slippage_pips` to match actual DB column. Created migration for strategy index. (6) Clarified integration tests are service-level (mock DB), not true DB integration. (7) Updated File List. | Claude Opus 4.5 (Code Review) |
+| 2026-02-27 | **Code Review 2 Fixes (7 issues):** (H1) Added TradeDBWriter lifecycle management to engine.py — init/start/stop + property for injection. (H2) Added `updated_at` column to ORM model and set it in `update_trade_exit` UPDATE. (M1) Documented slippage_pips semantic mismatch (stores raw price, not pips). (M2) Added buffer resilience test for re-add on flush failure. (M3) Added concurrent signal handling test verifying `_signals_by_order` isolation. (L2) Removed redundant `index=True` on account_id. (M5) Added validation report to File List. M4 (true DB integration tests) remains as follow-up. | Claude Opus 4.6 (Code Review) |

@@ -301,6 +301,30 @@ class TestTradeDBWriter:
         assert flush_called
 
     @pytest.mark.asyncio
+    async def test_flush_buffer_readds_entries_on_failure(self, db_writer, sample_trade):
+        """Test _flush_buffer re-adds entries to buffer on insert failure."""
+        if db_writer is None:
+            pytest.skip("db_writer fixture skipped")
+
+        await db_writer.write_trade_entry(
+            trade=sample_trade,
+            strategy_name="test_strategy",
+        )
+        assert db_writer.buffer_size == 1
+
+        # Mock batch_insert to raise exception
+        with patch.object(
+            db_writer,
+            "_batch_insert",
+            new_callable=AsyncMock,
+            side_effect=Exception("DB connection failed"),
+        ):
+            await db_writer._flush_buffer()
+
+        # Entries should be re-added to buffer after failure
+        assert db_writer.buffer_size == 1
+
+    @pytest.mark.asyncio
     async def test_update_trade_exit_calls_db(self, db_writer):
         """Test update_trade_exit calls the database."""
         if db_writer is None:
