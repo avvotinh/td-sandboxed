@@ -14,5 +14,6 @@ Exports:
 from .audit import audit_app
 from .config import config_app
 from .main import app
+from .report import report_app
 
-__all__ = ["app", "audit_app", "config_app"]
+__all__ = ["app", "audit_app", "config_app", "report_app"]

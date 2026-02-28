@@ -114,5 +114,5 @@ development_status:
   7-3-rule-violation-tracking: review
   7-4-daily-account-snapshots: done
   7-5-cli-audit-query-commands: review
-  7-6-compliance-report-generation: backlog
+  7-6-compliance-report-generation: review
   epic-7-retrospective: optional

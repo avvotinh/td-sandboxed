@@ -20,6 +20,7 @@ from ..state.redis_state import RedisStateManager
 from .accounts import accounts_app
 from .audit import audit_app
 from .config import config_app
+from .report import report_app
 from .constants import ENGINE_STATE_KEY, ENGINE_START_TIME_KEY, STATUS_COLORS
 
 if TYPE_CHECKING:
@@ -79,6 +80,7 @@ app = typer.Typer(
 app.add_typer(accounts_app, name="accounts")
 app.add_typer(audit_app, name="audit")
 app.add_typer(config_app, name="config")
+app.add_typer(report_app, name="report")
 
 
 def _run_async(coro) -> Any:
