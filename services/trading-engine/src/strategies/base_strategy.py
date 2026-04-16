@@ -8,18 +8,23 @@ position management, and order execution.
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING
+from datetime import datetime, time
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 
 from nautilus_trader.core.message import Event
 from nautilus_trader.model.data import Bar
-from nautilus_trader.model.enums import OrderSide, PositionSide
+from nautilus_trader.model.enums import OrderSide, OrderType, PositionSide
 from nautilus_trader.model.events import PositionClosed, PositionOpened
 from nautilus_trader.trading.strategy import Strategy
 
 from src.orders.signal import SignalType
 from src.strategies.config import BaseStrategyConfig
+from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
+from src.strategies.mixins.session_filter_mixin import SessionFilterMixin
 
 if TYPE_CHECKING:
+    from nautilus_trader.model.orders.list import OrderList
     from nautilus_trader.model.position import Position
 
 
@@ -261,3 +266,114 @@ class BaseStrategy(Strategy):
         if self._position:
             self.close_all_positions(self.config.instrument_id)
             self._log.info("Closing position")
+
+    # --- Epic 8 helpers ----------------------------------------------------
+
+    def _calculate_atr_stop(
+        self,
+        side: OrderSide,
+        entry_price: Decimal,
+        atr_value: Decimal,
+        multiplier: Decimal,
+    ) -> Decimal:
+        """Convenience: ATR-based stop-loss price (delegates to ATRStopMixin)."""
+        return ATRStopMixin.calculate_atr_stop(
+            side=side,
+            entry_price=entry_price,
+            atr_value=atr_value,
+            multiplier=multiplier,
+        )
+
+    def _in_session(
+        self,
+        ts: datetime,
+        session_start: time,
+        session_end: time,
+        tz: str = "UTC",
+    ) -> bool:
+        """Convenience: trading-session predicate (delegates to SessionFilterMixin)."""
+        return SessionFilterMixin.in_session(
+            ts=ts,
+            session_start=session_start,
+            session_end=session_end,
+            tz=tz,
+        )
+
+    def _build_bracket_args(
+        self,
+        side: OrderSide,
+        quantity: Decimal,
+        sl_price: Decimal,
+        tp_price: Decimal,
+    ) -> dict[str, Any]:
+        """Build kwargs for ``OrderFactory.bracket()``.
+
+        Pure: validates SL/TP placement vs. side, quantity > 0, and converts
+        Decimal inputs to instrument-correct Quantity/Price via the cached
+        instrument's ``make_qty`` / ``make_price``.
+        """
+        if quantity <= 0:
+            raise ValueError(f"quantity must be positive, got {quantity}")
+        if side == OrderSide.BUY and sl_price >= tp_price:
+            raise ValueError(
+                f"sl_price ({sl_price}) must be below tp_price ({tp_price}) for LONG"
+            )
+        if side == OrderSide.SELL and sl_price <= tp_price:
+            raise ValueError(
+                f"sl_price ({sl_price}) must be above tp_price ({tp_price}) for SHORT"
+            )
+
+        return {
+            "instrument_id": self.config.instrument_id,
+            "order_side": side,
+            "quantity": self._instrument.make_qty(quantity),
+            "entry_order_type": OrderType.MARKET,
+            "sl_order_type": OrderType.STOP_MARKET,
+            "tp_order_type": OrderType.LIMIT,
+            "sl_trigger_price": self._instrument.make_price(sl_price),
+            "tp_price": self._instrument.make_price(tp_price),
+        }
+
+    def _submit_bracket_order(
+        self,
+        side: OrderSide,
+        quantity: Decimal,
+        sl_price: Decimal,
+        tp_price: Decimal,
+    ) -> OrderList | None:
+        """Submit a market bracket order (entry + linked SL + linked TP).
+
+        Returns ``None`` (no submission) when:
+        - a position is already open (``is_flat`` is False), or
+        - ``quantity`` is non-positive (sizer signalled "cannot size safely").
+
+        Callers can treat skipping as a normal outcome rather than an error.
+        """
+        if not self.is_flat:
+            self._log.debug(
+                "Skipping bracket submission — position already open"
+            )
+            return None
+        if quantity <= 0:
+            self._log.warning(
+                f"Skipping bracket submission — non-positive quantity ({quantity}); "
+                "sizer likely rejected the trade"
+            )
+            return None
+
+        args = self._build_bracket_args(side, quantity, sl_price, tp_price)
+        order_list = self._submit_bracket_via_factory(args)
+        self._log.info(
+            f"Bracket {side.name} qty={quantity} SL={sl_price} TP={tp_price}"
+        )
+        return order_list
+
+    def _submit_bracket_via_factory(self, args: dict[str, Any]) -> OrderList:
+        """Build the bracket OrderList via ``order_factory`` and submit it.
+
+        Encapsulates the two Nautilus Cython calls so tests can patch this
+        single seam without needing a live ``TradingNode``.
+        """
+        order_list = self.order_factory.bracket(**args)
+        self.submit_order_list(order_list)
+        return order_list

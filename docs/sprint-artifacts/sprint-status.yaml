@@ -108,11 +108,25 @@ development_status:
   epic-6-retrospective: optional
 
   # Epic 7: Audit & Compliance Logging (6 stories)
-  epic-7: in-progress
-  7-1-trade-execution-audit-logging: review
-  7-2-comprehensive-audit-log-table: review
-  7-3-rule-violation-tracking: review
+  epic-7: done
+  7-1-trade-execution-audit-logging: done
+  7-2-comprehensive-audit-log-table: done
+  7-3-rule-violation-tracking: done
   7-4-daily-account-snapshots: done
-  7-5-cli-audit-query-commands: review
-  7-6-compliance-report-generation: review
+  7-5-cli-audit-query-commands: done
+  7-6-compliance-report-generation: done
   epic-7-retrospective: optional
+
+  # Epic 8: Strategies & Backtesting Framework (10 stories)
+  epic-8: contexted
+  8-0-foundation-mixins-sizer-deps: done
+  8-1-indicator-module: backlog
+  8-2-backtest-engine-metrics-ftmo-actor: backlog
+  8-3-backtest-data-loader: backlog
+  8-4-supertrend-strategy: backlog
+  8-5-donchian-breakout-strategy: backlog
+  8-6-rsi-bollinger-mean-reversion: backlog
+  8-7-opening-range-breakout: backlog
+  8-8-walk-forward-parameter-sweep-cli: backlog
+  8-9-documentation: backlog
+  epic-8-retrospective: optional

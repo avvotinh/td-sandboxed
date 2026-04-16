@@ -2,12 +2,13 @@
 
 This module provides position sizing calculations based on risk parameters.
 Supports both fixed lot sizing (for prop firm accounts) and risk-based
-dynamic sizing.
+dynamic sizing. Conforms to ``PositionSizerProtocol`` via the
+``calculate_lot_size`` adapter.
 """
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from pydantic import BaseModel, Field
 
@@ -137,16 +138,42 @@ class PositionSizer:
         # Fallback to minimum
         return self.config.min_lot_size
 
+    def calculate_lot_size(
+        self,
+        *,
+        account_balance: Decimal,
+        entry_price: Decimal,
+        stop_price: Decimal,
+        pip_value_per_lot: Decimal,
+        pip_size: Decimal,
+    ) -> Decimal:
+        """Adapter for ``PositionSizerProtocol``.
+
+        Converts price-distance inputs to pip distance, then delegates to the
+        legacy ``calculate_size`` so existing fixed-lot / risk-percent logic is
+        preserved unchanged.
+        """
+        if pip_size <= 0:
+            return self.config.min_lot_size
+        stop_loss_pips = abs(entry_price - stop_price) / pip_size
+        return self.calculate_size(
+            account_balance=account_balance,
+            stop_loss_pips=stop_loss_pips,
+            pip_value=pip_value_per_lot,
+        )
+
     def _apply_constraints(self, lot_size: Decimal) -> Decimal:
         """Apply min/max constraints to lot size.
+
+        Floors to 2 decimal places (never rounds up) so realised risk never
+        exceeds the configured target — critical for FTMO compliance.
 
         Args:
             lot_size: Raw calculated lot size
 
         Returns:
-            Lot size clamped to min/max and rounded to 2 decimal places
+            Lot size clamped to min/max and floored to 2 decimal places
         """
         lot_size = max(lot_size, self.config.min_lot_size)
         lot_size = min(lot_size, self.config.max_lot_size)
-        # Round to 2 decimal places
-        return round(lot_size, 2)
+        return lot_size.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
