@@ -2825,6 +2825,237 @@ Profit Target    4.8%        [Enter value]
 
 ---
 
+## Epic 8: Strategies & Backtesting Framework
+
+**Goal:** Ship a library of prop-firm-ready strategies and a backtest framework that replays historical bars through the same rule engine used in live trading, so backtest PnL tracks live PnL and FTMO breaches surface before a live account fails.
+
+**User Value:** Trader can validate strategy ideas offline (walk-forward + parameter sweep) and trust that backtest results reflect live behaviour under FTMO constraints.
+
+**PRD Coverage:** Post-MVP vision — "Backtesting with multi-account simulation" + "Strategy marketplace/sharing"
+
+**Technical Context:**
+- NautilusTrader `BacktestEngine` + `BarDataWrangler` + `OrderFactory.bracket`
+- Rule engine (Epic 4) injected via Nautilus `Actor` subclass — unchanged from live path
+- TimescaleDB (source of truth) + Parquet cache-aside for sweep speed
+- Custom indicators: Supertrend, ADX, SessionVWAP (Nautilus lacks these)
+- Position sizing respects FTMO daily-loss / max-drawdown (returns 0 on underflow instead of min-lot upsizing)
+
+See [`docs/epic-8-context.md`](./epic-8-context.md) for full architectural decisions.
+
+---
+
+### Story 8.0: Foundation — Mixins, Sizer, Dependencies
+
+As a **developer**,
+I want **composable strategy mixins and a risk-aware position-sizer protocol**,
+So that **Epic 8 strategies can share ATR/session/sizing logic without inheritance bloat**.
+
+**Acceptance Criteria:**
+- `PositionSizerProtocol` (runtime_checkable) exists; both legacy `PositionSizer` and new `RiskBasedPositionSizer` satisfy it
+- `RiskBasedPositionSizer.calculate_lot_size` returns `Decimal("0")` on insufficient capital or malformed inputs (no silent min-lot upsize)
+- `PositionSizer._apply_constraints` uses `ROUND_DOWN` (fixes FTMO-fatal banker's rounding)
+- Mixins: `ATRStopMixin`, `SessionFilterMixin` (DST-safe via `zoneinfo`), `RiskSizedMixin`
+- `BaseStrategy` adds `_calculate_atr_stop`, `_in_session`, `_submit_bracket_order` helpers
+- `_submit_bracket_order` skips on `is_flat=False` or `quantity<=0` (graceful "don't trade")
+- Deps added: `pandas`, `numpy`, `pyarrow`, `jinja2` (main) + `hypothesis`, `pytest-benchmark` (dev)
+
+**Prerequisites:** Epic 4 done, Epic 7 done
+
+**FR Coverage:** Foundation for FR Epic 8
+
+---
+
+### Story 8.1: Indicator Module
+
+As a **strategy developer**,
+I want **a curated set of trading indicators with a consistent Nautilus interface**,
+So that **strategies can compose indicators without reinventing math or dealing with raw Nautilus paths**.
+
+**Acceptance Criteria:**
+- Re-exports at `src.indicators.*`: `ATR`, `RSI`, `Bollinger`, `Donchian` (thin facades over Nautilus classes)
+- Custom `Supertrend(Indicator)` — composes internal ATR, exposes `.value` + `.trend` (+1/-1); first-bar seeds `+1` (Pine-Script convention)
+- Custom `ADX(Indicator)` — Wilder smoothing of +DM/-DM/TR + normalised EMA for ADX itself; exposes `.value`, `.plus_di`, `.minus_di`; initialised at ~2×period bars
+- Custom `SessionVWAP(Indicator)` — cumulative typical*volume within a local-tz trading day; resets on session boundary; clears `initialized=False` at boundary so zero-volume open bars don't leak stale value
+- Integer-ns division for timestamp conversion (avoids sub-minute rollover at 23:59:59.999...)
+- All custom indicators subclass `Indicator`, support `reset()`, and produce identical values on feed → reset → feed-same
+
+**Prerequisites:** Story 8.0
+
+**FR Coverage:** Foundation for Stories 8.4-8.7
+
+---
+
+### Story 8.2: Backtest Engine + Metrics + FtmoComplianceActor
+
+As a **trader**,
+I want **a backtest runner that replays bars through the same FTMO rule engine used in live trading**,
+So that **backtest results faithfully reflect what a live account would experience**.
+
+**Acceptance Criteria:**
+- `BacktestRunner` wraps `nautilus_trader.backtest.engine.BacktestEngine`
+- `FtmoComplianceActor(Actor)` subscribes to order/position/bar events, builds `AccountState` via `account_state_builder`, invokes existing `RuleEngine` (unchanged), cancels orders on `RuleAction.BLOCK`, logs breaches
+- Breach events deduplicated per `(date, rule_name)` so a losing day registers one daily-loss breach, not one per bar
+- `FtmoMetricsSchema` (Pydantic) — profit factor, Sharpe, Sortino, max overall DD %, max daily DD %, daily-loss breach count, max-DD breach flag, profit target hit flag, expectancy, R-multiple, longest losing streak, recovery factor
+- Synthetic bar generator (`src/backtesting/synthetic_bars.py`) supports trending / mean-reverting / flat patterns for tests
+- Integration smoke test: MACrossover on 1000 synthetic bars completes in <10s, produces equity curve of length == bar count
+
+**Prerequisites:** Story 8.0
+
+**FR Coverage:** Backtesting post-MVP vision
+
+---
+
+### Story 8.3: Backtest Data Loader
+
+As a **trader**,
+I want **historical bars loaded from TimescaleDB with a transparent Parquet cache**,
+So that **parameter sweeps don't re-query the database for every iteration**.
+
+**Acceptance Criteria:**
+- `TimescaleBarLoader.load(symbol, timeframe, start, end)` returns DataFrame via asyncpg
+- `ParquetBarLoader` reads/writes Parquet shards under `data/cache/bars/{symbol}/{timeframe}/{start}_{end}_{hash}.parquet`
+- `CachedBarLoader` composes both with cache-aside; cache key includes SHA256 content-hash of `(min, max, count)` from TimescaleDB metadata → auto-invalidates on bar corrections
+- `--no-cache` CLI flag forces refresh
+- Integration test: first call hits DB, second call hits Parquet (mock verifies DB not re-queried)
+
+**Prerequisites:** Story 8.2
+
+**FR Coverage:** Backtest performance / sweep viability
+
+---
+
+### Story 8.4: Supertrend Strategy
+
+As a **trader**,
+I want **a Supertrend-based trend-following strategy with ATR stops**,
+So that **I can capture directional moves with FTMO-safe position sizing**.
+
+**Acceptance Criteria:**
+- `SupertrendStrategy(BaseStrategy, ATRStopMixin, RiskSizedMixin)` registered as `"supertrend"` in `StrategyRegistry`
+- On Supertrend flip to +1 while flat: submits bracket order (BUY entry + StopMarket SL at `entry - sl_atr_mult*ATR` + Limit TP at `entry + tp_atr_mult*ATR`)
+- Mirror logic for flip to -1
+- No new order while position open (guard on `is_flat`)
+- `configs/strategies/supertrend_xauusd.yaml` preset — period=10, multiplier=3.0, sl_atr_mult=1.5, tp_atr_mult=3.0, risk_pct=1.0
+- Integration backtest on synthetic trending market produces ≥1 trade, net PnL > 0
+
+**Prerequisites:** Stories 8.0, 8.1, 8.2
+
+**FR Coverage:** Strategy library
+
+---
+
+### Story 8.5: Donchian Breakout Strategy (Turtle-style)
+
+As a **trader**,
+I want **a classical Donchian breakout strategy**,
+So that **I can capture strong breakout moves in trending markets**.
+
+**Acceptance Criteria:**
+- BUY when close > **prior** bar's 20-bar Donchian upper band (never current bar's own band)
+- Symmetric SHORT logic
+- ATR stop + 2× ATR take profit
+- No re-entry while position open
+- `configs/strategies/donchian_xauusd.yaml` preset
+- Lookahead bias guard: uses `_prev_upper` / `_prev_lower` shadowed values
+
+**Prerequisites:** Stories 8.0, 8.1, 8.2
+
+**FR Coverage:** Strategy library
+
+---
+
+### Story 8.6: RSI + Bollinger Mean Reversion Strategies
+
+As a **trader**,
+I want **two mean-reversion strategies for ranging markets**,
+So that **I have non-correlated entries versus trend-following strategies**.
+
+**Acceptance Criteria:**
+- `RSIMeanReversionStrategy` — BUY on RSI oversold + rising (cross-up from <0.3); exit at RSI 0.5 or SL/TP
+- `BollingerMeanReversionStrategy` — BUY when close < lower band; exit at middle band or SL/TP
+- Both use ATR stop + `RiskBasedPositionSizer`
+- Both guard against re-entry while open
+- Two YAML presets
+- Integration tests on oscillating synthetic bars yield ≥1 trade each
+
+**Prerequisites:** Stories 8.0, 8.1, 8.2
+
+**FR Coverage:** Strategy library
+
+---
+
+### Story 8.7: Opening Range Breakout (ORB)
+
+As a **trader**,
+I want **an intraday ORB strategy that respects session boundaries**,
+So that **I can participate in London/NY open breakouts without holding overnight**.
+
+**Acceptance Criteria:**
+- First N minutes of configured session (default 30 min London): track high/low, no trades
+- After OR formed: first bar closing above OR-high → BUY (one entry per session)
+- All positions force-closed at session end (within 1 bar)
+- No trades outside session
+- Session state resets per day (`_session_id` tracking via `SessionFilterMixin.session_id`)
+- DST transitions handled correctly (uses `zoneinfo`)
+- `configs/strategies/orb_xauusd.yaml` preset
+
+**Prerequisites:** Stories 8.0, 8.1, 8.2
+
+**FR Coverage:** Strategy library (intraday)
+
+---
+
+### Story 8.8: Walk-Forward + Parameter Sweep CLI
+
+As a **trader**,
+I want **walk-forward analysis and parameter sweeps**,
+So that **I can validate strategy robustness on out-of-sample data before risking real capital**.
+
+**Acceptance Criteria:**
+- `ParamSpace` supports grid + random sampling
+- `ParameterSweep` runs backtests in `ProcessPoolExecutor` (engine per worker)
+- `WalkForwardAnalyzer` produces rolling train/test folds; picks best params on train, evaluates on test
+- CLI: `backtest run | sweep | walkforward` (Typer)
+- JSON report (matches `FtmoMetricsSchema`) + HTML report (Jinja2, inline equity curve)
+- Early-stop on `max_overall_dd_pct` threshold to abort losing folds
+
+**Prerequisites:** Stories 8.2, 8.3, ≥1 strategy
+
+**FR Coverage:** Post-MVP backtesting vision
+
+---
+
+### Story 8.9: Documentation
+
+As a **maintainer**,
+I want **strategy + backtest runbooks and updated architecture docs**,
+So that **a new contributor can run a backtest end-to-end without reading source code**.
+
+**Acceptance Criteria:**
+- `docs/architecture.md` gains a "Backtesting Framework" section with module list + data flow
+- `docs/runbooks/backtest-runbook.md` — how to run backtest / sweep / walk-forward; troubleshooting
+- `docs/strategies/README.md` — 5 strategies' signal logic, parameters, suggested timeframes
+- Sprint-status.yaml marks epic-8 done
+- HTML report template polish
+
+**Prerequisites:** 8.0-8.8
+
+**FR Coverage:** Documentation deliverable
+
+---
+
+**Epic 8 Complete: 10 Stories**
+
+**FR Coverage:** Post-MVP vision (strategy library + backtesting)
+
+**Technical Context Used:**
+- NautilusTrader 1.200+ BacktestEngine / Actor / OrderFactory / Indicator base
+- Epic 4 rule engine (reused unchanged via FtmoComplianceActor)
+- TimescaleDB + Parquet cache-aside
+- FTMO safety constraints drive position sizing + rounding decisions
+
+---
+
 ## Summary
 
 ### Epic Overview
@@ -2838,8 +3069,9 @@ Profit Target    4.8%        [Enter value]
 | 5 | State Persistence & Crash Recovery | 7 | FR31-35,54 | Survive crashes safely |
 | 6 | Notifications & Emergency Control | 6 | FR36,38,40 | Stay informed, emergency stop |
 | 7 | Audit & Compliance Logging | 6 | FR42-45,53 | Complete audit trail |
+| 8 | Strategies & Backtesting Framework | 10 | Post-MVP vision | Validate strategies offline, trust live alignment |
 
-**Total: 53 Stories across 7 Epics**
+**Total: 63 Stories across 8 Epics**
 
 ---
 
