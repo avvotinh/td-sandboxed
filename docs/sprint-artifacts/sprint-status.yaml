@@ -120,7 +120,7 @@ development_status:
   # Epic 8: Strategies & Backtesting Framework (10 stories)
   epic-8: contexted
   8-0-foundation-mixins-sizer-deps: done
-  8-1-indicator-module: backlog
+  8-1-indicator-module: done
   8-2-backtest-engine-metrics-ftmo-actor: backlog
   8-3-backtest-data-loader: backlog
   8-4-supertrend-strategy: backlog
