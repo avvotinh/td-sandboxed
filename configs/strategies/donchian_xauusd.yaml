@@ -1,0 +1,24 @@
+# Donchian Breakout (Turtle-style) — XAUUSD daily or H4.
+#
+# Target regime: strong breakout markets. 20-period channel is the
+# classical Turtle entry window. Wider channels (e.g. 55) give fewer,
+# higher-quality signals at the cost of later entries.
+#
+# Stops are 2x ATR (standard Turtle), targets 4x ATR (2:1 R:R). This
+# strategy is NOT reversal-friendly — re-entries only when flat.
+
+strategy: donchian_breakout
+instrument_id: XAUUSD.BROKER
+bar_type: XAUUSD.BROKER-1-HOUR-LAST-EXTERNAL
+trade_size: "0.10"   # ignored — sized by RiskBasedPositionSizer
+account_id: ftmo-main
+
+channel_period: 20
+atr_period: 14
+sl_atr_mult: "2.0"
+tp_atr_mult: "4.0"
+
+risk_percent: "1.0"
+pip_size: "0.01"
+pip_value_per_lot: "1.0"
+initial_balance_fallback: "100000"
