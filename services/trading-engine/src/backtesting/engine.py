@@ -11,18 +11,20 @@ correctness is covered by ``tests/integration/test_backtest_smoke.py``.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from nautilus_trader.backtest.engine import BacktestEngine, BacktestEngineConfig
 from nautilus_trader.model.currencies import USD
+from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.objects import Currency
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.backtesting.ftmo_actor import FtmoComplianceActor, FtmoComplianceActorConfig
+from src.backtesting.ftmo_preset import FtmoPreset
 from src.backtesting.metrics.calculator import calculate_metrics
-from src.backtesting.result import BacktestResult
+from src.backtesting.result import BacktestResult, TradeRecord
 
 if TYPE_CHECKING:
     from nautilus_trader.model.identifiers import Venue
@@ -31,7 +33,13 @@ if TYPE_CHECKING:
 
 
 class BacktestRunnerConfig(BaseModel):
-    """Configuration for a single backtest run."""
+    """Configuration for a single backtest run.
+
+    Prefer :meth:`from_preset` over passing the FTMO threshold fields
+    directly so the backtest shares the same compliance numbers the
+    live rule engine enforces (see
+    ``.claude/rules/common/sandboxed-domain.md``).
+    """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
@@ -41,6 +49,25 @@ class BacktestRunnerConfig(BaseModel):
     profit_target_pct: float = 10.0
     max_dd_pct: float = 10.0
     min_trading_days: int = 4
+
+    @classmethod
+    def from_preset(
+        cls,
+        *,
+        strategy_name: str,
+        initial_balance: Decimal,
+        preset: FtmoPreset,
+        currency: str = "USD",
+    ) -> BacktestRunnerConfig:
+        """Build a config whose FTMO thresholds come from ``preset``."""
+        return cls(
+            strategy_name=strategy_name,
+            initial_balance=initial_balance,
+            currency=currency,
+            profit_target_pct=preset.profit_target_pct,
+            max_dd_pct=preset.max_drawdown_pct,
+            min_trading_days=preset.min_trading_days,
+        )
 
 
 class BacktestRunner:
@@ -136,11 +163,7 @@ class BacktestRunner:
         breaches = (
             self._ftmo_actor.breaches if self._ftmo_actor is not None else []
         )
-
-        # TODO: extract TradeRecord list from engine.cache.positions_closed().
-        # For now we pass [] and let metrics fall back to safe defaults. Full
-        # trade extraction is wired in the integration smoke test (Task 8).
-        trades = []
+        trades = self._extract_trades()
 
         start = self._start or (
             equity_curve[0][0] if equity_curve else datetime.now()
@@ -172,6 +195,44 @@ class BacktestRunner:
             breaches=breaches,
             metrics=metrics,
         )
+
+    def _extract_trades(self) -> list[TradeRecord]:
+        """Convert Nautilus closed positions into our ``TradeRecord`` list.
+
+        Only fully-closed positions contribute — open positions have no
+        ``avg_px_close`` or ``realized_pnl`` yet. Ns timestamps are
+        converted to UTC-aware datetimes via ``datetime.fromtimestamp`` so
+        TradeRecord.entry_ts / exit_ts stay tz-aware.
+        """
+        try:
+            positions = self._engine.cache.positions_closed()
+        except Exception:
+            # Cache may be empty or unavailable mid-construction — return [].
+            return []
+
+        records: list[TradeRecord] = []
+        for pos in positions:
+            side = "BUY" if pos.side == PositionSide.LONG else "SELL"
+            entry_ts = datetime.fromtimestamp(
+                pos.ts_opened // 1_000_000_000, tz=UTC
+            )
+            exit_ts = datetime.fromtimestamp(
+                (pos.ts_closed or pos.ts_last) // 1_000_000_000, tz=UTC
+            )
+            records.append(
+                TradeRecord(
+                    trade_id=str(pos.id),
+                    symbol=str(pos.instrument_id),
+                    side=side,
+                    entry_ts=entry_ts,
+                    exit_ts=exit_ts,
+                    entry_price=Decimal(str(pos.avg_px_open)),
+                    exit_price=Decimal(str(pos.avg_px_close or pos.avg_px_open)),
+                    quantity=Decimal(str(pos.quantity)),
+                    pnl=Decimal(str(pos.realized_pnl)) if pos.realized_pnl else Decimal("0"),
+                )
+            )
+        return records
 
     def dispose(self) -> None:
         """Release the underlying engine's resources."""

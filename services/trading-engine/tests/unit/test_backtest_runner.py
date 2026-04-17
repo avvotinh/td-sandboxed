@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
+from src.backtesting.ftmo_preset import FtmoPreset
 from src.backtesting.result import BacktestResult
 
 
@@ -28,6 +29,26 @@ def runner_config() -> BacktestRunnerConfig:
         initial_balance=Decimal("100000"),
         currency="USD",
     )
+
+
+class TestFromPreset:
+    """BacktestRunnerConfig.from_preset wires FTMO thresholds from YAML."""
+
+    def test_threshold_fields_populated_from_preset(self) -> None:
+        preset = FtmoPreset(
+            name="Custom",
+            daily_loss_pct=3.5,
+            max_drawdown_pct=7.5,
+            profit_target_pct=8.0,
+            min_trading_days=2,
+            max_position_lots=50.0,
+        )
+        cfg = BacktestRunnerConfig.from_preset(
+            strategy_name="s", initial_balance=Decimal("50000"), preset=preset,
+        )
+        assert cfg.max_dd_pct == 7.5
+        assert cfg.profit_target_pct == 8.0
+        assert cfg.min_trading_days == 2
 
 
 class TestBacktestRunnerInit:

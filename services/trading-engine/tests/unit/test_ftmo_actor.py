@@ -28,10 +28,11 @@ from src.rules.engine_result import RuleEngineResult
 pytestmark = pytest.mark.unit
 
 
-def _make_actor(rule_engine) -> FtmoComplianceActor:
+def _make_actor(rule_engine, *, daily_session_tz: str = "UTC") -> FtmoComplianceActor:
     config = FtmoComplianceActorConfig(
         account_id="ftmo-test",
         initial_balance=Decimal("100000"),
+        daily_session_tz=daily_session_tz,
     )
     actor = FtmoComplianceActor(config=config, rule_engine=rule_engine)
     return actor
@@ -169,6 +170,51 @@ class TestBreachDeduplication:
             state, ts=datetime(2026, 1, 2, 12, 0, tzinfo=UTC)
         )
         assert len(actor.breaches) == 2
+
+    def test_dedup_uses_session_tz_not_utc(self) -> None:
+        """Regression: FTMO trading day boundary is 22:00 UTC (CET midnight).
+
+        Two bars on the SAME CET day but straddling UTC midnight must
+        dedup to one breach.
+        """
+        from src.rules.base_rule import RuleAction, RuleResult
+        from src.rules.engine_result import RuleEngineResult
+
+        mock_rule = Mock()
+        mock_rule.name = "daily_loss_limit"
+        rule_engine = Mock()
+        rule_engine.validate = Mock(
+            return_value=RuleEngineResult(
+                action=RuleAction.BLOCK,
+                blocked_by=mock_rule,
+                blocking_reason="breach",
+                warnings=[],
+                all_results=[
+                    (
+                        mock_rule,
+                        RuleResult(
+                            action=RuleAction.BLOCK,
+                            message="breach",
+                            current_value=5.5,
+                            threshold_value=5.0,
+                        ),
+                    )
+                ],
+                evaluation_time_ms=0.1,
+            )
+        )
+        actor = _make_actor(rule_engine, daily_session_tz="Europe/Berlin")
+        state = {"balance": Decimal("94000"), "equity": Decimal("94000")}
+
+        # 2026-03-17 23:30 UTC = 2026-03-18 00:30 CET  (session "2026-03-18")
+        # 2026-03-18 01:00 UTC = 2026-03-18 02:00 CET  (same session "2026-03-18")
+        actor.record_compliance_check(
+            state, ts=datetime(2026, 3, 17, 23, 30, tzinfo=UTC)
+        )
+        actor.record_compliance_check(
+            state, ts=datetime(2026, 3, 18, 1, 0, tzinfo=UTC)
+        )
+        assert len(actor.breaches) == 1
 
     def test_different_rules_same_day_recorded_separately(self) -> None:
         mock_rule_a = Mock()

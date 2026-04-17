@@ -33,6 +33,7 @@ from src.backtesting.account_state_builder import build_account_state
 from src.backtesting.result import BreachEvent
 from src.rules.base_rule import RuleAction
 from src.rules.engine import RuleEngine
+from src.strategies.mixins.session_filter_mixin import SessionFilterMixin
 
 
 class FtmoComplianceActorConfig(ActorConfig, frozen=True):
@@ -69,7 +70,11 @@ class FtmoComplianceActor(Actor):
         self._config = config
         self._rule_engine = rule_engine
         self._breaches: list[BreachEvent] = []
-        self._dedup: set[tuple[date, str]] = set()
+        # Dedup keyed by the trading-day *session id* (local date in
+        # ``daily_session_tz``) — so broker rollover at 22:00 UTC with a
+        # CET session groups correctly instead of splitting across two
+        # UTC dates.
+        self._dedup: set[tuple[str, str]] = set()
         self._equity_curve: list[tuple[datetime, Decimal]] = []
         self._peak_balance: Decimal = config.initial_balance
         # Per-day open balance — resets when the UTC date rolls over so the
@@ -141,11 +146,16 @@ class FtmoComplianceActor(Actor):
         account_state: Mapping[str, Any],
         ts: datetime,
     ) -> None:
-        """Evaluate rules and dedupe-append breaches to the actor's log."""
+        """Evaluate rules and dedupe-append breaches to the actor's log.
+
+        Deduplication buckets by the **session id** in
+        ``config.daily_session_tz`` so a daily-loss breach registers once
+        per FTMO trading day, not once per UTC date.
+        """
         new_breaches = self.evaluate_compliance(account_state, ts)
-        local_date = ts.astimezone(UTC).date()  # session bucketing by UTC day
+        session_id = SessionFilterMixin.session_id(ts, self._config.daily_session_tz)
         for event in new_breaches:
-            key = (local_date, event.rule_name)
+            key = (session_id, event.rule_name)
             if key in self._dedup:
                 continue
             self._dedup.add(key)
