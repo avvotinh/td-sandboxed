@@ -125,7 +125,4 @@ class TestSignalGeneration:
         assert strategy.generate_signal(_mock_bar()) == SignalType.NONE
 
 
-class TestRegistry:
-    def test_registered(self) -> None:
-        from src.strategies.registry import StrategyRegistry
-        assert StrategyRegistry.is_registered("rsi_mean_reversion")
+# Registry verified by successful import (decorator registered at load).

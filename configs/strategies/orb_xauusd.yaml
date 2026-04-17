@@ -1,0 +1,31 @@
+# Opening Range Breakout (ORB) — XAUUSD M5 or M15.
+#
+# Target regime: intraday volatility expansion during London/NY open.
+# First 30 minutes of session define the range; breakouts in either
+# direction trigger a single entry per session. Positions force-close
+# at session end (or first bar past close).
+#
+# Default: London session 08:00-16:30 Europe/London (DST-safe via
+# SessionFilterMixin). Switch to America/New_York 08:30-15:00 for NY.
+
+strategy: orb
+instrument_id: XAUUSD.BROKER
+bar_type: XAUUSD.BROKER-5-MINUTE-LAST-EXTERNAL
+trade_size: "0.10"   # ignored — sized by RiskBasedPositionSizer
+account_id: ftmo-main
+
+session_open_hour: 8
+session_open_minute: 0
+session_close_hour: 16
+session_close_minute: 30
+session_tz: "Europe/London"
+opening_range_minutes: 30
+
+atr_period: 14
+sl_atr_mult: "1.0"
+tp_atr_mult: "2.0"
+
+risk_percent: "1.0"
+pip_size: "0.01"
+pip_value_per_lot: "1.0"
+initial_balance_fallback: "100000"

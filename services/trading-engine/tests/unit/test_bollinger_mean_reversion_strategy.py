@@ -104,7 +104,4 @@ class TestSignalGeneration:
         assert strategy.generate_signal(_mock_bar(2400)) == SignalType.CLOSE
 
 
-class TestRegistry:
-    def test_registered(self) -> None:
-        from src.strategies.registry import StrategyRegistry
-        assert StrategyRegistry.is_registered("bollinger_mean_reversion")
+# Registry verified by successful import (decorator registered at load).

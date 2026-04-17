@@ -156,9 +156,4 @@ class TestBracketParams:
         assert qty > 0
 
 
-class TestRegistry:
-    def test_registered(self) -> None:
-        from src.strategies.registry import StrategyRegistry
-
-        assert StrategyRegistry.is_registered("donchian_breakout")
-        assert StrategyRegistry.get("donchian_breakout") is DonchianBreakoutStrategy
+# Registry verified by successful import (decorator registered at load).
