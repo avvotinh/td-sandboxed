@@ -1,0 +1,30 @@
+# Supertrend strategy preset — XAUUSD (gold) on M5 or M15 bars.
+#
+# Target regime: trending markets (gold during London/NY open).
+# Sensitivity: moderate (period=10, multiplier=3.0). Lower multiplier for
+# more signals / more whipsaws; higher for fewer but stronger signals.
+#
+# Risk: 1% per trade, ATR-based stops. Reward:Risk = 2:1 (sl=1.5*ATR,
+# tp=3.0*ATR). On a $100k account at pip_value $1, a 50-pip stop uses
+# roughly 0.2 lot; widen ATR stop or lower risk_percent for tighter sizing.
+
+strategy: supertrend
+instrument_id: XAUUSD.BROKER
+bar_type: XAUUSD.BROKER-15-MINUTE-LAST-EXTERNAL
+trade_size: "0.10"   # ignored — RiskBasedPositionSizer overrides
+account_id: ftmo-main
+
+# Supertrend indicator params
+period: 10
+multiplier: 3.0
+
+# ATR for stop/target
+atr_period: 14
+sl_atr_mult: "1.5"
+tp_atr_mult: "3.0"
+
+# Position sizing
+risk_percent: "1.0"
+pip_size: "0.01"          # XAUUSD: 1 pip = $0.01 move
+pip_value_per_lot: "1.0"  # $1 per pip per lot (standard)
+initial_balance_fallback: "100000"

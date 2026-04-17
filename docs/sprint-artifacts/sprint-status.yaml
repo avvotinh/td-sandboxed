@@ -123,7 +123,7 @@ development_status:
   8-1-indicator-module: done
   8-2-backtest-engine-metrics-ftmo-actor: done
   8-3-backtest-data-loader: backlog
-  8-4-supertrend-strategy: backlog
+  8-4-supertrend-strategy: done
   8-5-donchian-breakout-strategy: backlog
   8-6-rsi-bollinger-mean-reversion: backlog
   8-7-opening-range-breakout: backlog
