@@ -1,0 +1,23 @@
+# Bollinger Mean Reversion — XAUUSD M15.
+#
+# 20-period SMA ± 2 standard deviations. Enters on band breach, exits at
+# middle band. Works best in ranging markets; disable / switch off during
+# strong directional moves where prices ride a band for multiple bars.
+
+strategy: bollinger_mean_reversion
+instrument_id: XAUUSD.BROKER
+bar_type: XAUUSD.BROKER-15-MINUTE-LAST-EXTERNAL
+trade_size: "0.10"   # ignored — sized by RiskBasedPositionSizer
+account_id: ftmo-main
+
+period: 20
+num_std: 2.0
+
+atr_period: 14
+sl_atr_mult: "1.0"
+tp_atr_mult: "2.0"
+
+risk_percent: "1.0"
+pip_size: "0.01"
+pip_value_per_lot: "1.0"
+initial_balance_fallback: "100000"
