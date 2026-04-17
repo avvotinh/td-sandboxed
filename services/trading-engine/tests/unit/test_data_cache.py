@@ -135,3 +135,45 @@ class TestBuildCachePath:
         p1 = build_cache_path(tmp_path, "XAUUSD", "1m", start, end, fp)
         p2 = build_cache_path(tmp_path, "EURUSD", "1m", start, end, fp)
         assert p1.parent != p2.parent
+
+
+class TestPathTraversalHardening:
+    """Regression: symbol/timeframe must be rejected if they could escape."""
+
+    def _args(self, tmp_path) -> dict:
+        return dict(
+            cache_dir=tmp_path,
+            start=datetime(2026, 1, 1, tzinfo=UTC),
+            end=datetime(2026, 4, 1, tzinfo=UTC),
+            fingerprint=ContentHashFingerprint(min_ts=1, max_ts=2, row_count=1),
+        )
+
+    def test_rejects_parent_traversal_symbol(self, tmp_path) -> None:
+        with pytest.raises(ValueError, match="symbol"):
+            build_cache_path(symbol="../../etc", timeframe="1m", **self._args(tmp_path))
+
+    def test_rejects_parent_traversal_timeframe(self, tmp_path) -> None:
+        with pytest.raises(ValueError, match="timeframe"):
+            build_cache_path(symbol="XAUUSD", timeframe="../x", **self._args(tmp_path))
+
+    def test_rejects_absolute_path_symbol(self, tmp_path) -> None:
+        with pytest.raises(ValueError, match="symbol"):
+            build_cache_path(symbol="/etc/passwd", timeframe="1m", **self._args(tmp_path))
+
+    def test_rejects_empty_symbol(self, tmp_path) -> None:
+        with pytest.raises(ValueError, match="symbol"):
+            build_cache_path(symbol="", timeframe="1m", **self._args(tmp_path))
+
+    def test_rejects_null_byte(self, tmp_path) -> None:
+        with pytest.raises(ValueError, match="symbol"):
+            build_cache_path(symbol="XAU\x00", timeframe="1m", **self._args(tmp_path))
+
+    def test_rejects_space(self, tmp_path) -> None:
+        with pytest.raises(ValueError, match="symbol"):
+            build_cache_path(symbol="XAU USD", timeframe="1m", **self._args(tmp_path))
+
+    def test_accepts_safe_symbol(self, tmp_path) -> None:
+        path = build_cache_path(
+            symbol="XAUUSD", timeframe="1m", **self._args(tmp_path)
+        )
+        assert path.parent.parent.name == "XAUUSD"

@@ -18,7 +18,9 @@ consume any layer identically.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -32,6 +34,15 @@ from src.backtesting.data_cache import (
 
 
 logger = logging.getLogger(__name__)
+
+
+# Only tables we know live in the prod schema. Adding a new candles
+# variant means landing a migration + explicitly opting in here.
+_ALLOWED_CANDLE_TABLES: frozenset[str] = frozenset({"candles"})
+
+# Fallback validator for anything outside the allowlist — names must be a
+# simple SQL-safe identifier, no quoting, no semicolons.
+_SQL_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
 class BarLoaderProtocol(Protocol):
@@ -125,6 +136,14 @@ class TimescaleBarLoader:
     """
 
     def __init__(self, pool, table: str = "candles") -> None:
+        # SQL-injection hardening: the table name is interpolated into the
+        # query string (PostgreSQL does not accept table names as bind
+        # parameters). Reject anything outside the known-safe allowlist.
+        if table not in _ALLOWED_CANDLE_TABLES and not _SQL_IDENTIFIER.match(table):
+            raise ValueError(
+                f"Unsafe table name: {table!r}. Must be in {_ALLOWED_CANDLE_TABLES} "
+                f"or match {_SQL_IDENTIFIER.pattern}."
+            )
         self._pool = pool
         self._table = table
 
@@ -191,15 +210,37 @@ class TimescaleBarLoader:
         end: datetime,
         fingerprint: ContentHashFingerprint,  # ignored — Timescale is source
     ) -> pd.DataFrame:
-        """Sync wrapper — runs the async fetch on a private event loop."""
-        import asyncio
+        """Sync wrapper — runs the async fetch on a private event loop.
 
+        Raises ``RuntimeError`` when invoked from inside a running event
+        loop (pytest-asyncio, FastAPI, Jupyter). Async callers must use
+        :meth:`aload` instead.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass  # no loop → safe to use asyncio.run()
+        else:
+            raise RuntimeError(
+                "TimescaleBarLoader.load() called from a running event loop — "
+                "use `aload()` from async code instead."
+            )
         return asyncio.run(self.aload(symbol, timeframe, start, end))
 
 
 def _dt_to_ns(dt: datetime) -> int:
-    """Convert a tz-aware datetime to nanoseconds since Unix epoch."""
-    return int(dt.timestamp() * 1_000_000_000)
+    """Convert a tz-aware datetime to nanoseconds since Unix epoch.
+
+    Uses integer arithmetic end-to-end — ``dt.timestamp()`` returns a
+    float whose ~15-digit precision silently truncates the last 4 digits
+    of an ns-resolution integer, so ``int(ts * 1e9)`` can produce two
+    distinct datetimes that collide to the same value. Because the
+    fingerprint is the sole cache-invalidation mechanism, a collision
+    would silently serve stale Parquet shards after late-arriving bar
+    corrections.
+    """
+    seconds = int(dt.timestamp())
+    return seconds * 1_000_000_000 + dt.microsecond * 1_000
 
 
 # --- Composite cached layer -------------------------------------------

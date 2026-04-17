@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.backtesting.data_cache import ContentHashFingerprint
-from src.backtesting.data_loader import TimescaleBarLoader
+from src.backtesting.data_loader import TimescaleBarLoader, _dt_to_ns
 
 
 pytestmark = pytest.mark.unit
@@ -62,6 +62,47 @@ class TestFingerprint:
         assert fp == ContentHashFingerprint(min_ts=0, max_ts=0, row_count=0)
 
 
+class TestTableAllowlist:
+    """Regression: SQL injection via table parameter must be blocked."""
+
+    def test_default_table_ok(self) -> None:
+        TimescaleBarLoader(_fake_pool())  # no raise
+
+    def test_dangerous_table_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Unsafe table"):
+            TimescaleBarLoader(_fake_pool(), table="candles; DROP TABLE users--")
+
+    def test_uppercase_table_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Unsafe table"):
+            TimescaleBarLoader(_fake_pool(), table="Candles")
+
+    def test_quoted_table_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Unsafe table"):
+            TimescaleBarLoader(_fake_pool(), table='"candles"')
+
+    def test_safe_identifier_accepted(self) -> None:
+        TimescaleBarLoader(_fake_pool(), table="candles_m1")  # matches regex
+
+
+class TestDtToNsPrecision:
+    """_dt_to_ns must be lossless for microsecond timestamps."""
+
+    def test_preserves_microseconds(self) -> None:
+        from datetime import UTC as _UTC
+        dt = datetime(2026, 4, 17, 12, 0, 0, 123_456, tzinfo=_UTC)
+        ns = _dt_to_ns(dt)
+        # Expected: (epoch_seconds * 1e9) + (123_456 * 1e3)
+        expected_seconds = int(dt.timestamp())
+        assert ns == expected_seconds * 1_000_000_000 + 123_456_000
+
+    def test_distinct_microsecond_datetimes_distinct_ns(self) -> None:
+        """Critical: float precision bug would collide these two values."""
+        base_epoch = datetime(2026, 4, 17, 12, 0, 0, 0, tzinfo=UTC)
+        dt1 = base_epoch.replace(microsecond=123_456)
+        dt2 = base_epoch.replace(microsecond=123_457)
+        assert _dt_to_ns(dt1) != _dt_to_ns(dt2)
+
+
 class TestLoad:
     def test_empty_result_returns_empty_df(self) -> None:
         pool = _fake_pool(fetch_return=[])
@@ -108,6 +149,22 @@ class TestLoad:
         assert len(df) == 2
         assert df.iloc[0]["close"] == pytest.approx(2405.0)
         assert df.iloc[1]["close"] == pytest.approx(2410.0)
+
+    def test_sync_load_in_running_loop_raises(self) -> None:
+        """Calling the sync shim from inside an event loop must raise clearly."""
+        import asyncio as _a
+        loader = TimescaleBarLoader(_fake_pool(fetch_return=[]))
+
+        async def attempt():
+            loader.load(
+                "XAUUSD", "1m",
+                datetime(2026, 1, 1, tzinfo=UTC),
+                datetime(2026, 2, 1, tzinfo=UTC),
+                ContentHashFingerprint(min_ts=0, max_ts=0, row_count=0),
+            )
+
+        with pytest.raises(RuntimeError, match="running event loop"):
+            _a.run(attempt())
 
     def test_volume_null_coerced_to_zero(self) -> None:
         t0 = datetime(2026, 1, 1, tzinfo=UTC)

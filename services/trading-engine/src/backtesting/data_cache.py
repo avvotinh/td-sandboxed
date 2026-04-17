@@ -18,9 +18,23 @@ the same series coexist without colliding.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+
+# Strict allowlist for path components — rejects traversal sequences
+# (``../``, absolute paths, NULs) and any non-ASCII-identifier-safe glyph.
+_SAFE_PATH_COMPONENT = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _validate_path_component(name: str, value: str) -> None:
+    """Reject any string that could escape the cache directory."""
+    if not value or not _SAFE_PATH_COMPONENT.match(value):
+        raise ValueError(
+            f"Unsafe {name} for cache path: {value!r}. Only [A-Za-z0-9._-] allowed."
+        )
 
 
 @dataclass(frozen=True)
@@ -66,7 +80,15 @@ def build_cache_path(
     end: datetime,
     fingerprint: ContentHashFingerprint,
 ) -> Path:
-    """Resolve the on-disk Parquet path for a (symbol, timeframe, range)."""
+    """Resolve the on-disk Parquet path for a (symbol, timeframe, range).
+
+    ``symbol`` and ``timeframe`` are validated against a strict allowlist
+    to block directory-traversal attacks: any value outside
+    ``[A-Za-z0-9._-]`` raises ``ValueError``. See Epic 8 security audit
+    for the attack scenario (crafted YAML escaping ``cache_dir``).
+    """
+    _validate_path_component("symbol", symbol)
+    _validate_path_component("timeframe", timeframe)
     start_stamp = start.strftime("%Y%m%dT%H%M%S")
     end_stamp = end.strftime("%Y%m%dT%H%M%S")
     filename = f"{start_stamp}_{end_stamp}_{fingerprint.sha256()}.parquet"
