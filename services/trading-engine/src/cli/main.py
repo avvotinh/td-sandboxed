@@ -17,6 +17,7 @@ from ..accounts.account_manager import AccountManager
 from ..config.loader import ConfigLoader, ConfigValidationError, ConfigSyntaxError
 from ..rules.audit_logger import AuditEntry
 from ..state.redis_state import RedisStateManager
+from ..backtesting.cli import backtest_app
 from .accounts import accounts_app
 from .audit import audit_app
 from .config import config_app
@@ -81,6 +82,7 @@ app.add_typer(accounts_app, name="accounts")
 app.add_typer(audit_app, name="audit")
 app.add_typer(config_app, name="config")
 app.add_typer(report_app, name="report")
+app.add_typer(backtest_app, name="backtest")
 
 
 def _run_async(coro) -> Any:
