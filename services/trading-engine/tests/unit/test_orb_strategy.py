@@ -111,6 +111,29 @@ class TestOpeningRangeAccumulation:
         strategy.generate_signal(_mock_bar(ts2, high=2412, low=2388))
         assert strategy._or_complete is True
 
+    def test_boundary_bar_at_exact_window_not_added_to_or(self) -> None:
+        """Half-open window: bar at elapsed == opening_range_minutes is past.
+
+        M15 bars at 08:00, 08:15, 08:30 with opening_range_minutes=30 —
+        only 08:00 and 08:15 should contribute. The 08:30 bar marks OR
+        complete and is eligible for breakout evaluation.
+        """
+        strategy = _make_strategy()
+        strategy._atr = Mock(initialized=True, value=5.0)
+        # Bar 1 at 08:00 BST = 07:00 UTC
+        ts1 = datetime(2026, 4, 17, 7, 0, tzinfo=UTC)
+        strategy.generate_signal(_mock_bar(ts1, high=2410, low=2390))
+        # Bar 2 at 08:15 BST — still inside window
+        ts2 = datetime(2026, 4, 17, 7, 15, tzinfo=UTC)
+        strategy.generate_signal(_mock_bar(ts2, high=2415, low=2395))
+        # Bar 3 at 08:30 BST — elapsed == 30, past the half-open window.
+        # Must NOT extend OR, even though its H/L would otherwise widen it.
+        ts3 = datetime(2026, 4, 17, 7, 30, tzinfo=UTC)
+        strategy.generate_signal(_mock_bar(ts3, high=2500, low=2300, close=2400))
+        assert strategy._or_high == 2415, "08:30 bar's H leaked into OR"
+        assert strategy._or_low == 2390, "08:30 bar's L leaked into OR"
+        assert strategy._or_complete is True
+
 
 class TestBreakoutSignal:
     def _primed_strategy(self) -> ORBStrategy:

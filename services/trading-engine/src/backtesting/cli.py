@@ -103,7 +103,12 @@ def run_cmd(
     payload = result_to_json_dict(result)
 
     if out is not None:
-        write_json(out, payload)
+        if out.suffix.lower() == ".html":
+            from src.backtesting.reports.html_writer import write_html_report
+
+            write_html_report(result, out)
+        else:
+            write_json(out, payload)
         typer.echo(f"Result written to {out}")
         return
     if json_output:

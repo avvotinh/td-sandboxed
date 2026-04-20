@@ -19,13 +19,14 @@ from datetime import UTC, datetime, time
 from decimal import Decimal
 
 from nautilus_trader.indicators.volatility import AverageTrueRange
-from nautilus_trader.model.currencies import USD
 from nautilus_trader.model.data import Bar
-from nautilus_trader.model.enums import OrderSide
 
 from src.orders.signal import SignalType
 from src.strategies.base_strategy import BaseStrategy
-from src.strategies.config import BaseStrategyConfig
+from src.strategies.bracket_strategy import (
+    BracketStrategyConfig,
+    BracketStrategyMixin,
+)
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
 from src.strategies.mixins.session_filter_mixin import SessionFilterMixin
@@ -36,7 +37,7 @@ from src.strategies.risk_based_position_sizer import (
 )
 
 
-class ORBConfig(BaseStrategyConfig, frozen=True, kw_only=True):
+class ORBConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     session_open_hour: int = 8  # e.g. London open 08:00
     session_open_minute: int = 0
     session_close_hour: int = 16  # e.g. London close 16:30
@@ -44,13 +45,9 @@ class ORBConfig(BaseStrategyConfig, frozen=True, kw_only=True):
     session_tz: str = "Europe/London"
     opening_range_minutes: int = 30
 
-    atr_period: int = 14
+    # ORB-specific ATR defaults (tighter than trend-follower bracket)
     sl_atr_mult: Decimal = Decimal("1.0")
     tp_atr_mult: Decimal = Decimal("2.0")
-    risk_percent: Decimal = Decimal("1.0")
-    pip_size: Decimal = Decimal("0.01")
-    pip_value_per_lot: Decimal = Decimal("1.0")
-    initial_balance_fallback: Decimal = Decimal("100000")
 
     def __post_init__(self) -> None:
         if not 0 <= self.session_open_hour <= 23:
@@ -62,7 +59,13 @@ class ORBConfig(BaseStrategyConfig, frozen=True, kw_only=True):
 
 
 @register_strategy("orb")
-class ORBStrategy(BaseStrategy, ATRStopMixin, RiskSizedMixin, SessionFilterMixin):
+class ORBStrategy(
+    BaseStrategy,
+    ATRStopMixin,
+    RiskSizedMixin,
+    SessionFilterMixin,
+    BracketStrategyMixin,
+):
     """Opening Range Breakout — one entry per session, force-close at end."""
 
     def __init__(self, config: ORBConfig) -> None:
@@ -133,17 +136,27 @@ class ORBStrategy(BaseStrategy, ATRStopMixin, RiskSizedMixin, SessionFilterMixin
             self._reset_session_state()
             self._or_open_ts = ts
 
-        # Accumulate OR during opening-range window.
+        # Opening-range accumulation — half-open window
+        # [session_open, session_open + opening_range_minutes). A bar at
+        # exactly elapsed == opening_range_minutes is past the window: do
+        # NOT contribute its H/L; mark OR complete and let the breakout
+        # logic below evaluate it normally.
         if not self._or_complete and self._or_open_ts is not None:
             elapsed_minutes = (ts - self._or_open_ts).total_seconds() / 60
-            high = bar.high.as_double()
-            low = bar.low.as_double()
-            self._or_high = high if self._or_high is None else max(self._or_high, high)
-            self._or_low = low if self._or_low is None else min(self._or_low, low)
             if elapsed_minutes >= self.config.opening_range_minutes:
                 self._or_complete = True
-            # No signals during OR formation.
-            return SignalType.NONE
+                # Fall through to breakout evaluation.
+            else:
+                high = bar.high.as_double()
+                low = bar.low.as_double()
+                self._or_high = (
+                    high if self._or_high is None else max(self._or_high, high)
+                )
+                self._or_low = (
+                    low if self._or_low is None else min(self._or_low, low)
+                )
+                # No signals while the OR is still forming.
+                return SignalType.NONE
 
         # OR complete — watch for breakout. One entry per session.
         if self._entered_this_session or not self.is_flat:
@@ -162,63 +175,5 @@ class ORBStrategy(BaseStrategy, ATRStopMixin, RiskSizedMixin, SessionFilterMixin
         if signal == SignalType.CLOSE:
             self._close_position()
             return
-        if signal == SignalType.NONE or not self.is_flat:
-            return
-
-        side = OrderSide.BUY if signal == SignalType.BUY else OrderSide.SELL
-        last_bar = self._last_bar()
-        if last_bar is None:
-            return
-        entry_price = Decimal(str(last_bar.close.as_double()))
         atr_value = Decimal(str(self._atr.value))
-        balance = self._read_account_balance()
-        qty, sl, tp = self._compute_bracket_params(
-            side=side,
-            entry_price=entry_price,
-            atr_value=atr_value,
-            account_balance=balance,
-        )
-        self._submit_bracket_order(side=side, quantity=qty, sl_price=sl, tp_price=tp)
-
-    def _compute_bracket_params(
-        self,
-        *,
-        side: OrderSide,
-        entry_price: Decimal,
-        atr_value: Decimal,
-        account_balance: Decimal,
-    ) -> tuple[Decimal, Decimal, Decimal]:
-        sl_price = self.calculate_atr_stop(
-            side=side, entry_price=entry_price, atr_value=atr_value,
-            multiplier=self.config.sl_atr_mult,
-        )
-        tp_price = self.calculate_atr_take_profit(
-            side=side, entry_price=entry_price, atr_value=atr_value,
-            multiplier=self.config.tp_atr_mult,
-        )
-        qty = self.size_from_risk(
-            account_balance=account_balance,
-            entry_price=entry_price, stop_price=sl_price,
-            pip_value_per_lot=self.config.pip_value_per_lot,
-            pip_size=self.config.pip_size,
-        )
-        return qty, sl_price, tp_price
-
-    def _last_bar(self) -> Bar | None:
-        try:
-            return self.cache.bar(self.config.bar_type, index=0)
-        except Exception:
-            return None
-
-    def _read_account_balance(self) -> Decimal:
-        venue = self.config.bar_type.instrument_id.venue
-        try:
-            account = self.portfolio.account(venue)
-        except Exception:
-            return self.config.initial_balance_fallback
-        if account is None:
-            return self.config.initial_balance_fallback
-        balance = account.balance_total(USD)
-        if balance is None:
-            return self.config.initial_balance_fallback
-        return Decimal(str(balance.as_double()))
+        self._submit_bracket_for_entry(signal, atr_value)

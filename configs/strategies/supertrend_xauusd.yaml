@@ -27,4 +27,3 @@ tp_atr_mult: "3.0"
 risk_percent: "1.0"
 pip_size: "0.01"          # XAUUSD: 1 pip = $0.01 move
 pip_value_per_lot: "1.0"  # $1 per pip per lot (standard)
-initial_balance_fallback: "100000"

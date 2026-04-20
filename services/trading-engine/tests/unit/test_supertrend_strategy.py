@@ -36,7 +36,6 @@ def _make_config(**overrides) -> SupertrendConfig:
         risk_percent=Decimal("1.0"),
         pip_size=Decimal("0.01"),
         pip_value_per_lot=Decimal("1.0"),
-        initial_balance_fallback=Decimal("100000"),
     )
     defaults.update(overrides)
     return SupertrendConfig(**defaults)

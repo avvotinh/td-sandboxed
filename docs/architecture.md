@@ -546,6 +546,74 @@ services/trading-engine/
 
 ---
 
+### Backtest Framework (trading-engine sub-system)
+
+The backtest framework lives under `services/trading-engine/src/backtesting/`
+and replays historical bars through **the same rule engine** used in live
+trading, so FTMO breaches surface before any live account hits them.
+
+**Layering (top-down call order):**
+
+```
+typer CLI  →  ParameterSweep / WalkForward  →  run_backtest(job)  →  BacktestRunner  →  Nautilus BacktestEngine
+   │                │                               │                      │
+   │                │                               │                      └─ FtmoComplianceActor (Nautilus Actor)
+   │                │                               │                                │
+   │                │                               │                                └─ RuleEngine (Epic 4, unchanged)
+   │                │                               │
+   │                │                               └─ BacktestJobConfig (Pydantic) → instrument / data / strategy / FTMO
+   │                │
+   │                └─ grid + random search,
+   │                  ProcessPoolExecutor fan-out,
+   │                  early-stop skip-record
+   │
+   └─ `backtest run | sweep | walkforward`
+```
+
+**Key design decisions:**
+
+1. **Indicators subclass `nautilus_trader.indicators.base.Indicator`** so the
+   same code path updates during live and backtest runs. Custom Supertrend,
+   ADX, and session-anchored VWAP live alongside re-exports of Nautilus
+   built-ins (ATR, RSI, Bollinger, Donchian).
+2. **FTMO rules inject via a Nautilus `Actor`**, not a Strategy hook. The
+   `FtmoComplianceActor` subscribes to order/position events, builds
+   `AccountState` from Portfolio + Cache each bar, and calls the existing
+   `RuleEngine`. Breaches are deduplicated by `(date, rule_name)`.
+3. **`BacktestJobConfig` is the single serializable job description** — a
+   Pydantic-frozen model with a discriminated-union `data` field
+   (synthetic / TimescaleDB / Parquet). It crosses `ProcessPoolExecutor`
+   boundaries as JSON; workers reconstruct the `BacktestRunner` in-process
+   because Nautilus engines are not pickle-safe.
+4. **Parameter sweep is skip-record on early-stop**: combos that breach a
+   drawdown threshold are retained in the result set with
+   `status="early_stop"` so the user still sees the full parameter map.
+   Aborting the whole sweep would hide mostly-good regions.
+5. **Walk-forward derives per-fold seeds** (`seed + fold_idx`) so random
+   search draws different combos on each fold, avoiding correlated
+   in-sample selection.
+6. **Cache-aside Parquet layer** for backtest data: `CachedBarLoader`
+   composes `TimescaleBarLoader` + `ParquetBarLoader`. Cache key includes
+   a SHA-256 fingerprint of min/max/count from a TimescaleDB metadata
+   query, so late-arriving bar corrections invalidate the cache
+   automatically.
+7. **`BracketStrategyMixin`** (added in 8.9) collapses the bracket-order
+   boilerplate shared by Supertrend, Donchian, RSI MR, Bollinger MR, and
+   ORB. Signal generation + reversal policy stay in subclasses; last-bar
+   reads, balance reads, and SL/TP/qty math live in the mixin.
+
+**Runbook:** `docs/runbooks/backtesting.md` — CLI walkthroughs, job YAML
+schema, common errors.
+
+**Test surface:**
+
+- Unit: 50+ tests covering facade, sweep, walk-forward, metrics, CLI.
+- Integration smoke: 1 test per strategy on 500 synthetic bars
+  (MACrossover, Supertrend, Donchian, RSI MR, Bollinger MR, ORB) plus
+  sweep + walk-forward smokes (<3 s total).
+
+---
+
 ### 4. Notification Service (Go)
 
 **Purpose:** Alert and notification delivery via Telegram
