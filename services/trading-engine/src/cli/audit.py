@@ -66,6 +66,14 @@ def _get_db_session_factory() -> Any:
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
+# Public alias — other CLI modules should reach for this name instead of
+# importing the private `_get_db_session_factory` so the patch target stays
+# stable. The factory is shared because all CLI commands need the same
+# DATABASE_URL handling; extracting it into a dedicated module is tracked
+# as a follow-up to consolidate the four current duplicates.
+get_db_session_factory = _get_db_session_factory
+
+
 # ---------------------------------------------------------------------------
 # Query helpers
 # ---------------------------------------------------------------------------

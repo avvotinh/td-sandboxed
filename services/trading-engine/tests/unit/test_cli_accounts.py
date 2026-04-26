@@ -415,3 +415,211 @@ class TestMainCLI:
         result = runner.invoke(app, ["status", "--help"])
         assert result.exit_code == 0
         assert "--json" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Epic 9 P0.10 — `accounts promote`
+# ---------------------------------------------------------------------------
+
+
+class TestPromoteCommand:
+    """Tests for `trading-engine accounts promote`.
+
+    Patches the helpers (config loader, firm registry, audit persistence)
+    so the command can be exercised without TimescaleDB / firm YAML files.
+    """
+
+    def _patches(
+        self,
+        *,
+        accounts=None,
+        registry=None,
+        validate_side_effect=None,
+        persist_side_effect=None,
+        session_factory_side_effect=None,
+    ):
+        from datetime import datetime, timezone
+
+        from src.config.firm_profile import AccountPhase
+        from src.rules.audit_logger import AuditEntry, AuditEventType
+
+        # Default account list with one firm-bound account.
+        if accounts is None:
+            account = MagicMock()
+            account.id = "ftmo-001"
+            account.firm_id = "ftmo"
+            account.product_id = "challenge"
+            account.phase = "evaluation"
+            accounts = [account]
+
+        config = MagicMock()
+        config.accounts = accounts
+
+        if registry is None:
+            registry = MagicMock()
+
+        validate_phases = (
+            AccountPhase(phase_id="evaluation", name="Evaluation"),
+            AccountPhase(phase_id="verification", name="Verification"),
+        )
+
+        validate_patch = patch(
+            "src.cli.accounts.validate_phase_transition",
+            return_value=validate_phases if validate_side_effect is None else None,
+            side_effect=validate_side_effect,
+        )
+
+        # Real entry — round-trip the same fields the command passes.
+        entry = AuditEntry(
+            timestamp=datetime.now(timezone.utc),
+            account_id="ftmo-001",
+            event_type=AuditEventType.SYSTEM_EVENT.value,
+            event_subtype="phase_transition",
+            source="cli",
+            level="INFO",
+            message="msg",
+            rule_name="",
+            rule_result="",
+            context={},
+        )
+        build_patch = patch(
+            "src.cli.accounts.build_phase_transition_audit_entry",
+            return_value=entry,
+        )
+
+        config_patch = patch(
+            "src.cli.accounts._load_accounts_config_or_exit",
+            return_value=(config, "configs/accounts.yaml"),
+        )
+        registry_patch = patch(
+            "src.cli.accounts._load_firm_registry_or_exit",
+            return_value=registry,
+        )
+        if session_factory_side_effect is not None:
+            session_patch = patch(
+                "src.cli.audit.get_db_session_factory",
+                side_effect=session_factory_side_effect,
+            )
+        else:
+            session_patch = patch(
+                "src.cli.audit.get_db_session_factory",
+                return_value=MagicMock(),
+            )
+        persist_patch = patch(
+            "src.cli.accounts._persist_audit_entry",
+            new=AsyncMock(side_effect=persist_side_effect),
+        )
+
+        return (
+            config_patch, registry_patch, validate_patch,
+            build_patch, session_patch, persist_patch,
+        )
+
+    def test_promote_success(self):
+        patches = self._patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            result = runner.invoke(
+                app,
+                [
+                    "accounts", "promote",
+                    "--account", "ftmo-001",
+                    "--phase", "verification",
+                    "--reason", "Passed Challenge target",
+                    "--actor", "ops-test",
+                ],
+            )
+        assert result.exit_code == 0, result.stdout
+        assert "evaluation → verification" in result.stdout
+        assert "Reason:" in result.stdout and "Passed Challenge target" in result.stdout
+        assert "Actor:" in result.stdout and "ops-test" in result.stdout
+        # Hint to update YAML must appear
+        assert "configs/accounts.yaml" in result.stdout
+        assert "phase: verification" in result.stdout
+
+    def test_promote_missing_required_flags(self):
+        # `--account` is required
+        result = runner.invoke(
+            app,
+            ["accounts", "promote", "--phase", "verification", "--reason", "x"],
+        )
+        assert result.exit_code != 0
+
+    def test_promote_unknown_account_exits_1(self):
+        # Empty account list → command should report "not found"
+        patches = self._patches(accounts=[])
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            result = runner.invoke(
+                app,
+                [
+                    "accounts", "promote",
+                    "--account", "ghost",
+                    "--phase", "verification",
+                    "--reason", "x",
+                ],
+            )
+        assert result.exit_code == 1
+        assert "not found" in result.stdout
+
+    def test_promote_validation_error_exits_1(self):
+        from src.accounts.phase_promotion import PhasePromotionError
+
+        patches = self._patches(
+            validate_side_effect=PhasePromotionError("transition not allowed"),
+        )
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            result = runner.invoke(
+                app,
+                [
+                    "accounts", "promote",
+                    "--account", "ftmo-001",
+                    "--phase", "funded",
+                    "--reason", "Skipping Verification",
+                ],
+            )
+        assert result.exit_code == 1
+        assert "transition not allowed" in result.stdout
+
+    def test_promote_db_failure_exits_1(self):
+        from sqlalchemy.exc import OperationalError
+
+        patches = self._patches(
+            persist_side_effect=OperationalError("stmt", {}, RuntimeError("conn refused")),
+        )
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            result = runner.invoke(
+                app,
+                [
+                    "accounts", "promote",
+                    "--account", "ftmo-001",
+                    "--phase", "verification",
+                    "--reason", "ops",
+                ],
+            )
+        assert result.exit_code == 1
+        assert "Failed to write audit entry" in result.stdout
+
+    def test_promote_emits_correlation_id(self):
+        patches = self._patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            result = runner.invoke(
+                app,
+                [
+                    "accounts", "promote",
+                    "--account", "ftmo-001",
+                    "--phase", "verification",
+                    "--reason", "ops",
+                    "--actor", "ops-test",
+                ],
+            )
+        assert result.exit_code == 0, result.stdout
+        # Correlation ID line is present and looks like a UUID prefix
+        assert "Correlation ID:" in result.stdout
+        # Capture the value and check format
+        line = next(
+            (ln for ln in result.stdout.splitlines() if "Correlation ID:" in ln),
+            "",
+        )
+        cid = line.split("Correlation ID:")[1].strip()
+        # uuid4 string form is 36 chars including hyphens
+        assert len(cid) == 36
+        assert cid.count("-") == 4
