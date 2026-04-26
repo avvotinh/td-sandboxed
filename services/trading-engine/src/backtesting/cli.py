@@ -248,7 +248,7 @@ def _extract_named_metric(metric: str, res: BacktestResult) -> float:
     """
     if res.metrics is None:
         return 0.0
-    for section_name in ("drawdown", "pnl", "risk", "trades", "ftmo_compliance"):
+    for section_name in ("drawdown", "pnl", "risk", "trades", "prop_firm_compliance"):
         section = getattr(res.metrics, section_name, None)
         if section is None:
             continue

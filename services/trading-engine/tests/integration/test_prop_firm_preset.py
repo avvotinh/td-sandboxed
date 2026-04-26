@@ -28,7 +28,7 @@ from src.rules.types.targets import MinTradingDaysRule, ProfitTargetRule
 class TestFTMOPresetLoading:
     """Tests for loading FTMO preset via RulePresetLoader (AC2)."""
 
-    def test_load_ftmo_preset_returns_rules(self):
+    def test_load_prop_firm_preset_returns_rules(self):
         """Load FTMO preset should return a list of rules."""
         loader = RulePresetLoader()
         rules = loader.load_preset("ftmo")
@@ -36,7 +36,7 @@ class TestFTMOPresetLoading:
         assert isinstance(rules, list)
         assert len(rules) > 0
 
-    def test_load_ftmo_preset_returns_5_rules(self):
+    def test_load_prop_firm_preset_returns_5_rules(self):
         """FTMO preset should contain exactly 5 rules (AC4)."""
         loader = RulePresetLoader()
         rules = loader.load_preset("ftmo")

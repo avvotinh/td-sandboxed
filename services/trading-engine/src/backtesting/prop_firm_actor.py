@@ -1,4 +1,4 @@
-"""FTMO compliance actor for backtest.
+"""Prop-firm compliance actor for backtest.
 
 The actor wires the Epic 4 rule engine into a Nautilus backtest via the
 ``Actor`` extension point — no modifications to strategies or to the rule
@@ -13,6 +13,10 @@ In backtest we cannot prevent a fill once Nautilus has accepted the order
 portfolio snapshot, invokes the rule engine, and records breach events
 (deduplicated by ``(date, rule_name)``). Downstream metrics reflect what
 *would* have been blocked in live trading.
+
+Epic 9 rename: ``FtmoComplianceActor`` → ``PropFirmComplianceActor``. The
+actor itself is firm-agnostic; specific prop-firm thresholds come from
+the rule engine it was constructed with.
 """
 
 from __future__ import annotations
@@ -36,13 +40,13 @@ from src.rules.engine import RuleEngine
 from src.strategies.mixins.session_filter_mixin import SessionFilterMixin
 
 
-class FtmoComplianceActorConfig(ActorConfig, frozen=True):
-    """Config for ``FtmoComplianceActor``.
+class PropFirmComplianceActorConfig(ActorConfig, frozen=True):
+    """Config for ``PropFirmComplianceActor``.
 
     Attributes:
         account_id: Identifier passed into the rule engine context.
         initial_balance: Starting balance of the backtest (for DD
-            calculations and FTMO-percentage metrics).
+            calculations and prop-firm percentage metrics).
         daily_session_tz: IANA timezone whose midnight marks a new
             trading day for daily-loss deduplication.
         bar_type: Optional ``BarType`` to subscribe to on_start. When
@@ -58,12 +62,12 @@ class FtmoComplianceActorConfig(ActorConfig, frozen=True):
     currency: Currency = USD
 
 
-class FtmoComplianceActor(Actor):
-    """Reactive FTMO compliance tracker subscribed to bars + order events."""
+class PropFirmComplianceActor(Actor):
+    """Reactive prop-firm compliance tracker subscribed to bars + order events."""
 
     def __init__(
         self,
-        config: FtmoComplianceActorConfig,
+        config: PropFirmComplianceActorConfig,
         rule_engine: RuleEngine,
     ) -> None:
         super().__init__(config=config)
@@ -150,7 +154,7 @@ class FtmoComplianceActor(Actor):
 
         Deduplication buckets by the **session id** in
         ``config.daily_session_tz`` so a daily-loss breach registers once
-        per FTMO trading day, not once per UTC date.
+        per prop-firm trading day, not once per UTC date.
         """
         new_breaches = self.evaluate_compliance(account_state, ts)
         session_id = SessionFilterMixin.session_id(ts, self._config.daily_session_tz)

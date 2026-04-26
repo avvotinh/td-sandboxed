@@ -1,4 +1,4 @@
-"""Unit tests for FtmoComplianceActor.
+"""Unit tests for PropFirmComplianceActor.
 
 We test the actor's pure logic (rule-engine invocation, breach dedup,
 equity curve accumulation) without instantiating a full BacktestEngine.
@@ -17,9 +17,9 @@ import pytest
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
 
-from src.backtesting.ftmo_actor import (
-    FtmoComplianceActor,
-    FtmoComplianceActorConfig,
+from src.backtesting.prop_firm_actor import (
+    PropFirmComplianceActor,
+    PropFirmComplianceActorConfig,
 )
 from src.rules.base_rule import RuleAction, RuleResult
 from src.rules.engine_result import RuleEngineResult
@@ -28,13 +28,13 @@ from src.rules.engine_result import RuleEngineResult
 pytestmark = pytest.mark.unit
 
 
-def _make_actor(rule_engine, *, daily_session_tz: str = "UTC") -> FtmoComplianceActor:
-    config = FtmoComplianceActorConfig(
+def _make_actor(rule_engine, *, daily_session_tz: str = "UTC") -> PropFirmComplianceActor:
+    config = PropFirmComplianceActorConfig(
         account_id="ftmo-test",
         initial_balance=Decimal("100000"),
         daily_session_tz=daily_session_tz,
     )
-    actor = FtmoComplianceActor(config=config, rule_engine=rule_engine)
+    actor = PropFirmComplianceActor(config=config, rule_engine=rule_engine)
     return actor
 
 
@@ -45,7 +45,7 @@ class TestActorSubclass:
         assert isinstance(actor, Actor)
 
     def test_config_is_actor_config(self) -> None:
-        assert issubclass(FtmoComplianceActorConfig, ActorConfig)
+        assert issubclass(PropFirmComplianceActorConfig, ActorConfig)
 
 
 class TestEvaluateCompliance:

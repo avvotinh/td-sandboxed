@@ -1,4 +1,4 @@
-"""Unit tests for FtmoMetricsSchema Pydantic model."""
+"""Unit tests for PropFirmMetricsSchema Pydantic model."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from pydantic import ValidationError
 
 from src.backtesting.metrics.schema import (
     DrawdownMetrics,
-    FtmoComplianceMetrics,
-    FtmoMetricsSchema,
+    PropFirmComplianceMetrics,
+    PropFirmMetricsSchema,
     PnlMetrics,
     RiskMetrics,
     TradeMetrics,
@@ -20,8 +20,8 @@ from src.backtesting.metrics.schema import (
 pytestmark = pytest.mark.unit
 
 
-def _sample_schema() -> FtmoMetricsSchema:
-    return FtmoMetricsSchema(
+def _sample_schema() -> PropFirmMetricsSchema:
+    return PropFirmMetricsSchema(
         strategy_name="ma_crossover",
         pnl=PnlMetrics(
             gross_pnl=1000.0,
@@ -52,7 +52,7 @@ def _sample_schema() -> FtmoMetricsSchema:
             avg_win=50.0,
             avg_loss=-25.0,
         ),
-        ftmo_compliance=FtmoComplianceMetrics(
+        prop_firm_compliance=PropFirmComplianceMetrics(
             daily_loss_breaches=0,
             max_dd_breach=False,
             profit_target_hit=False,
@@ -61,23 +61,23 @@ def _sample_schema() -> FtmoMetricsSchema:
     )
 
 
-class TestFtmoMetricsSchemaHappyPath:
+class TestPropFirmMetricsSchemaHappyPath:
     def test_valid_schema_constructs(self) -> None:
         schema = _sample_schema()
         assert schema.strategy_name == "ma_crossover"
         assert schema.pnl.net_pnl == 950.0
-        assert schema.ftmo_compliance.profit_target_hit is False
+        assert schema.prop_firm_compliance.profit_target_hit is False
 
     def test_json_round_trip(self) -> None:
         schema = _sample_schema()
         payload = schema.model_dump()
         as_json = json.dumps(payload, default=str)
         parsed = json.loads(as_json)
-        schema2 = FtmoMetricsSchema.model_validate(parsed)
+        schema2 = PropFirmMetricsSchema.model_validate(parsed)
         assert schema2 == schema
 
 
-class TestFtmoMetricsSchemaValidation:
+class TestPropFirmMetricsSchemaValidation:
     def test_win_rate_bounds(self) -> None:
         with pytest.raises(ValidationError):
             TradeMetrics(
@@ -111,10 +111,10 @@ class TestFtmoMetricsSchemaValidation:
             )
 
 
-class TestFtmoComplianceMetrics:
+class TestPropFirmComplianceMetrics:
     def test_daily_loss_breaches_non_negative(self) -> None:
         with pytest.raises(ValidationError):
-            FtmoComplianceMetrics(
+            PropFirmComplianceMetrics(
                 daily_loss_breaches=-1,
                 max_dd_breach=False,
                 profit_target_hit=False,

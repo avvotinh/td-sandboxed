@@ -1,7 +1,7 @@
 """Build an AccountState dict for the Epic 4 rule engine.
 
 The live path assembles this dict from Redis + ZMQ; in backtest, the
-:class:`FtmoComplianceActor` passes a snapshot extracted from Nautilus's
+:class:`PropFirmComplianceActor` passes a snapshot extracted from Nautilus's
 ``Portfolio`` into :func:`build_account_state`, which augments it with
 derived metrics (daily loss %, trailing drawdown %) needed by rules.
 

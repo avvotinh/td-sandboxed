@@ -1,4 +1,4 @@
-"""End-to-end backtest smoke test: BacktestRunner + FtmoComplianceActor
+"""End-to-end backtest smoke test: BacktestRunner + PropFirmComplianceActor
 + MACrossover strategy on synthetic trending bars.
 
 Proves the full stack works: venue + instrument + synthetic bars +
@@ -79,7 +79,7 @@ def test_backtest_runner_end_to_end() -> None:
         runner.add_data(bars)
 
         rule_engine = _build_rule_engine(account_id="ftmo-sim")
-        actor = runner.attach_ftmo_compliance(
+        actor = runner.attach_prop_firm_compliance(
             rule_engine=rule_engine,
             account_id="ftmo-sim",
             bar_type=bar_type,

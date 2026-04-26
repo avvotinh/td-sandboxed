@@ -1,5 +1,5 @@
 """Unit tests for MetricsCalculator — orchestrates per-metric helpers into
-the top-level ``FtmoMetricsSchema``."""
+the top-level ``PropFirmMetricsSchema``."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from decimal import Decimal
 import pytest
 
 from src.backtesting.metrics.calculator import calculate_metrics
-from src.backtesting.metrics.schema import FtmoMetricsSchema
+from src.backtesting.metrics.schema import PropFirmMetricsSchema
 from src.backtesting.result import TradeRecord
 
 
@@ -39,7 +39,7 @@ def _curve(*points: tuple[int, float]) -> list[tuple[datetime, Decimal]]:
 
 
 class TestCalculateMetricsHappyPath:
-    def test_returns_ftmo_metrics_schema(self) -> None:
+    def test_returns_prop_firm_metrics_schema(self) -> None:
         trades = [_make_trade("1", 100), _make_trade("2", -50), _make_trade("3", 75)]
         curve = _curve((0, 100000), (1, 100050), (2, 100125))
         schema = calculate_metrics(
@@ -52,7 +52,7 @@ class TestCalculateMetricsHappyPath:
             profit_target_pct=10.0,
             min_trading_days=4,
         )
-        assert isinstance(schema, FtmoMetricsSchema)
+        assert isinstance(schema, PropFirmMetricsSchema)
         assert schema.strategy_name == "ma_crossover"
         assert schema.trades.total_trades == 3
         assert schema.trades.winning_trades == 2
@@ -92,7 +92,7 @@ class TestCalculateMetricsEmptyInputs:
         assert schema.trades.total_trades == 0
         assert schema.pnl.profit_factor == 0.0
         assert schema.trades.win_rate == 0.0
-        assert schema.ftmo_compliance.profit_target_hit is False
+        assert schema.prop_firm_compliance.profit_target_hit is False
 
     def test_empty_curve_safe_defaults(self) -> None:
         schema = calculate_metrics(
@@ -106,10 +106,10 @@ class TestCalculateMetricsEmptyInputs:
             min_trading_days=4,
         )
         assert schema.drawdown.max_overall_dd_pct == 0.0
-        assert schema.ftmo_compliance.min_trading_days_met is False
+        assert schema.prop_firm_compliance.min_trading_days_met is False
 
 
-class TestFtmoCompliance:
+class TestPropFirmCompliance:
     def test_breach_count_from_breach_events(self) -> None:
         from src.backtesting.result import BreachEvent
         breach = BreachEvent(
@@ -130,7 +130,7 @@ class TestFtmoCompliance:
             profit_target_pct=10.0,
             min_trading_days=4,
         )
-        assert schema.ftmo_compliance.daily_loss_breaches == 1
+        assert schema.prop_firm_compliance.daily_loss_breaches == 1
 
     def test_max_dd_breach_flag_true_when_over_10pct(self) -> None:
         curve = _curve((0, 100000), (1, 90000), (2, 89000))
@@ -146,7 +146,7 @@ class TestFtmoCompliance:
             max_dd_pct=10.0,
         )
         # peak = 100000, trough = 89000 → DD = 11%, breached
-        assert schema.ftmo_compliance.max_dd_breach is True
+        assert schema.prop_firm_compliance.max_dd_breach is True
 
     def test_profit_target_hit_true(self) -> None:
         curve = _curve((0, 100000), (5, 110500))
@@ -160,7 +160,7 @@ class TestFtmoCompliance:
             profit_target_pct=10.0,
             min_trading_days=4,
         )
-        assert schema.ftmo_compliance.profit_target_hit is True
+        assert schema.prop_firm_compliance.profit_target_hit is True
 
     def test_min_trading_days_met(self) -> None:
         curve = _curve((0, 100000), (1, 100100), (2, 100200), (3, 100300), (4, 100400))
@@ -174,4 +174,4 @@ class TestFtmoCompliance:
             profit_target_pct=10.0,
             min_trading_days=4,
         )
-        assert schema.ftmo_compliance.min_trading_days_met is True
+        assert schema.prop_firm_compliance.min_trading_days_met is True

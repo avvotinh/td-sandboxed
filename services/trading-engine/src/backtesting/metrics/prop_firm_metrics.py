@@ -1,4 +1,4 @@
-"""FTMO-specific drawdown, breach, and profit-target metrics.
+"""Prop-firm drawdown, breach, and profit-target metrics.
 
 All functions are pure: they take equity curves or scalar balances and
 return floats / ints / bools. No I/O, no Nautilus dependencies — makes
@@ -6,6 +6,10 @@ them independently unit-testable.
 
 Equity curve format: ``list[tuple[datetime, Decimal]]`` where the
 datetime MUST be timezone-aware. The first entry is the initial balance.
+
+Epic 9 rename: this module replaces the previous ``ftmo_metrics`` module
+name. Formulas are unchanged; naming now reflects the multi-firm scope
+(FTMO, The5ers, …).
 """
 
 from __future__ import annotations
@@ -50,7 +54,7 @@ def _group_by_day(curve: _EquityCurve) -> list[tuple[date, list[Decimal]]]:
 def compute_daily_pnl_percentages(
     curve: _EquityCurve, *, initial_balance: Decimal
 ) -> list[float]:
-    """Per-day P&L expressed as % of ``initial_balance`` (FTMO convention).
+    """Per-day P&L expressed as % of ``initial_balance`` (prop-firm convention).
 
     Each day's PnL = close-of-day equity - open-of-day equity. Closed days
     only; a single-point curve returns an empty list.
@@ -72,7 +76,7 @@ def compute_daily_pnl_percentages(
 def compute_max_daily_drawdown_pct(
     curve: _EquityCurve, *, initial_balance: Decimal
 ) -> float:
-    """Worst single-day loss as % of ``initial_balance`` (FTMO daily-loss metric).
+    """Worst single-day loss as % of ``initial_balance`` (prop-firm daily-loss metric).
 
     Returns the *absolute* value of the worst daily-loss %, e.g. a -5%
     daily return returns ``5.0``. Positive days are ignored.

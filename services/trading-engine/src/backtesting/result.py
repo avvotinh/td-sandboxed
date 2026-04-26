@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.backtesting.metrics.schema import FtmoMetricsSchema
+    from src.backtesting.metrics.schema import PropFirmMetricsSchema
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ class TradeRecord:
 
 @dataclass(frozen=True)
 class BreachEvent:
-    """FTMO rule-engine breach captured during backtest."""
+    """Prop-firm rule-engine breach captured during backtest."""
 
     ts: datetime
     rule_name: str
@@ -49,4 +49,4 @@ class BacktestResult:
     equity_curve: list[tuple[datetime, Decimal]] = field(default_factory=list)
     trades: list[TradeRecord] = field(default_factory=list)
     breaches: list[BreachEvent] = field(default_factory=list)
-    metrics: FtmoMetricsSchema | None = None
+    metrics: PropFirmMetricsSchema | None = None

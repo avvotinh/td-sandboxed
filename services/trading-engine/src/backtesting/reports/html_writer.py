@@ -99,7 +99,7 @@ def write_html_report(result: BacktestResult, path: Path) -> None:
     """Render + write the HTML report to ``path`` (creates parents).
 
     Rejects paths containing ``..`` components — consistent with the
-    ``ParquetDataSpec.path`` / ``FtmoSpec.preset_path`` guards. Forces
+    ``ParquetDataSpec.path`` / ``PropFirmSpec.preset_path`` guards. Forces
     UTF-8 so the output matches the ``<meta charset='utf-8'>`` header
     regardless of the host platform's default encoding.
     """
@@ -185,7 +185,7 @@ def _render_trades(trades: list[TradeRecord]) -> str:
 
 def _render_breaches(breaches: list[BreachEvent]) -> str:
     if not breaches:
-        return "<p class='empty'>No FTMO rule breaches.</p>\n"
+        return "<p class='empty'>No prop-firm rule breaches.</p>\n"
     head = (
         "<tr><th>Time</th><th>Rule</th><th>Current</th><th>Threshold</th><th>Message</th></tr>"
     )

@@ -2,7 +2,7 @@
 
 The runner is a thin façade: tests verify that calls are forwarded in the
 right order and that the runner exposes a ``get_result`` that assembles
-a ``BacktestResult`` from the engine + attached ``FtmoComplianceActor``.
+a ``BacktestResult`` from the engine + attached ``PropFirmComplianceActor``.
 
 End-to-end integration is covered by ``tests/integration/test_backtest_smoke.py``.
 """
@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
-from src.backtesting.ftmo_preset import FtmoPreset
+from src.backtesting.prop_firm_preset import PropFirmPreset
 from src.backtesting.result import BacktestResult
 
 
@@ -35,7 +35,7 @@ class TestFromPreset:
     """BacktestRunnerConfig.from_preset wires FTMO thresholds from YAML."""
 
     def test_threshold_fields_populated_from_preset(self) -> None:
-        preset = FtmoPreset(
+        preset = PropFirmPreset(
             name="Custom",
             daily_loss_pct=3.5,
             max_drawdown_pct=7.5,
@@ -102,21 +102,21 @@ class TestBacktestRunnerDelegation:
         mock_engine.add_strategy.assert_called_once_with(strategy)
 
 
-class TestAttachFtmoCompliance:
+class TestAttachPropFirmCompliance:
     def test_attaches_actor_to_engine(self, runner_config) -> None:
         runner = BacktestRunner(config=runner_config)
         mock_engine = Mock()
         runner._engine = mock_engine
         mock_rule_engine = Mock()
-        actor = runner.attach_ftmo_compliance(
+        actor = runner.attach_prop_firm_compliance(
             rule_engine=mock_rule_engine, account_id="ftmo-test"
         )
         mock_engine.add_actor.assert_called_once_with(actor)
-        assert runner.ftmo_actor is actor
+        assert runner.prop_firm_actor is actor
 
     def test_without_attach_actor_is_none(self, runner_config) -> None:
         runner = BacktestRunner(config=runner_config)
-        assert runner.ftmo_actor is None
+        assert runner.prop_firm_actor is None
 
 
 class TestRun:
@@ -138,7 +138,7 @@ class TestGetResult:
         mock_actor = Mock()
         mock_actor.equity_curve = []
         mock_actor.breaches = []
-        runner._ftmo_actor = mock_actor
+        runner._prop_firm_actor = mock_actor
 
         with patch(
             "src.backtesting.engine.calculate_metrics"

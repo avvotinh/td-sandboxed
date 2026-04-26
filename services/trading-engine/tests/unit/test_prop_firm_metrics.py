@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.backtesting.metrics.ftmo_metrics import (
+from src.backtesting.metrics.prop_firm_metrics import (
     compute_daily_pnl_percentages,
     compute_max_daily_drawdown_pct,
     compute_max_overall_drawdown_pct,

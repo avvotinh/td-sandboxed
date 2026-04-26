@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from src.backtesting.metrics.schema import (
     DrawdownMetrics,
-    FtmoComplianceMetrics,
-    FtmoMetricsSchema,
     PnlMetrics,
+    PropFirmComplianceMetrics,
+    PropFirmMetricsSchema,
     RiskMetrics,
     TradeMetrics,
 )
 
 __all__ = [
     "DrawdownMetrics",
-    "FtmoComplianceMetrics",
-    "FtmoMetricsSchema",
     "PnlMetrics",
+    "PropFirmComplianceMetrics",
+    "PropFirmMetricsSchema",
     "RiskMetrics",
     "TradeMetrics",
 ]

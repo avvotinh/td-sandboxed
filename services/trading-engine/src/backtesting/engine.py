@@ -1,9 +1,10 @@
 """BacktestRunner — thin façade over ``nautilus_trader.backtest.BacktestEngine``.
 
 The runner's job is to compose a backtest in a way that keeps the rest of
-our stack (rule engine, strategies, FTMO metrics) independent of Nautilus
-internals. Composition order matters — ``add_venue`` must precede
-``add_instrument``, and the FTMO actor must be attached before ``run()``.
+our stack (rule engine, strategies, prop-firm metrics) independent of
+Nautilus internals. Composition order matters — ``add_venue`` must precede
+``add_instrument``, and the prop-firm compliance actor must be attached
+before ``run()``.
 
 For unit-level tests the underlying engine is mocked. End-to-end
 correctness is covered by ``tests/integration/test_backtest_smoke.py``.
@@ -21,8 +22,11 @@ from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.objects import Currency
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.backtesting.ftmo_actor import FtmoComplianceActor, FtmoComplianceActorConfig
-from src.backtesting.ftmo_preset import FtmoPreset
+from src.backtesting.prop_firm_actor import (
+    PropFirmComplianceActor,
+    PropFirmComplianceActorConfig,
+)
+from src.backtesting.prop_firm_preset import PropFirmPreset
 from src.backtesting.metrics.calculator import calculate_metrics
 from src.backtesting.result import BacktestResult, TradeRecord
 
@@ -35,7 +39,7 @@ if TYPE_CHECKING:
 class BacktestRunnerConfig(BaseModel):
     """Configuration for a single backtest run.
 
-    Prefer :meth:`from_preset` over passing the FTMO threshold fields
+    Prefer :meth:`from_preset` over passing prop-firm threshold fields
     directly so the backtest shares the same compliance numbers the
     live rule engine enforces (see
     ``.claude/rules/common/sandboxed-domain.md``).
@@ -56,10 +60,10 @@ class BacktestRunnerConfig(BaseModel):
         *,
         strategy_name: str,
         initial_balance: Decimal,
-        preset: FtmoPreset,
+        preset: PropFirmPreset,
         currency: str = "USD",
     ) -> BacktestRunnerConfig:
-        """Build a config whose FTMO thresholds come from ``preset``."""
+        """Build a config whose prop-firm thresholds come from ``preset``."""
         return cls(
             strategy_name=strategy_name,
             initial_balance=initial_balance,
@@ -71,12 +75,12 @@ class BacktestRunnerConfig(BaseModel):
 
 
 class BacktestRunner:
-    """Façade orchestrating a Nautilus backtest with FTMO compliance."""
+    """Façade orchestrating a Nautilus backtest with prop-firm compliance."""
 
     def __init__(self, config: BacktestRunnerConfig) -> None:
         self.config = config
         self._engine: BacktestEngine = BacktestEngine(config=BacktestEngineConfig())
-        self._ftmo_actor: FtmoComplianceActor | None = None
+        self._prop_firm_actor: PropFirmComplianceActor | None = None
         self._start: datetime | None = None
         self._end: datetime | None = None
 
@@ -85,8 +89,8 @@ class BacktestRunner:
         return self._engine
 
     @property
-    def ftmo_actor(self) -> FtmoComplianceActor | None:
-        return self._ftmo_actor
+    def prop_firm_actor(self) -> PropFirmComplianceActor | None:
+        return self._prop_firm_actor
 
     # ---- Composition ------------------------------------------------------
 
@@ -103,7 +107,7 @@ class BacktestRunner:
     def add_strategy(self, strategy: Any) -> None:
         self._engine.add_strategy(strategy)
 
-    def attach_ftmo_compliance(
+    def attach_prop_firm_compliance(
         self,
         *,
         rule_engine: RuleEngine,
@@ -112,8 +116,8 @@ class BacktestRunner:
         bar_type: Any = None,
         venue: Venue | None = None,
         currency: Currency = USD,
-    ) -> FtmoComplianceActor:
-        """Build + register an ``FtmoComplianceActor`` against this engine.
+    ) -> PropFirmComplianceActor:
+        """Build + register an ``PropFirmComplianceActor`` against this engine.
 
         ``bar_type`` is the ``BarType`` the actor should subscribe to on
         start — pass the same ``BarType`` you used for ``add_data``. When
@@ -124,7 +128,7 @@ class BacktestRunner:
         portfolio. When omitted (unit-test path) equity reads return
         ``None`` and ``on_bar`` is a no-op.
         """
-        actor_config = FtmoComplianceActorConfig(
+        actor_config = PropFirmComplianceActorConfig(
             account_id=account_id,
             initial_balance=self.config.initial_balance,
             daily_session_tz=daily_session_tz,
@@ -132,9 +136,9 @@ class BacktestRunner:
             venue=venue,
             currency=currency,
         )
-        actor = FtmoComplianceActor(config=actor_config, rule_engine=rule_engine)
+        actor = PropFirmComplianceActor(config=actor_config, rule_engine=rule_engine)
         self._engine.add_actor(actor)
-        self._ftmo_actor = actor
+        self._prop_firm_actor = actor
         return actor
 
     # ---- Execution --------------------------------------------------------
@@ -158,10 +162,10 @@ class BacktestRunner:
     def get_result(self, *, final_balance: Decimal) -> BacktestResult:
         """Assemble a ``BacktestResult`` from engine + actor state."""
         equity_curve = (
-            self._ftmo_actor.equity_curve if self._ftmo_actor is not None else []
+            self._prop_firm_actor.equity_curve if self._prop_firm_actor is not None else []
         )
         breaches = (
-            self._ftmo_actor.breaches if self._ftmo_actor is not None else []
+            self._prop_firm_actor.breaches if self._prop_firm_actor is not None else []
         )
         trades = self._extract_trades()
 

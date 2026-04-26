@@ -122,8 +122,8 @@ class VenueSpec(_Frozen):
     currency: str = "USD"
 
 
-class FtmoSpec(_Frozen):
-    """Optional FTMO compliance wiring."""
+class PropFirmSpec(_Frozen):
+    """Optional prop-firm compliance wiring."""
 
     preset_path: Path
     account_id: str
@@ -133,7 +133,7 @@ class FtmoSpec(_Frozen):
     def _no_traversal(cls, v: Path) -> Path:
         if ".." in v.parts:
             raise ValueError(
-                f"Path traversal via '..' not allowed in FtmoSpec.preset_path: {v}"
+                f"Path traversal via '..' not allowed in PropFirmSpec.preset_path: {v}"
             )
         return v
 
@@ -155,7 +155,7 @@ class BacktestJobConfig(_Frozen):
     instrument_symbol: str
     bar_type_suffix: str = "1-MINUTE-BID-EXTERNAL"
     data: DataSpec
-    ftmo: FtmoSpec | None = None
+    prop_firm: PropFirmSpec | None = None
     start: datetime | None = None
     end: datetime | None = None
 

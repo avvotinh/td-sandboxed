@@ -1,8 +1,8 @@
-"""Top-level orchestrator: trade list + equity curve → ``FtmoMetricsSchema``.
+"""Top-level orchestrator: trade list + equity curve → ``PropFirmMetricsSchema``.
 
 Pure function, no I/O. Delegates all arithmetic to the focused helpers in
-``trade_metrics`` and ``ftmo_metrics`` — keeps this layer a thin assembly
-step that maps to the Pydantic envelope.
+``trade_metrics`` and ``prop_firm_metrics`` — keeps this layer a thin
+assembly step that maps to the Pydantic envelope.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from src.backtesting.metrics.ftmo_metrics import (
+from src.backtesting.metrics.prop_firm_metrics import (
     compute_max_daily_drawdown_pct,
     compute_max_overall_drawdown_pct,
     compute_profit_target_hit,
@@ -19,9 +19,9 @@ from src.backtesting.metrics.ftmo_metrics import (
 )
 from src.backtesting.metrics.schema import (
     DrawdownMetrics,
-    FtmoComplianceMetrics,
-    FtmoMetricsSchema,
     PnlMetrics,
+    PropFirmComplianceMetrics,
+    PropFirmMetricsSchema,
     RiskMetrics,
     TradeMetrics,
 )
@@ -80,7 +80,7 @@ def calculate_metrics(
     profit_target_pct: float = 10.0,
     max_dd_pct: float = 10.0,
     min_trading_days: int = 4,
-) -> FtmoMetricsSchema:
+) -> PropFirmMetricsSchema:
     """Assemble the top-level metrics envelope for a completed backtest.
 
     Notes on metric conventions used here:
@@ -100,7 +100,7 @@ def calculate_metrics(
 
     net_pnl_decimal = final_balance - initial_balance
     net_pnl = float(net_pnl_decimal)
-    # Expressed as percentage (e.g. 5.0 = +5%) — matches FtmoMetricsSchema
+    # Expressed as percentage (e.g. 5.0 = +5%) — matches PropFirmMetricsSchema
     # convention used by drawdown.max_overall_dd_pct.
     return_pct = (
         float(net_pnl_decimal / initial_balance * 100)
@@ -176,7 +176,7 @@ def calculate_metrics(
     daily_loss_breaches = sum(
         1 for b in breaches if b.rule_name == "daily_loss_limit"
     )
-    compliance = FtmoComplianceMetrics(
+    compliance = PropFirmComplianceMetrics(
         daily_loss_breaches=daily_loss_breaches,
         max_dd_breach=max_overall_dd_pct > max_dd_pct,
         profit_target_hit=compute_profit_target_hit(
@@ -188,13 +188,13 @@ def calculate_metrics(
         >= min_trading_days,
     )
 
-    return FtmoMetricsSchema(
+    return PropFirmMetricsSchema(
         strategy_name=strategy_name,
         pnl=pnl,
         drawdown=drawdown,
         risk=risk,
         trades=trade_metrics,
-        ftmo_compliance=compliance,
+        prop_firm_compliance=compliance,
     )
 
 
@@ -202,6 +202,6 @@ def _daily_pct_list(
     curve: list[tuple[datetime, Decimal]], initial_balance: Decimal
 ) -> list[float]:
     """Per-day P&L % list (internal helper)."""
-    from src.backtesting.metrics.ftmo_metrics import compute_daily_pnl_percentages
+    from src.backtesting.metrics.prop_firm_metrics import compute_daily_pnl_percentages
 
     return compute_daily_pnl_percentages(curve, initial_balance=initial_balance)

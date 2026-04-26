@@ -1,9 +1,13 @@
-"""Pydantic schema for FTMO-aware backtest metrics.
+"""Pydantic schema for prop-firm-aware backtest metrics.
 
 The schema is the contract between the backtest metrics calculator and any
 downstream consumer (JSON report, HTML report, walk-forward aggregator,
 external tooling). Nested models group related metrics so reports can
 render sections directly.
+
+Epic 9 rename: ``FtmoMetricsSchema`` → ``PropFirmMetricsSchema`` and
+``FtmoComplianceMetrics`` → ``PropFirmComplianceMetrics``. The schema
+shape is unchanged; naming now reflects the multi-firm abstraction.
 """
 
 from __future__ import annotations
@@ -52,7 +56,7 @@ class TradeMetrics(BaseModel):
     avg_loss: float
 
 
-class FtmoComplianceMetrics(BaseModel):
+class PropFirmComplianceMetrics(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     daily_loss_breaches: int = Field(..., ge=0)
@@ -61,7 +65,7 @@ class FtmoComplianceMetrics(BaseModel):
     min_trading_days_met: bool
 
 
-class FtmoMetricsSchema(BaseModel):
+class PropFirmMetricsSchema(BaseModel):
     """Top-level metrics envelope emitted at the end of every backtest."""
 
     model_config = ConfigDict(frozen=True)
@@ -71,4 +75,4 @@ class FtmoMetricsSchema(BaseModel):
     drawdown: DrawdownMetrics
     risk: RiskMetrics
     trades: TradeMetrics
-    ftmo_compliance: FtmoComplianceMetrics
+    prop_firm_compliance: PropFirmComplianceMetrics

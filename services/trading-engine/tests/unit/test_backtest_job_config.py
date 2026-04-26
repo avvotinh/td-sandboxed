@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from src.backtesting.job_config import (
     BacktestJobConfig,
-    FtmoSpec,
+    PropFirmSpec,
     ParquetDataSpec,
     SyntheticDataSpec,
     TimescaleDataSpec,
@@ -108,19 +108,19 @@ class TestBacktestJobConfig:
             ParquetDataSpec(path=Path("../etc/passwd"))
         assert "traversal" in str(exc.value).lower()
 
-    def test_ftmo_spec_rejects_traversal(self) -> None:
+    def test_prop_firm_spec_rejects_traversal(self) -> None:
         with pytest.raises((ValueError, ValidationError)) as exc:
-            FtmoSpec(preset_path=Path("../../etc/shadow"), account_id="a")
+            PropFirmSpec(preset_path=Path("../../etc/shadow"), account_id="a")
         assert "traversal" in str(exc.value).lower()
 
-    def test_ftmo_spec_optional(self) -> None:
+    def test_prop_firm_spec_optional(self) -> None:
         job = _synth_job()
-        assert job.ftmo is None
+        assert job.prop_firm is None
         job2 = _synth_job(
-            ftmo=FtmoSpec(preset_path=Path("preset.yaml"), account_id="a")
+            prop_firm=PropFirmSpec(preset_path=Path("preset.yaml"), account_id="a")
         )
-        assert job2.ftmo is not None
-        assert job2.ftmo.account_id == "a"
+        assert job2.prop_firm is not None
+        assert job2.prop_firm.account_id == "a"
 
     def test_window_override_narrows_date_range(self) -> None:
         start = datetime(2024, 1, 5, tzinfo=UTC)

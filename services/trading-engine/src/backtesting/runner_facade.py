@@ -1,7 +1,7 @@
 """``run_backtest`` — single entrypoint shared by CLI, sweep, walk-forward.
 
 Given a ``BacktestJobConfig`` this builds the ``BacktestRunner``, wires
-venue → instrument → data → strategy → (optional) FTMO actor, runs the
+venue → instrument → data → strategy → (optional) prop-firm compliance actor, runs the
 engine, and returns a ``BacktestResult``. All Nautilus imports live here
 so callers (CLI, ``parameter_sweep``, ``walk_forward``) stay free of
 Nautilus types — they can cross the ``ProcessPoolExecutor`` boundary
@@ -25,7 +25,7 @@ from nautilus_trader.test_kit.providers import TestInstrumentProvider
 
 from src.backtesting.bar_converter import dataframe_to_bars
 from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
-from src.backtesting.ftmo_preset import load_ftmo_preset
+from src.backtesting.prop_firm_preset import load_prop_firm_preset
 from src.backtesting.job_config import (
     BacktestJobConfig,
     ParquetDataSpec,
@@ -174,14 +174,14 @@ def run_backtest(
         runner.add_instrument(instrument)
         runner.add_data(bars)
 
-        if job.ftmo is not None:
-            preset = load_ftmo_preset(job.ftmo.preset_path)
-            rule_engine = _build_ftmo_rule_engine(
-                account_id=job.ftmo.account_id, preset=preset
+        if job.prop_firm is not None:
+            preset = load_prop_firm_preset(job.prop_firm.preset_path)
+            rule_engine = _build_prop_firm_rule_engine(
+                account_id=job.prop_firm.account_id, preset=preset
             )
-            runner.attach_ftmo_compliance(
+            runner.attach_prop_firm_compliance(
                 rule_engine=rule_engine,
-                account_id=job.ftmo.account_id,
+                account_id=job.prop_firm.account_id,
                 bar_type=bar_type,
                 venue=instrument.id.venue,
                 currency=currency,
@@ -255,11 +255,11 @@ def _read_final_balance(
         return fallback
 
 
-def _build_ftmo_rule_engine(*, account_id: str, preset: Any) -> Any:
-    """Construct the minimum FTMO rule set for backtest compliance.
+def _build_prop_firm_rule_engine(*, account_id: str, preset: Any) -> Any:
+    """Construct the minimum prop-firm rule set for backtest compliance.
 
     Kept small + importable inside the function so unit tests that do
-    not touch the FTMO path never pay the import cost.
+    not touch the prop-firm path never pay the import cost.
     """
     from src.rules.engine import RuleEngine
     from src.rules.types.drawdown import DailyLossLimitRule, MaxDrawdownRule
