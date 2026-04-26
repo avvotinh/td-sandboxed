@@ -13,8 +13,13 @@ Calculation Formula:
     Daily P&L = Realized P&L + Unrealized P&L
 
 Where:
-    Realized P&L = SUM(pnl_dollars) from trades WHERE status='closed' AND exit_time >= midnight_utc_today
+    Realized P&L = SUM(pnl_dollars) from trades WHERE status='closed' AND
+                   exit_time >= last firm-session reset (was: midnight UTC)
     Unrealized P&L = SUM(position.unrealized_pnl) for all open positions (from PnLTracker)
+
+The day boundary is resolved per account from its ``FirmProfile.session``
+when a ``FirmRegistry`` and ``AccountManager`` are wired in; legacy /
+unbound accounts fall back to UTC midnight.
 
 CRITICAL: All financial calculations use Decimal for precision.
 """
@@ -30,12 +35,21 @@ from typing import TYPE_CHECKING
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import SQLAlchemyError
 
+from ..config.firm_profile import SessionConfig
+from ..config.firm_registry import FirmRegistryError
+from ..config.session_clock import previous_reset_at
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from ..accounts.account_manager import AccountManager
     from ..accounts.pnl_registry import PnLTrackerRegistry
     from ..accounts.risk_registry import RiskStateRegistry
+    from ..config.firm_registry import FirmRegistry
     from .redis_state import RedisStateManager
+
+
+_DEFAULT_SESSION = SessionConfig(timezone="UTC", reset_time="00:00")
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +132,8 @@ class DailyPnLRecalculator:
         redis_manager: RedisStateManager,
         risk_registry: RiskStateRegistry,
         pnl_registry: PnLTrackerRegistry,
+        firm_registry: FirmRegistry | None = None,
+        account_manager: AccountManager | None = None,
     ) -> None:
         """Initialize DailyPnLRecalculator.
 
@@ -126,24 +142,64 @@ class DailyPnLRecalculator:
             redis_manager: Redis state manager for persisting updates
             risk_registry: Risk state registry for updating risk metrics
             pnl_registry: P&L registry for accessing account trackers
+            firm_registry: Optional firm registry for resolving per-account
+                session timezones (Epic 9 P0.5).
+            account_manager: Optional account manager used together with
+                ``firm_registry`` to look up an account's ``firm_id``.
         """
         self._session_factory = db_session_factory
         self._redis = redis_manager
         self._risk_registry = risk_registry
         self._pnl_registry = pnl_registry
+        self._firm_registry = firm_registry
+        self._account_manager = account_manager
 
-    def _get_day_boundary(self, now: datetime | None = None) -> datetime:
-        """Calculate day boundary (midnight UTC) for current day.
+    def _resolve_session(self, account_id: str) -> SessionConfig:
+        """Return the session config for an account, defaulting to UTC midnight."""
+        if self._firm_registry is None or self._account_manager is None:
+            return _DEFAULT_SESSION
+        account = self._account_manager.get_account(account_id)
+        firm_id = getattr(account, "firm_id", None) if account is not None else None
+        if firm_id is None:
+            return _DEFAULT_SESSION
+        try:
+            firm = self._firm_registry.get(firm_id)
+        except FirmRegistryError:
+            logger.warning(
+                "Firm %s not in registry for account %s; "
+                "falling back to UTC midnight",
+                firm_id, account_id,
+            )
+            return _DEFAULT_SESSION
+        return firm.session
+
+    def _get_day_boundary(
+        self,
+        account_id: str | None = None,
+        now: datetime | None = None,
+    ) -> datetime:
+        """Calculate the start of the current trading day in UTC.
+
+        For firm-bound accounts, this is the most recent reset boundary in
+        the firm's session timezone. Otherwise it is midnight UTC.
 
         Args:
-            now: Optional datetime to use as current time (for testing)
+            account_id: Account whose firm session governs the boundary.
+                If omitted (or no firm_registry/account_manager wired in),
+                falls back to UTC midnight for backwards compatibility.
+            now: Optional datetime to use as current time (for testing).
 
         Returns:
-            Midnight UTC of current day
+            UTC datetime of the most recent reset at or before ``now``.
         """
         if now is None:
             now = datetime.now(timezone.utc)
-        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+        session = (
+            self._resolve_session(account_id)
+            if account_id is not None
+            else _DEFAULT_SESSION
+        )
+        return previous_reset_at(session, now)
 
     async def _query_realized_pnl(
         self,
@@ -241,9 +297,9 @@ class DailyPnLRecalculator:
             RecalculationResult with success status and recalculated values
         """
         try:
-            # 1. Calculate day boundary (midnight UTC)
+            # 1. Calculate day boundary (firm-session local reset, or UTC midnight)
             now = datetime.now(timezone.utc)
-            day_boundary = self._get_day_boundary(now)
+            day_boundary = self._get_day_boundary(account_id, now)
 
             # 2. Query realized P&L from database
             realized_pnl, trade_count = await self._query_realized_pnl(

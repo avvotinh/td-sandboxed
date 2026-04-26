@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
@@ -50,9 +50,9 @@ class TestDayBoundaryCalculation:
         self,
         recalculator: DailyPnLRecalculator,
     ) -> None:
-        """Test day boundary is exactly midnight UTC."""
+        """Without firm_registry, boundary defaults to UTC midnight."""
         test_time = datetime(2026, 1, 13, 14, 30, 45, 123456, tzinfo=timezone.utc)
-        boundary = recalculator._get_day_boundary(test_time)
+        boundary = recalculator._get_day_boundary(account_id=None, now=test_time)
 
         assert boundary.hour == 0
         assert boundary.minute == 0
@@ -75,6 +75,36 @@ class TestDayBoundaryCalculation:
         assert boundary.day == now.day
         assert boundary.hour == 0
         assert boundary.minute == 0
+
+    def test_day_boundary_uses_firm_session_when_registered(self) -> None:
+        """When firm_registry is wired in, boundary follows firm session timezone."""
+        from src.config.firm_profile import SessionConfig
+
+        # Mock account + firm registry so account "ftmo-001" → CET session
+        account = MagicMock()
+        account.firm_id = "ftmo"
+        account_manager = MagicMock()
+        account_manager.get_account.return_value = account
+
+        cet_session = SessionConfig(timezone="Europe/Berlin", reset_time="00:00")
+        firm = MagicMock(session=cet_session)
+        firm_registry = MagicMock()
+        firm_registry.get.return_value = firm
+
+        recalculator = DailyPnLRecalculator(
+            db_session_factory=MagicMock(),
+            redis_manager=MagicMock(),
+            risk_registry=MagicMock(),
+            pnl_registry=MagicMock(),
+            firm_registry=firm_registry,
+            account_manager=account_manager,
+        )
+
+        # 14:00 UTC on 15 Jan = 15:00 CET → previous local midnight = 14 Jan 23:00 UTC
+        now = datetime(2026, 1, 15, 14, 0, tzinfo=timezone.utc)
+        boundary = recalculator._get_day_boundary(account_id="ftmo-001", now=now)
+
+        assert boundary == datetime(2026, 1, 14, 23, 0, tzinfo=timezone.utc)
 
 
 class TestUnrealizedPnLRetrieval:

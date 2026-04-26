@@ -417,7 +417,10 @@ class PnLTracker:
         )
 
     def reset_daily(self, starting_balance: Decimal) -> None:
-        """Reset daily P&L counters at midnight UTC.
+        """Reset daily P&L counters at the firm session reset boundary.
+
+        Trigger lives in the daily snapshot scheduler; the boundary follows
+        ``FirmProfile.session`` (was: midnight UTC).
 
         Args:
             starting_balance: Balance at start of new trading day

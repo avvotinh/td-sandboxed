@@ -129,7 +129,11 @@ class AccountRiskManager:
         return None
 
     async def reset_daily(self, starting_balance: Decimal) -> None:
-        """Reset daily metrics at midnight UTC.
+        """Reset daily metrics at the firm session reset boundary.
+
+        Trigger lives in the daily snapshot scheduler; this method only
+        applies the reset to in-memory state and persists it. The boundary
+        follows ``FirmProfile.session`` (was: midnight UTC).
 
         Args:
             starting_balance: Balance at start of new day

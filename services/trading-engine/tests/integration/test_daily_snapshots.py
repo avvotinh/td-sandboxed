@@ -79,7 +79,12 @@ class TestFullSnapshotFlow:
             db_session_factory=session_factory,
         )
 
-        await service._take_all_snapshots()
+        from src.snapshots.daily_snapshot_service import DEFAULT_SESSION
+        await service._take_snapshots_for_session(
+            DEFAULT_SESSION,
+            account_manager.get_active_account_ids.return_value,
+            date(2025, 12, 3),
+        )
 
         # Verify write_snapshot was called with correct data
         db_writer.write_snapshot.assert_called_once()
@@ -327,7 +332,7 @@ class TestMultiAccountFlow:
             db_session_factory=MagicMock(),
         )
 
-        async def mock_collect(account_id, snapshot_date):
+        async def mock_collect(account_id, snapshot_date, session=None):
             return {
                 "account_id": account_id,
                 "snapshot_date": snapshot_date,
@@ -337,7 +342,12 @@ class TestMultiAccountFlow:
 
         service._collect_snapshot_data = mock_collect
 
-        await service._take_all_snapshots()
+        from src.snapshots.daily_snapshot_service import DEFAULT_SESSION
+        await service._take_snapshots_for_session(
+            DEFAULT_SESSION,
+            account_manager.get_active_account_ids.return_value,
+            date(2025, 12, 3),
+        )
 
         assert db_writer.write_snapshot.call_count == 2
         call_accounts = [

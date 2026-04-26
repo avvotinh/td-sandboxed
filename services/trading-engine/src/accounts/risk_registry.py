@@ -153,7 +153,10 @@ class RiskStateRegistry:
         return manager.state if manager else None
 
     async def reset_daily_all(self, account_balances: dict[str, Decimal]) -> None:
-        """Reset daily metrics for all accounts at midnight UTC.
+        """Reset daily metrics for all accounts at their session reset boundary.
+
+        Caller is responsible for invoking this once per local trading day
+        per ``FirmProfile.session`` (was: midnight UTC).
 
         Args:
             account_balances: Dict of account_id -> starting balance

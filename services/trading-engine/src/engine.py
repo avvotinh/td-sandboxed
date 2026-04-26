@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .accounts.risk_registry import RiskStateRegistry
     from .adapters.zmq_adapter import ZmqAdapter
     from .audit.audit_service import AuditService
+    from .config.firm_registry import FirmRegistry
     from .orders.trade_db_writer import TradeDBWriter
     from .rules.violation_db_writer import ViolationDBWriter
     from .rules.violation_service import ViolationService
@@ -61,6 +62,7 @@ class TradingEngine:
         snapshot_service: SnapshotService | None = None,
         database_url: str | None = None,
         audit_service: AuditService | None = None,
+        firm_registry: FirmRegistry | None = None,
     ) -> None:
         """Initialize the trading engine.
 
@@ -111,6 +113,7 @@ class TradingEngine:
         self._violation_db_writer: ViolationDBWriter | None = None
         self._violation_service: ViolationService | None = None
         self._audit_service = audit_service
+        self._firm_registry = firm_registry
 
     @property
     def is_running(self) -> bool:
@@ -292,6 +295,7 @@ class TradingEngine:
             account_manager=self._account_manager,
             db_session_factory=self._db_session_factory,
             audit_service=self._audit_service,
+            firm_registry=self._firm_registry,
         )
         await self._daily_snapshot_service.start()
         logger.info("Daily snapshot service initialized")
@@ -482,6 +486,8 @@ class TradingEngine:
                 redis_manager=self._redis_manager,
                 risk_registry=self._risk_registry,
                 pnl_registry=self._pnl_registry,
+                firm_registry=self._firm_registry,
+                account_manager=self._account_manager,
             )
 
         for account_id, recon_result in reconciliation_results.items():

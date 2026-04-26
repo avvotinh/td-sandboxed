@@ -69,7 +69,11 @@ class RiskState:
         self.last_updated = datetime.now(timezone.utc)
 
     def reset_daily(self, starting_balance: Decimal) -> None:
-        """Reset daily metrics at midnight UTC.
+        """Reset daily metrics at the firm session reset boundary.
+
+        The actual reset trigger lives in the scheduler (see
+        ``DailySnapshotService``), which calls this once per local trading
+        day per the account's ``FirmProfile.session`` (was: midnight UTC).
 
         Args:
             starting_balance: Account balance at start of new day

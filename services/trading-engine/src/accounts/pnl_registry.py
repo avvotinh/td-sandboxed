@@ -196,7 +196,10 @@ class PnLTrackerRegistry:
         return self._trackers.copy()
 
     async def reset_daily_all(self, account_balances: dict[str, Decimal]) -> None:
-        """Reset daily P&L for all trackers at midnight UTC.
+        """Reset daily P&L for all trackers at their session reset boundary.
+
+        Caller is responsible for invoking this once per local trading day
+        per ``FirmProfile.session`` (was: midnight UTC).
 
         Args:
             account_balances: Dict of account_id -> starting balance

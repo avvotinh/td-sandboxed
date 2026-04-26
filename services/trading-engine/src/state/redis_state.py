@@ -231,9 +231,11 @@ class RedisStateManager:
         return RiskState.from_dict(data)
 
     async def reset_daily_risk_state(self, account_id: str) -> None:
-        """Reset daily metrics in risk state at midnight UTC.
+        """Reset daily metrics in Redis at the firm session reset boundary.
 
         Preserves peak_equity and total_drawdown, resets daily counters.
+        Trigger lives in the daily snapshot scheduler; the boundary follows
+        ``FirmProfile.session`` (was: midnight UTC).
 
         Args:
             account_id: Account identifier
