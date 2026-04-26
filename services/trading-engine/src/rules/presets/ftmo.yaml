@@ -25,6 +25,10 @@ rules:
   # Maximum Drawdown: 10% of initial balance (trailing)
   # BLOCKING: Exceeding this fails the challenge/funded account
   # Reference: https://academy.ftmo.com/lesson/maximum-loss/
+  # TODO(P0.6 follow-up): switch to method: "balance_based" once RiskState
+  # gains an account_initial_balance field separate from daily_starting_balance
+  # — see validated_adapter.py:308 wiring. Until then, equity_peak (default)
+  # is the correct method given the available state.
   - type: max_drawdown
     threshold_percent: 10.0
     reference: "initial_balance"

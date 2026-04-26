@@ -285,10 +285,13 @@ class MaxDrawdownRule:
     rule_type: str = "max_drawdown"
     priority: int = 2  # Evaluated after daily loss limit
 
+    VALID_METHODS = ("equity_peak", "balance_based")
+
     def __init__(
         self,
         threshold_percent: float = 10.0,
         reference: str = "initial_balance",
+        method: str = "equity_peak",
         warning_at: list[float] | None = None,
         action: str = "block_trading",  # From YAML, for documentation
         **kwargs: Any,  # Accept additional YAML fields
@@ -299,19 +302,32 @@ class MaxDrawdownRule:
             threshold_percent: Max drawdown as percentage (default: 10.0).
                 FTMO uses 10% for all challenge phases.
             reference: Reference point for drawdown calculation.
-                Default: "initial_balance" (FTMO style).
-                NOTE: The current implementation uses peak_equity (high water mark)
-                via RiskState.total_drawdown_percent. The reference parameter is
-                accepted for YAML compatibility but does not change calculation
-                behavior in this implementation.
+                Informational; the actual calculation is selected by ``method``.
+            method: How drawdown is measured (Epic 9 P0.6).
+                * ``"equity_peak"`` (default): drawdown from the running high
+                  water mark — read from ``context['total_drawdown_percent']``.
+                * ``"balance_based"``: drawdown from the static
+                  ``initial_balance`` — computed from
+                  ``context['current_equity']`` and
+                  ``context['initial_balance']``. FTMO Challenge "Maximum
+                  Loss" semantics (10% of starting balance).
             warning_at: Warning thresholds as percentages of limit.
                 Default: [50, 70, 85] means warn at 50%, 70%, 85% of the limit.
                 For a 10% limit: warn at 5%, 7%, 8.5% actual drawdown.
             action: Action to take (for YAML compatibility, always blocks).
             **kwargs: Additional YAML fields (ignored for forward compatibility).
+
+        Raises:
+            ValueError: If ``method`` is not one of ``VALID_METHODS``.
         """
+        if method not in self.VALID_METHODS:
+            raise ValueError(
+                f"MaxDrawdownRule: unknown method {method!r}. "
+                f"Valid: {self.VALID_METHODS}"
+            )
         self.threshold_percent = float(threshold_percent)
         self.reference = reference
+        self.method = method
         self.warning_at = sorted(
             warning_at if warning_at is not None else [50.0, 70.0, 85.0]
         )
@@ -333,37 +349,56 @@ class MaxDrawdownRule:
         """
         return f"Max Drawdown {self.threshold_percent}%"
 
+    def _compute_drawdown_percent(self, context: dict[str, Any]) -> float:
+        """Return the current drawdown percentage per the configured method.
+
+        ``equity_peak`` returns ``total_drawdown_percent`` straight from the
+        context (computed upstream by ``RiskState.drawdown_from_peak``).
+
+        ``balance_based`` derives the drawdown from ``initial_balance`` and
+        ``current_equity``: a positive number when equity has fallen below
+        the starting balance, ``0.0`` when in profit (or at par). Returns
+        ``0.0`` if ``initial_balance`` is missing or zero (defensive — no
+        meaningful drawdown can be computed).
+        """
+        if self.method == "equity_peak":
+            value = context.get("total_drawdown_percent", 0.0)
+            if isinstance(value, Decimal):
+                value = float(value)
+            return float(value)
+
+        # balance_based
+        initial_balance = context.get("initial_balance", 0.0)
+        current_equity = context.get("current_equity", 0.0)
+        if isinstance(initial_balance, Decimal):
+            initial_balance = float(initial_balance)
+        if isinstance(current_equity, Decimal):
+            current_equity = float(current_equity)
+        if initial_balance <= 0:
+            return 0.0
+        if current_equity >= initial_balance:
+            return 0.0
+        return (initial_balance - current_equity) / initial_balance * 100.0
+
     def validate(self, context: dict[str, Any]) -> RuleResult:
         """Validate trading context against max drawdown limit.
 
-        Checks the current total drawdown percentage against the configured
-        threshold and warning levels. Returns the appropriate action based
-        on current state.
+        Checks the current drawdown percentage (per ``self.method``) against
+        the configured threshold and warning levels. Returns the appropriate
+        action based on current state.
 
         Args:
-            context: Trading context with total_drawdown_percent key.
-                Expected keys:
-                - total_drawdown_percent (float|Decimal): Current drawdown from
-                    peak as percentage. Positive values indicate drawdown
-                    (e.g., 7.0 = 7% drawdown from peak).
+            context: Trading context. Required keys depend on ``self.method``:
+                - ``equity_peak`` → ``total_drawdown_percent``
+                - ``balance_based`` → ``initial_balance`` + ``current_equity``
 
         Returns:
             RuleResult with:
             - BLOCK if drawdown >= threshold
             - WARN if approaching threshold (at warning level)
             - ALLOW if safely below all thresholds
-
-        Note:
-            Unlike DailyLossLimitRule which uses negative values for loss,
-            total_drawdown_percent is already positive (drawdown is measured
-            as percentage below peak equity).
         """
-        # Get current total drawdown (positive = drawdown, 0 or negative = no drawdown)
-        total_drawdown_percent = context.get("total_drawdown_percent", 0.0)
-
-        # Convert Decimal to float for consistent comparison
-        if isinstance(total_drawdown_percent, Decimal):
-            total_drawdown_percent = float(total_drawdown_percent)
+        total_drawdown_percent = self._compute_drawdown_percent(context)
 
         # If no drawdown or zero, always allow (defensive edge case)
         if total_drawdown_percent <= 0:
@@ -395,6 +430,7 @@ class MaxDrawdownRule:
                 metadata={
                     "rule_type": self.rule_type,
                     "reference": self.reference,
+                    "method": self.method,
                 },
             )
 
@@ -420,6 +456,7 @@ class MaxDrawdownRule:
                         "rule_type": self.rule_type,
                         "warning_threshold": warning_threshold,
                         "usage_percent": usage_percent,
+                        "method": self.method,
                     },
                 )
 
@@ -436,19 +473,15 @@ class MaxDrawdownRule:
         )
 
     def get_current_value(self, context: dict[str, Any]) -> float:
-        """Get current drawdown percentage from context.
+        """Get current drawdown percentage from context per ``self.method``.
 
         Args:
-            context: Trading context with total_drawdown_percent key.
+            context: Trading context. See ``validate`` for required keys.
 
         Returns:
             Current drawdown as positive percentage (0.0 if no drawdown).
-            Returns 0.0 if total_drawdown_percent not in context.
         """
-        total_drawdown_percent = context.get("total_drawdown_percent", 0.0)
-        if isinstance(total_drawdown_percent, Decimal):
-            total_drawdown_percent = float(total_drawdown_percent)
-        return max(0.0, total_drawdown_percent)  # Never return negative
+        return max(0.0, self._compute_drawdown_percent(context))
 
     def get_threshold(self) -> float:
         """Get the max drawdown threshold percentage.
@@ -468,13 +501,9 @@ class MaxDrawdownRule:
         return self.warning_at.copy()
 
     def __repr__(self) -> str:
-        """Return string representation for debugging.
-
-        Returns:
-            String like "MaxDrawdownRule(threshold=10.0%, reference=initial_balance, warnings=[50.0, 70.0, 85.0])"
-        """
+        """Return string representation for debugging."""
         return (
             f"MaxDrawdownRule(threshold={self.threshold_percent}%, "
-            f"reference={self.reference}, "
+            f"method={self.method}, reference={self.reference}, "
             f"warnings={self.warning_at})"
         )

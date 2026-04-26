@@ -677,3 +677,131 @@ class TestMaxDrawdownRuleAcceptanceCriteria:
         # Verify it's included in BLOCK metadata
         result = rule.validate({"total_drawdown_percent": 10.0})
         assert result.metadata["reference"] == "initial_balance"
+
+
+# ===========================================================================
+# Epic 9 P0.6: drawdown method (equity_peak vs balance_based)
+# ===========================================================================
+
+
+class TestMaxDrawdownRuleMethodInit:
+    """Tests for the new ``method`` parameter introduced by P0.6."""
+
+    def test_default_method_is_equity_peak(self):
+        # Preserves existing behaviour for callers that don't specify a method.
+        rule = MaxDrawdownRule()
+        assert rule.method == "equity_peak"
+
+    def test_custom_method_balance_based(self):
+        rule = MaxDrawdownRule(method="balance_based")
+        assert rule.method == "balance_based"
+
+    def test_invalid_method_raises(self):
+        with pytest.raises(ValueError, match="method"):
+            MaxDrawdownRule(method="from_atlantis")
+
+
+class TestMaxDrawdownRuleEquityPeakMethod:
+    """``method='equity_peak'`` reads ``total_drawdown_percent`` from context."""
+
+    def test_block_above_threshold(self):
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="equity_peak")
+        result = rule.validate({"total_drawdown_percent": 10.5})
+        assert result.action == RuleAction.BLOCK
+
+    def test_ignores_balance_fields(self):
+        # Even if initial_balance / current_equity disagree, equity_peak relies
+        # only on total_drawdown_percent. This is the load-bearing invariant.
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="equity_peak")
+        ctx = {
+            "total_drawdown_percent": 2.0,
+            "initial_balance": 100000.0,
+            "current_equity": 50000.0,  # Would be 50% balance_based
+        }
+        result = rule.validate(ctx)
+        assert result.action == RuleAction.ALLOW
+
+    def test_metadata_records_method(self):
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="equity_peak")
+        result = rule.validate({"total_drawdown_percent": 10.5})
+        assert result.metadata["method"] == "equity_peak"
+
+
+class TestMaxDrawdownRuleBalanceBasedMethod:
+    """``method='balance_based'`` computes drawdown vs ``initial_balance``."""
+
+    def _ctx(self, **kw):
+        # Total_drawdown_percent intentionally absent / wrong to prove it's not used.
+        base = {"initial_balance": 100000.0, "current_equity": 100000.0}
+        base.update(kw)
+        return base
+
+    def test_allow_at_par_equity(self):
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="balance_based")
+        result = rule.validate(self._ctx(current_equity=100000.0))
+        assert result.action == RuleAction.ALLOW
+        assert result.current_value == 0.0
+
+    def test_allow_when_in_profit(self):
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="balance_based")
+        # Equity above initial_balance → no drawdown
+        result = rule.validate(self._ctx(current_equity=108000.0))
+        assert result.action == RuleAction.ALLOW
+        assert result.current_value == 0.0
+
+    def test_warn_at_70_percent_of_threshold(self):
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="balance_based")
+        # 7% drawdown = 70% of 10% threshold → WARN at 70 warning level
+        result = rule.validate(self._ctx(current_equity=93000.0))
+        assert result.action == RuleAction.WARN
+        assert result.current_value == pytest.approx(7.0, abs=0.001)
+
+    def test_block_at_threshold(self):
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="balance_based")
+        # 10% drawdown exactly
+        result = rule.validate(self._ctx(current_equity=90000.0))
+        assert result.action == RuleAction.BLOCK
+        assert result.current_value == pytest.approx(10.0, abs=0.001)
+
+    def test_balance_based_ignores_total_drawdown_percent(self):
+        # Even if total_drawdown_percent says 50, balance_based only looks at
+        # the current_equity vs initial_balance ratio.
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="balance_based")
+        ctx = self._ctx(current_equity=99000.0, total_drawdown_percent=50.0)
+        result = rule.validate(ctx)
+        assert result.action == RuleAction.ALLOW  # Only 1% balance_based DD
+        assert result.current_value == pytest.approx(1.0, abs=0.001)
+
+    def test_zero_initial_balance_returns_allow(self):
+        # Defensive: avoid div-by-zero. No way to compute a meaningful DD,
+        # so pass through as ALLOW rather than crash.
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="balance_based")
+        ctx = self._ctx(initial_balance=0.0, current_equity=0.0)
+        result = rule.validate(ctx)
+        assert result.action == RuleAction.ALLOW
+        assert result.current_value == 0.0
+
+    def test_decimal_inputs(self):
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="balance_based")
+        ctx = {
+            "initial_balance": Decimal("100000"),
+            "current_equity": Decimal("89000"),  # 11% DD
+        }
+        result = rule.validate(ctx)
+        assert result.action == RuleAction.BLOCK
+
+    def test_metadata_records_method(self):
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="balance_based")
+        ctx = self._ctx(current_equity=89000.0)
+        result = rule.validate(ctx)
+        assert result.metadata["method"] == "balance_based"
+
+    def test_get_current_value_uses_balance_based(self):
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="balance_based")
+        ctx = self._ctx(current_equity=95000.0)
+        assert rule.get_current_value(ctx) == pytest.approx(5.0, abs=0.001)
+
+    def test_get_current_value_returns_zero_in_profit(self):
+        rule = MaxDrawdownRule(threshold_percent=10.0, method="balance_based")
+        ctx = self._ctx(current_equity=110000.0)
+        assert rule.get_current_value(ctx) == 0.0
