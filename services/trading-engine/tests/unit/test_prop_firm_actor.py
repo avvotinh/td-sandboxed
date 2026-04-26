@@ -287,3 +287,116 @@ class TestEquityTracking:
         actor.record_equity(ts=ts0 + timedelta(hours=1), equity=Decimal("102000"))
         actor.record_equity(ts=ts0 + timedelta(hours=2), equity=Decimal("101000"))
         assert actor.peak_balance == Decimal("102000")
+
+
+# ---------------------------------------------------------------------------
+# Epic 9 P0.7 — consistency rule context injection (backtest parity)
+# ---------------------------------------------------------------------------
+
+
+class TestConsistencyContextInjection:
+    """``evaluate_compliance`` forwards consistency keys verbatim into context."""
+
+    def test_account_state_keys_propagate_to_rule_context(self) -> None:
+        from datetime import date
+
+        rule_engine = Mock()
+        rule_engine.validate = Mock(
+            return_value=RuleEngineResult(
+                action=RuleAction.ALLOW,
+                blocked_by=None,
+                blocking_reason=None,
+                warnings=[],
+                all_results=[],
+                evaluation_time_ms=0.1,
+            )
+        )
+        actor = _make_actor(rule_engine)
+        history = {date(2026, 4, 1): 500.0, date(2026, 4, 2): 300.0}
+        state = {
+            "balance": Decimal("100000"),
+            "equity": Decimal("100400"),
+            "current_day_pnl": Decimal("400"),
+            "daily_profits_history": history,
+        }
+
+        actor.evaluate_compliance(state, ts=datetime(2026, 4, 3, 10, tzinfo=UTC))
+
+        rule_engine.validate.assert_called_once()
+        ctx = rule_engine.validate.call_args[0][0]
+        assert ctx["current_day_pnl"] == Decimal("400")
+        assert ctx["daily_profits_history"] == history
+
+
+class TestProfitHistoryAccumulation:
+    """``register_completed_day`` and ``daily_profits_history`` round-trip."""
+
+    def test_register_completed_day_appears_in_history(self) -> None:
+        from datetime import date
+
+        rule_engine = Mock()
+        actor = _make_actor(rule_engine)
+
+        actor.register_completed_day(date(2026, 4, 1), Decimal("500"))
+        actor.register_completed_day(date(2026, 4, 2), Decimal("-100"))
+        actor.register_completed_day(date(2026, 4, 3), Decimal("300"))
+
+        history = actor.daily_profits_history
+        assert history == {
+            date(2026, 4, 1): 500.0,
+            date(2026, 4, 2): -100.0,
+            date(2026, 4, 3): 300.0,
+        }
+
+    def test_daily_profits_history_is_defensive_copy(self) -> None:
+        from datetime import date
+
+        rule_engine = Mock()
+        actor = _make_actor(rule_engine)
+        actor.register_completed_day(date(2026, 4, 1), Decimal("500"))
+
+        snap = actor.daily_profits_history
+        snap[date(2099, 1, 1)] = 9999.0
+
+        # Internal state untouched
+        assert actor.daily_profits_history == {date(2026, 4, 1): 500.0}
+
+    def test_per_account_isolation_between_actors(self) -> None:
+        from datetime import date
+
+        rule_engine = Mock()
+        actor_a = _make_actor(rule_engine)
+        actor_b_config = PropFirmComplianceActorConfig(
+            account_id="ftmo-other",
+            initial_balance=Decimal("100000"),
+        )
+        actor_b = PropFirmComplianceActor(config=actor_b_config, rule_engine=rule_engine)
+
+        actor_a.register_completed_day(date(2026, 4, 1), Decimal("500"))
+        actor_b.register_completed_day(date(2026, 4, 1), Decimal("999"))
+
+        # Each actor maintains its own history scoped by config.account_id
+        assert actor_a.daily_profits_history == {date(2026, 4, 1): 500.0}
+        assert actor_b.daily_profits_history == {date(2026, 4, 1): 999.0}
+
+    def test_on_stop_flushes_in_progress_day(self) -> None:
+        """The final day of a backtest must reach the rolling profit history.
+
+        Without an on_stop flush, the last day's pnl is dropped because
+        rollover only fires on the next day's first bar.
+        """
+        from datetime import date
+
+        rule_engine = Mock()
+        actor = _make_actor(rule_engine)
+        # Simulate a backtest that processed bars within one day, ending
+        # with _last_daily_pnl = $750 on date 2026-04-15.
+        actor._current_day = date(2026, 4, 15)
+        actor._last_daily_pnl = Decimal("750")
+
+        actor.on_stop()
+
+        assert actor.daily_profits_history == {date(2026, 4, 15): 750.0}
+        # Idempotent — calling on_stop again must not double-record
+        actor.on_stop()
+        assert actor.daily_profits_history == {date(2026, 4, 15): 750.0}

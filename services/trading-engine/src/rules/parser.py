@@ -148,6 +148,14 @@ class RuleParser:
         except ImportError:
             pass
 
+        try:
+            from .types.consistency import ConsistencyRule
+
+            self._rule_types["consistency"] = ConsistencyRule
+            logger.debug("Loaded ConsistencyRule")
+        except ImportError:
+            pass
+
         # Log which rules are using placeholders
         placeholder_types = [
             k
@@ -176,6 +184,7 @@ class RuleParser:
         priority_map = {
             "daily_loss_limit": 1,
             "max_drawdown": 2,
+            "consistency": 5,
             "max_position_size": 10,
             "profit_target": 100,
             "min_trading_days": 100,

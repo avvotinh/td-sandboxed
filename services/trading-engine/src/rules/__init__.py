@@ -64,6 +64,7 @@ from .engine_factory import RuleEngineFactory
 from .engine_result import RuleEngineResult
 from .parser import RuleParseError, RuleParser
 from .preset_loader import PresetNotFoundError, RulePresetLoader
+from .types.consistency import ConsistencyRule
 from .types.drawdown import DailyLossLimitRule, MaxDrawdownRule
 from .types.position import MaxPositionSizeRule
 from .types.targets import MinTradingDaysRule, ProfitTargetRule
@@ -77,7 +78,8 @@ __all__ = [
     "RuleAction",
     "RuleResult",
     "RuleList",
-    # Rule types (Story 4.2+)
+    # Rule types (Story 4.2+; Epic 9 P0.7 added ConsistencyRule)
+    "ConsistencyRule",
     "DailyLossLimitRule",
     "MaxDrawdownRule",
     "MaxPositionSizeRule",

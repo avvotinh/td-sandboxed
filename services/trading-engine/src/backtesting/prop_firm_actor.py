@@ -37,6 +37,7 @@ from src.backtesting.account_state_builder import build_account_state
 from src.backtesting.result import BreachEvent
 from src.rules.base_rule import RuleAction
 from src.rules.engine import RuleEngine
+from src.snapshots.daily_profit_history import DailyProfitHistory
 from src.strategies.mixins.session_filter_mixin import SessionFilterMixin
 
 
@@ -85,6 +86,10 @@ class PropFirmComplianceActor(Actor):
         # rule engine sees *today's* P&L, not cumulative since inception.
         self._current_day: date | None = None
         self._day_open_balance: Decimal = config.initial_balance
+        # Last per-bar daily P&L, used at day-rollover to record the just-
+        # ended day into _profit_history (Epic 9 P0.7 — consistency rule).
+        self._last_daily_pnl: Decimal = Decimal("0")
+        self._profit_history = DailyProfitHistory()
 
     # ---- Public test seams -------------------------------------------------
 
@@ -105,6 +110,22 @@ class PropFirmComplianceActor(Actor):
         self._equity_curve.append((ts, equity))
         if equity > self._peak_balance:
             self._peak_balance = equity
+
+    def register_completed_day(self, day: date, daily_pnl: Decimal) -> None:
+        """Record a finished day's P&L into the rolling profit history.
+
+        Called by ``on_bar`` at day rollover, and exposed publicly for tests
+        and for callers that drive the actor without a Nautilus event loop.
+        """
+        self._profit_history.record(self._config.account_id, day, daily_pnl)
+
+    @property
+    def daily_profits_history(self) -> dict[date, float]:
+        """Snapshot of completed prior days' P&L for context injection.
+
+        Returns a defensive copy keyed by date.
+        """
+        return self._profit_history.get_history(self._config.account_id)
 
     def evaluate_compliance(
         self,
@@ -173,13 +194,22 @@ class PropFirmComplianceActor(Actor):
             self.subscribe_bars(self._config.bar_type)
 
     def on_stop(self) -> None:
-        """Unsubscribe cleanly to suppress Nautilus warnings.
+        """Unsubscribe cleanly and flush the final trading day.
 
-        Catches only ``RuntimeError`` — Nautilus raises this when the
-        actor is stopped before it fully subscribed (e.g. immediate
-        shutdown). Any other exception is a programming error and
-        propagates.
+        Without the flush, the last day of a backtest never reaches the
+        rolling profit history (rollover only fires on the next day's
+        first bar). This would silently drop the final day from
+        ``daily_profits_history``.
+
+        Catches only ``RuntimeError`` from ``unsubscribe_bars`` — Nautilus
+        raises this when the actor is stopped before it fully subscribed
+        (e.g. immediate shutdown). Any other exception is a programming
+        error and propagates.
         """
+        if self._current_day is not None:
+            self.register_completed_day(self._current_day, self._last_daily_pnl)
+            self._current_day = None
+            self._last_daily_pnl = Decimal("0")
         if self._config.bar_type is not None:
             try:
                 self.unsubscribe_bars(self._config.bar_type)
@@ -195,11 +225,20 @@ class PropFirmComplianceActor(Actor):
         self.record_equity(ts=ts, equity=equity)
 
         # Reset day-open balance on UTC date change for proper daily_pnl.
+        # On rollover, persist the day that just ended into the rolling
+        # profit history so the consistency rule sees it on subsequent ticks.
         bar_date = ts.date()
-        if self._current_day is None or bar_date != self._current_day:
+        if self._current_day is None:
             self._current_day = bar_date
             self._day_open_balance = equity
+        elif bar_date != self._current_day:
+            self.register_completed_day(self._current_day, self._last_daily_pnl)
+            self._current_day = bar_date
+            self._day_open_balance = equity
+            self._last_daily_pnl = Decimal("0")
 
+        daily_pnl = equity - self._day_open_balance
+        self._last_daily_pnl = daily_pnl
         snapshot = {
             "balance": equity,
             "equity": equity,
@@ -210,8 +249,11 @@ class PropFirmComplianceActor(Actor):
             portfolio_snapshot=snapshot,
             initial_balance=self._config.initial_balance,
             peak_balance=self._peak_balance,
-            daily_pnl=equity - self._day_open_balance,
+            daily_pnl=daily_pnl,
         )
+        # Inject consistency-rule context (Epic 9 P0.7).
+        account_state["current_day_pnl"] = daily_pnl
+        account_state["daily_profits_history"] = self.daily_profits_history
         self.record_compliance_check(account_state, ts)
 
     def _read_equity(self) -> Decimal | None:
