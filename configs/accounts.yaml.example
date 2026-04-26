@@ -98,6 +98,44 @@ accounts:
     status: active
 
   # ============================================================================
+  # FIRM-BOUND ACCOUNT EXAMPLE (Epic 9+)
+  # ============================================================================
+  # Firm-bound accounts reference a FirmRegistry entry (loaded from
+  # configs/firms/*.yaml) by firm_id + product_id + phase. Rule sets are
+  # resolved from the firm profile's product; per-account rule_overrides can
+  # TIGHTEN (not loosen) thresholds per P0.16.
+  #
+  # Requirements:
+  #   - firm_id, product_id, and phase must all be set together
+  #   - Mutually exclusive with prop_firm (legacy) and rules_file (personal)
+  #
+  - id: ftmo-challenge-001
+    name: "FTMO Challenge (Firm-bound)"
+    type: prop_firm
+
+    firm_id: ftmo                 # Matches firm_id in configs/firms/ftmo.yaml
+    product_id: challenge         # Product within the firm profile
+    phase: evaluation             # One of the product's phase_ids
+
+    # Optional: tighten thresholds on this specific account.
+    # Per P0.16, overrides can only make rules STRICTER, never looser.
+    rule_overrides:
+      consistency:
+        block_at: 45              # ≤ firm default (50)
+
+    mt5:
+      server: "FTMO-Server"
+      login: 22334455
+      password_env: "FTMO_PASS_003"
+
+    strategy: ma_crossover
+    strategy_params:
+      fast_period: 20
+      slow_period: 50
+
+    status: active
+
+  # ============================================================================
   # THE5ERS ACCOUNT EXAMPLE
   # ============================================================================
   # Another prop firm with different preset rules

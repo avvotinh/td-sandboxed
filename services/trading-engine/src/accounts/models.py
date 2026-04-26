@@ -82,12 +82,28 @@ class AccountConfig(BaseModel):
     Represents a complete trading account setup including MT5 connection,
     strategy assignment, and compliance rules.
 
+    Rule-source options (pick one — validated by ``validate_rules_source``):
+
+    1. **Firm-bound (Epic 9+)** — ``firm_id`` + ``product_id`` + ``phase``
+       (+ optional ``rule_overrides``). Resolved against :class:`FirmRegistry`
+       to load a ``FirmProfile`` → ``AccountProduct`` → ``AccountPhase``.
+    2. **Preset (legacy, Epic 4)** — ``prop_firm`` points at a built-in
+       preset in ``services/trading-engine/src/rules/presets/``. Still
+       supported; will be phased out after P0.11 migrates presets to firm
+       profiles.
+    3. **Personal** — ``rules_file`` pointing at a custom YAML.
+    4. **Demo** — no rule source required.
+
     Attributes:
         id: Unique account identifier (alphanumeric with dashes/underscores)
         name: Human-readable account name
         type: Account type (prop_firm, personal, demo)
-        prop_firm: Prop firm preset name for compliance rules
-        rules_file: Path to custom rules file (alternative to prop_firm)
+        firm_id: FirmRegistry firm id (Epic 9)
+        product_id: FirmRegistry product id (Epic 9)
+        phase: Product phase id (Epic 9)
+        rule_overrides: Per-account rule overrides (validated in P0.16)
+        prop_firm: Legacy prop firm preset name (Epic 4)
+        rules_file: Path to custom rules file
         mt5: MT5 connection configuration
         strategy: Strategy name to execute on this account
         strategy_params: Strategy-specific parameters
@@ -98,7 +114,16 @@ class AccountConfig(BaseModel):
     id: str = Field(..., min_length=1, description="Unique account identifier")
     name: str = Field(..., min_length=1, description="Human-readable name")
     type: AccountType = Field(..., description="Account type")
-    prop_firm: Optional[str] = Field(default=None, description="Prop firm preset name")
+    firm_id: Optional[str] = Field(default=None, description="FirmRegistry firm id")
+    product_id: Optional[str] = Field(default=None, description="FirmRegistry product id")
+    phase: Optional[str] = Field(default=None, description="FirmRegistry phase id")
+    # TODO(P0.16): rule_overrides keys/values validated against known rule
+    # types and safety guard (no loosening) applied at bind time.
+    rule_overrides: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-account rule overrides (merged against product defaults in P0.16)",
+    )
+    prop_firm: Optional[str] = Field(default=None, description="Legacy prop firm preset name")
     rules_file: Optional[str] = Field(default=None, description="Custom rules file path")
     mt5: MT5Config
     strategy: str = Field(..., min_length=1, description="Strategy name")
@@ -122,22 +147,71 @@ class AccountConfig(BaseModel):
             return v.lower()
         return v
 
+    @field_validator("firm_id", mode="before")
+    @classmethod
+    def normalize_firm_id(cls, v: Optional[str]) -> Optional[str]:
+        """Normalize firm_id to lowercase for case-insensitive registry lookup."""
+        if v is not None:
+            return v.lower()
+        return v
+
     @model_validator(mode="after")
     def validate_rules_source(self) -> "AccountConfig":
-        """Validate that non-demo accounts have a rules source.
+        """Validate that non-demo accounts have exactly one rule source.
 
-        Prop firm and personal accounts must specify either:
-        - prop_firm: Name of a prop firm preset (e.g., "ftmo")
-        - rules_file: Path to a custom rules configuration file
+        Valid rule sources (pick one):
+          * Firm-bound: ``firm_id`` + ``product_id`` + ``phase`` (Epic 9+)
+          * Preset (legacy): ``prop_firm``
+          * Personal: ``rules_file``
+          * (Demo accounts need none.)
 
-        Demo accounts are exempt from this requirement.
+        The three sources are mutually exclusive to prevent ambiguity about
+        which rule set wins.
         """
-        if self.type != AccountType.DEMO:
-            if not self.prop_firm and not self.rules_file:
+        sources = []
+        if self.firm_id is not None or self.product_id is not None or self.phase is not None:
+            sources.append("firm")
+        if self.prop_firm is not None:
+            sources.append("preset")
+        if self.rules_file is not None:
+            sources.append("personal")
+
+        if len(sources) > 1:
+            raise ValueError(
+                f"Account '{self.id}' must specify exactly one rule source; "
+                f"got {sources}. Use firm_id+product_id+phase OR prop_firm OR rules_file."
+            )
+
+        if self.type != AccountType.DEMO and not sources:
+            raise ValueError(
+                f"Account '{self.id}' of type '{self.type.value}' must have a rule source: "
+                "firm_id+product_id+phase, prop_firm, or rules_file."
+            )
+
+        if self.type == AccountType.DEMO and sources:
+            raise ValueError(
+                f"Account '{self.id}' is type 'demo' but specifies rule sources {sources}; "
+                "demo accounts must have no rule source."
+            )
+
+        if "firm" in sources:
+            missing = [
+                f for f, v in
+                [("firm_id", self.firm_id), ("product_id", self.product_id), ("phase", self.phase)]
+                if not v
+            ]
+            if missing:
                 raise ValueError(
-                    f"Account '{self.id}' of type '{self.type.value}' must have "
-                    "either 'prop_firm' or 'rules_file' specified"
+                    f"Account '{self.id}' firm binding is incomplete: missing {missing}. "
+                    "firm_id, product_id, and phase are all required together."
                 )
+
+        if "firm" not in sources and self.rule_overrides:
+            raise ValueError(
+                f"Account '{self.id}' sets rule_overrides but is not firm-bound. "
+                "rule_overrides only apply when firm_id+product_id+phase are set."
+            )
+
         return self
 
     @model_validator(mode="after")

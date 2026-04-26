@@ -16,12 +16,15 @@ Example:
     'ftmo'
 """
 
+from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from ..accounts.models import AccountConfig
     from .base_rule import BaseRule
+
+AssignmentType = Literal["firm", "preset", "personal", "none"]
 
 
 @dataclass
@@ -33,77 +36,96 @@ class RuleAssignment:
     and loaded rules.
 
     Attributes:
-        assignment_type: How rules are assigned ("preset", "personal", "none").
-        preset_name: Name of preset if using prop firm preset.
-        rules_file: Path to custom rules file if using personal/custom rules.
+        assignment_type: How rules are assigned
+            ("firm", "preset", "personal", "none").
+        preset_name: Name of preset (assignment_type == "preset").
+        rules_file: Path to custom rules file (assignment_type == "personal").
+        firm_id: Firm registry id (assignment_type == "firm").
+        product_id: Firm product id (assignment_type == "firm").
+        phase: Firm phase id (assignment_type == "firm").
+        rule_overrides: Per-account overrides (assignment_type == "firm").
+            Merge + safety-guard happens in P0.16.
         rules: List of instantiated rule objects (populated after loading).
     """
 
-    assignment_type: Literal["preset", "personal", "none"]
+    assignment_type: AssignmentType
     preset_name: str | None = None
     rules_file: str | None = None
+    firm_id: str | None = None
+    product_id: str | None = None
+    phase: str | None = None
+    rule_overrides: dict[str, Any] = field(default_factory=dict)
     rules: list["BaseRule"] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Validate assignment configuration."""
-        # Validate preset_name is set for preset type
         if self.assignment_type == "preset" and not self.preset_name:
             raise ValueError(
                 "preset_name is required when assignment_type is 'preset'"
             )
 
-        # Validate rules_file is set for personal type
         if self.assignment_type == "personal" and not self.rules_file:
             raise ValueError(
                 "rules_file is required when assignment_type is 'personal'"
             )
 
+        if self.assignment_type == "firm":
+            missing = [
+                f for f, v in
+                [("firm_id", self.firm_id), ("product_id", self.product_id), ("phase", self.phase)]
+                if not v
+            ]
+            if missing:
+                raise ValueError(
+                    f"assignment_type 'firm' requires all of firm_id, product_id, phase; "
+                    f"missing {missing}"
+                )
+
     @classmethod
     def from_account_config(cls, account: "AccountConfig") -> "RuleAssignment":
         """Create RuleAssignment from account configuration.
 
-        Determines the assignment type based on account type and
-        available configuration fields.
-
-        Args:
-            account: Account configuration object.
-
-        Returns:
-            RuleAssignment with appropriate type and settings.
-
-        Note:
-            Uses AccountType enum for comparison (not string literals).
-            - PROP_FIRM with prop_firm → preset assignment
-            - PERSONAL with rules_file → personal assignment
-            - DEMO or no rules → no assignment
+        Resolution order (matches ``AccountConfig.validate_rules_source``):
+          1. ``firm_id`` set → firm assignment (Epic 9 path)
+          2. ``prop_firm`` set → preset assignment (legacy Epic 4 path)
+          3. ``rules_file`` set → personal assignment
+          4. Otherwise (demo or no source) → none
         """
-        # Import here to avoid circular import
         from ..accounts.models import AccountType
 
+        if account.firm_id and account.product_id and account.phase:
+            return cls(
+                assignment_type="firm",
+                firm_id=account.firm_id,
+                product_id=account.product_id,
+                phase=account.phase,
+                rule_overrides=deepcopy(account.rule_overrides),
+            )
         if account.type == AccountType.PROP_FIRM and account.prop_firm:
             return cls(
                 assignment_type="preset",
                 preset_name=account.prop_firm,
             )
-        elif account.type == AccountType.PERSONAL and account.rules_file:
+        if account.type == AccountType.PERSONAL and account.rules_file:
             return cls(
                 assignment_type="personal",
                 rules_file=account.rules_file,
             )
-        else:
-            # Demo, test, or no rules specified
-            return cls(assignment_type="none")
+        return cls(assignment_type="none")
 
     @property
     def source_description(self) -> str:
         """Human-readable description of rule source.
 
         Returns:
-            Source description (e.g., "preset:ftmo", "personal:my_rules.yaml", "none").
+            Source description (e.g., "firm:ftmo/challenge/evaluation",
+            "preset:ftmo", "personal:my_rules.yaml", "none").
         """
+        if self.assignment_type == "firm":
+            return f"firm:{self.firm_id}/{self.product_id}/{self.phase}"
         if self.assignment_type == "preset":
             return f"preset:{self.preset_name}"
-        elif self.assignment_type == "personal":
+        if self.assignment_type == "personal":
             return f"personal:{self.rules_file}"
         return "none"
 
@@ -127,8 +149,14 @@ class RuleAssignment:
 
     def __repr__(self) -> str:
         """Return string representation."""
+        if self.assignment_type == "firm":
+            return (
+                f"RuleAssignment(type='firm', firm='{self.firm_id}', "
+                f"product='{self.product_id}', phase='{self.phase}', "
+                f"overrides={len(self.rule_overrides)}, rules={self.rule_count})"
+            )
         if self.assignment_type == "preset":
             return f"RuleAssignment(type='preset', preset='{self.preset_name}', rules={self.rule_count})"
-        elif self.assignment_type == "personal":
+        if self.assignment_type == "personal":
             return f"RuleAssignment(type='personal', file='{self.rules_file}', rules={self.rule_count})"
         return "RuleAssignment(type='none')"

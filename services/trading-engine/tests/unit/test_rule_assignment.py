@@ -8,8 +8,7 @@ Tests cover:
 - RuleAssignmentService orchestration
 """
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -540,6 +539,10 @@ rules:
         account.type = AccountType.PROP_FIRM
         account.prop_firm = "invalid_preset"
         account.rules_file = None
+        account.firm_id = None
+        account.product_id = None
+        account.phase = None
+        account.rule_overrides = {}
 
         with pytest.raises(PresetNotFoundError):
             service.get_rules_for_account(account)
@@ -554,6 +557,10 @@ rules:
         account.type = AccountType.PERSONAL
         account.prop_firm = None
         account.rules_file = "nonexistent_rules.yaml"
+        account.firm_id = None
+        account.product_id = None
+        account.phase = None
+        account.rule_overrides = {}
 
         with pytest.raises(RulesFileNotFoundError):
             service.get_rules_for_account(account)
