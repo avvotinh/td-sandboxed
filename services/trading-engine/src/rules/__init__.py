@@ -67,7 +67,7 @@ from .preset_loader import PresetNotFoundError, RulePresetLoader
 from .types.consistency import ConsistencyRule
 from .types.drawdown import DailyLossLimitRule, MaxDrawdownRule
 from .types.position import MaxPositionSizeRule
-from .types.targets import MinTradingDaysRule, ProfitTargetRule
+from .types.targets import MinTradingDaysRule, ProfitTargetRule, WeeklyTargetRule
 from .violation import RuleViolation
 from .violation_db_writer import RuleViolationModel, ViolationDBWriter
 from .violation_service import ViolationService
@@ -78,13 +78,15 @@ __all__ = [
     "RuleAction",
     "RuleResult",
     "RuleList",
-    # Rule types (Story 4.2+; Epic 9 P0.7 added ConsistencyRule)
+    # Rule types (Story 4.2+; Epic 9 P0.7 added ConsistencyRule;
+    #             P0.8 added WeeklyTargetRule)
     "ConsistencyRule",
     "DailyLossLimitRule",
     "MaxDrawdownRule",
     "MaxPositionSizeRule",
     "ProfitTargetRule",
     "MinTradingDaysRule",
+    "WeeklyTargetRule",
     # Assignment
     "RuleAssignment",
     "RuleAssignmentService",

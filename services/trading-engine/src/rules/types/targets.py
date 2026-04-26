@@ -3,6 +3,8 @@
 This module contains informational rules that track progress toward goals:
 - ProfitTargetRule: Tracks profit target achievement (Story 4.5)
 - MinTradingDaysRule: Tracks minimum trading days requirement (Story 4.5)
+- WeeklyTargetRule: Tracks weekly profit target (Epic 9 P0.8 — The5ers
+  Bootstrap)
 
 Key differences from blocking rules (drawdown.py, position.py):
 - These rules NEVER return BLOCK - they are informational only
@@ -394,3 +396,103 @@ class MinTradingDaysRule:
             String like "MinTradingDaysRule(required_days=4)"
         """
         return f"MinTradingDaysRule(required_days={self.required_days})"
+
+
+class WeeklyTargetRule:
+    """Weekly profit target — informational tracker (Epic 9 P0.8).
+
+    Used by The5ers Bootstrap (default 1.25% per week) and any other
+    product that scores progress on a rolling Monday-anchored window.
+
+    Reads ``weekly_pnl_percent`` from context — the caller (a future
+    weekly profit tracker, mirroring :class:`DailyProfitHistory`) is
+    responsible for computing the rolling Mon-Sun value. The rule
+    itself is window-agnostic: anything you label "this week" works.
+
+    NEVER returns ``BLOCK``: the rule is purely informational so that
+    a trader can see "target met" without trading being interrupted.
+    """
+
+    rule_type: ClassVar[str] = "weekly_target"
+    priority: ClassVar[int] = 100  # informational
+
+    def __init__(
+        self,
+        threshold_percent: float = 1.25,
+        action: str = "notify",
+        **kwargs: Any,
+    ) -> None:
+        self.threshold_percent = float(threshold_percent)
+        self.action_type = action
+        if self.threshold_percent <= 0:
+            logger.warning(
+                "WeeklyTargetRule created with invalid threshold_percent=%.2f. "
+                "Threshold must be > 0.",
+                self.threshold_percent,
+            )
+
+    @property
+    def name(self) -> str:
+        return f"Weekly Target {self.threshold_percent}%"
+
+    @staticmethod
+    def _coerce(value: Any) -> float:
+        if value is None:
+            return 0.0
+        if isinstance(value, Decimal):
+            return float(value)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "WeeklyTargetRule: non-numeric weekly_pnl_percent=%r, "
+                "defaulting to 0.0",
+                value,
+            )
+            return 0.0
+
+    def validate(self, context: dict[str, Any]) -> RuleResult:
+        weekly_pnl_percent = self._coerce(context.get("weekly_pnl_percent", 0.0))
+
+        if weekly_pnl_percent >= self.threshold_percent:
+            logger.info(
+                "Weekly target REACHED: %.2f%% >= %.2f%% target",
+                weekly_pnl_percent, self.threshold_percent,
+            )
+            return RuleResult(
+                action=RuleAction.WARN,
+                message=(
+                    f"Weekly profit target met: {weekly_pnl_percent:.2f}% "
+                    f">= {self.threshold_percent}%"
+                ),
+                current_value=weekly_pnl_percent,
+                threshold_value=self.threshold_percent,
+                metadata={
+                    "rule_type": self.rule_type,
+                    "weekly_pnl_percent": weekly_pnl_percent,
+                    "target_met": True,
+                },
+            )
+
+        return RuleResult(
+            action=RuleAction.ALLOW,
+            current_value=weekly_pnl_percent,
+            threshold_value=self.threshold_percent,
+            metadata={
+                "rule_type": self.rule_type,
+                "weekly_pnl_percent": weekly_pnl_percent,
+                "target_met": False,
+            },
+        )
+
+    def get_current_value(self, context: dict[str, Any]) -> float:
+        return max(0.0, self._coerce(context.get("weekly_pnl_percent", 0.0)))
+
+    def get_threshold(self) -> float:
+        return self.threshold_percent
+
+    def get_warning_thresholds(self) -> list[float]:
+        return []
+
+    def __repr__(self) -> str:
+        return f"WeeklyTargetRule(threshold={self.threshold_percent}%)"

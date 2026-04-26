@@ -8,12 +8,14 @@ This module contains concrete rule implementations:
 - MinTradingDaysRule: Tracks minimum trading days requirement (Story 4.5)
 - ConsistencyRule: Blocks trades when single-day profit concentration exceeds
   the firm's consistency limit (Epic 9 P0.7 — FTMO 50%)
+- WeeklyTargetRule: Tracks weekly profit target (Epic 9 P0.8 — The5ers
+  Bootstrap, default 1.25%)
 """
 
 from .consistency import ConsistencyRule
 from .drawdown import DailyLossLimitRule, MaxDrawdownRule
 from .position import MaxPositionSizeRule
-from .targets import MinTradingDaysRule, ProfitTargetRule
+from .targets import MinTradingDaysRule, ProfitTargetRule, WeeklyTargetRule
 
 __all__ = [
     "ConsistencyRule",
@@ -22,4 +24,5 @@ __all__ = [
     "MaxPositionSizeRule",
     "ProfitTargetRule",
     "MinTradingDaysRule",
+    "WeeklyTargetRule",
 ]

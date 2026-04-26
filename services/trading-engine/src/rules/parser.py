@@ -156,6 +156,14 @@ class RuleParser:
         except ImportError:
             pass
 
+        try:
+            from .types.targets import WeeklyTargetRule
+
+            self._rule_types["weekly_target"] = WeeklyTargetRule
+            logger.debug("Loaded WeeklyTargetRule")
+        except ImportError:
+            pass
+
         # Log which rules are using placeholders
         placeholder_types = [
             k
@@ -188,7 +196,11 @@ class RuleParser:
             "max_position_size": 10,
             "profit_target": 100,
             "min_trading_days": 100,
+            "weekly_target": 100,
         }
+        # Without an entry here, a future import failure of `types/targets.py`
+        # or `types/consistency.py` would silently delete these rule types
+        # from RULE_TYPES — the placeholder dance keeps them resolvable.
 
         def make_placeholder(rule_type_name: str) -> type:
             """Create a placeholder rule class."""
@@ -237,9 +249,11 @@ class RuleParser:
         return {
             "daily_loss_limit": make_placeholder("daily_loss_limit"),
             "max_drawdown": make_placeholder("max_drawdown"),
+            "consistency": make_placeholder("consistency"),
             "max_position_size": make_placeholder("max_position_size"),
             "profit_target": make_placeholder("profit_target"),
             "min_trading_days": make_placeholder("min_trading_days"),
+            "weekly_target": make_placeholder("weekly_target"),
         }
 
     def parse_rules(self, yaml_content: dict[str, Any]) -> list["BaseRule"]:
