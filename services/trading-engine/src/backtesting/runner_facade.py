@@ -24,6 +24,7 @@ from nautilus_trader.model.objects import Currency, Money
 from nautilus_trader.test_kit.providers import TestInstrumentProvider
 
 from src.backtesting.bar_converter import dataframe_to_bars
+from src.backtesting.commission import commission_per_lot_to_fee_model
 from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
 from src.backtesting.prop_firm_preset import load_prop_firm_preset
 from src.backtesting.job_config import (
@@ -162,6 +163,14 @@ def run_backtest(
         )
     )
     try:
+        # Epic 9 P0.13: per-firm commission via PerContractFeeModel.
+        # ``commission_per_lot_to_fee_model`` returns None when the
+        # field is zero; Nautilus accepts ``fee_model=None`` and falls
+        # back to the no-fee default, so legacy callers keep their
+        # prior behaviour without conditional wrapping.
+        fee_model = commission_per_lot_to_fee_model(
+            job.venue.commission_per_lot_usd, currency
+        )
         runner.add_venue(
             venue=instrument.id.venue,
             oms_type=OmsType.NETTING,
@@ -170,6 +179,7 @@ def run_backtest(
                 Money(float(job.venue.starting_balance), currency)
             ],
             base_currency=currency,
+            fee_model=fee_model,
         )
         runner.add_instrument(instrument)
         runner.add_data(bars)

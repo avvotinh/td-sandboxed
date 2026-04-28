@@ -115,11 +115,20 @@ DataSpec = Annotated[
 
 
 class VenueSpec(_Frozen):
-    """Backtest venue + starting balance."""
+    """Backtest venue + starting balance.
+
+    ``commission_per_lot_usd`` (Epic 9 P0.13) wires a flat per-lot fee
+    into the simulated venue so backtest PnL matches live PnL after
+    commission. Defaults to ``0`` (no commission) for backward
+    compatibility; firm-bound jobs typically derive this from the
+    firm's :class:`CommissionProfile` via
+    ``src.backtesting.commission.resolve_commission_profile``.
+    """
 
     name: str = "SIM"
     starting_balance: Decimal = Field(..., gt=0)
     currency: str = "USD"
+    commission_per_lot_usd: Decimal = Field(default=Decimal("0"), ge=0)
 
 
 class PropFirmSpec(_Frozen):
