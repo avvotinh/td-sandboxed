@@ -12,6 +12,7 @@ This module provides the complete order lifecycle management:
 from src.orders.db_models import Base, TradeRecord
 from src.orders.execution_service import DuplicateOrderError, OrderExecutionService
 from src.orders.order import InternalOrder, OrderState
+from src.orders.order_gateway import OrderGateway
 from src.orders.position_tracker import Position, PositionTracker
 from src.orders.signal import Signal, SignalType
 from src.orders.trade import Trade
@@ -23,6 +24,8 @@ __all__ = [
     # Order
     "OrderState",
     "InternalOrder",
+    # Order gateway protocol (Epic 9 P0.12)
+    "OrderGateway",
     # Trade
     "Trade",
     # Position

@@ -4,6 +4,11 @@ This module provides bidirectional communication with mt5-bridge:
 - SUB socket receives tick data and order results from bridge PUB (port 5556)
 - PUB socket sends order commands to bridge SUB (port 5557)
 
+``ZmqAdapter`` is the canonical implementation of
+:class:`src.orders.order_gateway.OrderGateway` (Epic 9 P0.12). Callers
+that only need the gateway surface should depend on the protocol so a
+future futures broker can be swapped in without touching this module.
+
 CRITICAL: The receive_ticks() async generator MUST run in a background task
 for order results to work. See usage pattern in docstring.
 

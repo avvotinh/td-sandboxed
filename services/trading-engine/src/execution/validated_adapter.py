@@ -29,8 +29,8 @@ from typing import TYPE_CHECKING, Any
 
 from ..accounts.risk_registry import RiskStateRegistry
 from ..accounts.risk_state import RiskState
-from ..adapters.zmq_adapter import ZmqAdapter
 from ..adapters.zmq_models import Order, OrderResult
+from ..orders.order_gateway import OrderGateway
 from .exceptions import OrderBlockedError
 from .order_validator import OrderValidator
 
@@ -70,7 +70,7 @@ class ValidatedZmqAdapter:
 
     def __init__(
         self,
-        zmq_adapter: ZmqAdapter,
+        zmq_adapter: OrderGateway,
         order_validator: OrderValidator,
         risk_registry: RiskStateRegistry,
         pnl_registry: "PnLTrackerRegistry | None" = None,
@@ -78,12 +78,15 @@ class ValidatedZmqAdapter:
         """Initialize ValidatedZmqAdapter.
 
         Args:
-            zmq_adapter: ZmqAdapter instance for MT5 communication.
+            zmq_adapter: Any :class:`OrderGateway` (Epic 9 P0.12). The
+                production wiring passes ``ZmqAdapter`` and the parameter
+                name is preserved for compatibility; future futures
+                gateways implement the same protocol.
             order_validator: OrderValidator for pre-trade validation.
             risk_registry: RiskStateRegistry for fetching account state.
             pnl_registry: Optional PnLTrackerRegistry for position tracking.
         """
-        self._adapter = zmq_adapter
+        self._adapter: OrderGateway = zmq_adapter
         self._validator = order_validator
         self._risk_registry = risk_registry
         self._pnl_registry = pnl_registry
