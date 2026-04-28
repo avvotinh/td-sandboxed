@@ -1,0 +1,137 @@
+# The5ers firm profile (Epic 9 P0.11)
+#
+# Three products with distinct rule sets:
+#   - Bootstrap:    balance_based DD,  weekly_target rule (1.25%/week)
+#   - High Stakes:  equity_peak DD,    consistency rule (50%)
+#   - Hyper Growth: balance_based DD,  scaling policy (YAML-only, logic deferred)
+#
+# References:
+#   - https://the5ers.com/
+#   - docs/epic-9-context.md (architectural decisions, P0.11 scope)
+#
+# Thresholds reflect publicly documented The5ers terms; per-account
+# rule_overrides (P0.16) can siết chặt thêm if the desk needs it.
+
+firm_id: the5ers
+name: "The5ers"
+version: "2026.1"
+instrument_class: forex_cfd
+
+# The5ers uses UTC for the daily reset (matches the legacy preset).
+session:
+  timezone: "UTC"
+  reset_time: "00:00"
+  reset_anchor: midnight
+
+# Default commission per-lot. Backtest parity refinement lands in P0.13.
+commission:
+  per_lot_usd: 6.0
+
+products:
+  # Bootstrap — instant funding, weekly profit target, balance-based DD.
+  # Rolling 1.25% per Mon-Sun window evaluated as informational only.
+  bootstrap:
+    product_id: bootstrap
+    name: "Bootstrap"
+    drawdown_method: balance_based
+    rules:
+      - type: daily_loss_limit
+        threshold_percent: 5.0
+        reset_time: "00:00"
+        timezone: "UTC"
+        action: "block_trading"
+        warning_at: [70, 80, 90]
+      - type: max_drawdown
+        threshold_percent: 4.0
+        reference: "initial_balance"
+        method: "balance_based"
+        action: "block_trading"
+        warning_at: [50, 70, 85]
+      - type: max_position_size
+        max_lots: 50.0
+        scaling: "per_10k_balance"
+        warning_at: [70, 80, 90]
+      - type: weekly_target
+        threshold_percent: 1.25
+        action: "notify"
+    phases:
+      - phase_id: funded
+        name: "Bootstrap Funded"
+
+  # High Stakes — evaluation product with equity-peak drawdown calculation.
+  # Consistency rule active to prevent single-day concentration > 50%.
+  high_stakes:
+    product_id: high_stakes
+    name: "High Stakes"
+    drawdown_method: equity_peak
+    rules:
+      - type: daily_loss_limit
+        threshold_percent: 5.0
+        reset_time: "00:00"
+        timezone: "UTC"
+        action: "block_trading"
+        warning_at: [70, 80, 90]
+      - type: max_drawdown
+        threshold_percent: 4.0
+        reference: "initial_balance"
+        method: "equity_peak"
+        action: "block_trading"
+        warning_at: [50, 70, 85]
+      - type: max_position_size
+        max_lots: 100.0
+        scaling: "per_10k_balance"
+        warning_at: [70, 80, 90]
+      - type: consistency
+        block_at: 50.0
+        warn_at: [40, 45, 48]
+      - type: profit_target
+        threshold_percent: 8.0
+        action: "notify"
+    phases:
+      - phase_id: evaluation
+        name: "High Stakes — Evaluation"
+        allowed_transitions: [funded]
+      - phase_id: funded
+        name: "High Stakes — Funded"
+
+  # Hyper Growth — funded with scaling plan. Engine logic deferred (P0.11
+  # scope: YAML only). The scaling_policy block is opaque payload that
+  # downstream automation reads but the rule engine ignores for now.
+  hyper_growth:
+    product_id: hyper_growth
+    name: "Hyper Growth"
+    drawdown_method: balance_based
+    rules:
+      - type: daily_loss_limit
+        threshold_percent: 5.0
+        reset_time: "00:00"
+        timezone: "UTC"
+        action: "block_trading"
+        warning_at: [70, 80, 90]
+      - type: max_drawdown
+        threshold_percent: 5.0
+        reference: "initial_balance"
+        method: "balance_based"
+        action: "block_trading"
+        warning_at: [50, 70, 85]
+      - type: max_position_size
+        max_lots: 200.0
+        scaling: "per_10k_balance"
+        warning_at: [70, 80, 90]
+      - type: profit_target
+        threshold_percent: 10.0
+        action: "notify"
+    phases:
+      - phase_id: funded
+        name: "Hyper Growth — Funded"
+    scaling_policy:
+      policy_id: the5ers_hyper_growth
+      params:
+        # Step parameters opaque to engine; payout/scaling automation owns
+        # the interpretation. Documented here for traceability.
+        step_up_percent: 10.0
+        step_up_threshold_percent: 10.0
+        max_capital_multiplier: 4.0
+
+report_template:
+  template_id: the5ers_daily
