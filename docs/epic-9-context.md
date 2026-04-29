@@ -1,10 +1,11 @@
 # Epic 9: Multi-firm Foundation — Technical Context
 
 **Created:** 2026-04-19
-**Status:** Planning (pre-implementation)
+**Last updated:** 2026-04-30
+**Status:** In Progress — 14 of 15 active tasks done (P0.9 dropped); P0.16 next (final task)
 **Epic:** 9 of 9+
 **Stories:** 16 (P0.1 – P0.16, P0.9 dropped)
-**Predecessor:** Epic 8 (Strategies & Backtesting) — 8.8/8.9 still in flight
+**Predecessor:** Epic 8 (Strategies & Backtesting) — complete as of 2026-04-20
 
 ---
 
@@ -333,7 +334,7 @@ MVP chỉ implement `midnight`; field có sẵn cho futures.
 
 ## Implementation Notes (updated as stories ship)
 
-### P0.3 — Coexistence strategy (shipped 2026-04-21)
+### P0.3 — Coexistence strategy (shipped 2026-04-26)
 
 Original plan said "+ Alembic" migration. Reality on landing:
 
@@ -362,7 +363,7 @@ Original plan said "+ Alembic" migration. Reality on landing:
 3. Drop the legacy `prop_firms` reference table + `accounts.prop_firm_id`
    FK after (2) ships. Own story.
 
-### P0.4 — FTMO → PropFirm rename (shipped 2026-04-21)
+### P0.4 — FTMO → PropFirm rename (shipped 2026-04-26)
 
 Hard cutover per Open Question 1 default.
 
@@ -404,7 +405,162 @@ a financial-integrity audit table and required `database-reviewer` +
 2192 unit tests green; 44 backtest integration tests green; unrelated
 TimescaleDB-dependent integration tests require live infra.
 
-### P0.2 — Rule overrides validation deferred to P0.16 (shipped 2026-04-21)
+### P0.11 — Firm YAML profiles (shipped 2026-04-28)
+
+Migrated the FTMO preset and wrote the The5ers firm profile as `configs/firms/*.yaml`,
+loading through `FirmRegistry`. Two design points resolved on landing:
+
+**FTMO structure — single product, three phases:**
+The initial plan considered a multi-product FTMO layout. The final design follows
+the structure validated by the existing unit fixture in
+`tests/unit/test_firm_registry.py`: one product (`challenge`) with three sequential
+phases — `evaluation` (profit_target 10%), `verification` (profit_target 5%),
+`funded` (informational, no profit target enforced). Six rules are declared at
+product level: daily_loss, max_drawdown, consistency (50% block / warn ladder
+40/45/48), position_size, trading_days, and weekly_drawdown.
+
+**The5ers — three distinct products:**
+- `bootstrap` — `balance_based` drawdown calculation + `weekly_target` 1.25% rule.
+- `high_stakes` — `equity_peak` drawdown calculation + `consistency` rule at 50%
+  block (same threshold as FTMO, different DD method).
+- `hyper_growth` — `equity_peak` DD + opaque `scaling_policy` block declared in
+  YAML; engine logic deferred per epic scope (Hyper Growth engine is Out of Scope).
+
+**Integration tests load real YAMLs:**
+`tests/integration/test_firm_yaml_configs.py` (30 tests) loads both files through
+`FirmRegistry` on every CI run. A cross-check asserts that
+`max_drawdown.method` in the rule config matches the product's declared
+`drawdown_method` field — this catches drift between config and schema before it
+reaches runtime.
+
+**Legacy preset kept for backward compat:**
+`services/trading-engine/src/rules/presets/ftmo.yaml` is not deleted. Nothing
+that imports `prop_firm_preset` has been updated to use `FirmRegistry` yet.
+Retirement of that file (and the `prop_firm` field on `AccountConfig`) is a
+follow-up task queued post-Epic 9, as noted in the P0.3 follow-up debt list.
+
+### P0.12 — OrderGateway Protocol (shipped 2026-04-28)
+
+**Protocol shape:** 6 members defined under `src/orders/order_gateway.py` and
+exported from `src/orders/__init__.py`: `is_connected` (property),
+`connect`, `disconnect`, `send_order`, `send_order_and_wait`,
+`get_pending_order_count`. The Protocol uses `@runtime_checkable`; the class
+docstring notes that runtime isinstance checks test method presence only, not
+signatures — full enforcement requires mypy.
+
+**Structural satisfaction:** `ZmqAdapter` satisfies the Protocol structurally
+with no behavioral change; its module docstring was augmented to mark it as
+the canonical `OrderGateway` implementation.
+
+**Retrofit:** `ValidatedZmqAdapter.__init__` parameter type changed from
+`ZmqAdapter` to `OrderGateway`. The parameter name `zmq_adapter` is
+deliberately kept for keyword-arg call-site compatibility; it will be renamed
+to `gateway` when the first non-MT5 gateway implementation lands.
+
+**Tests:** 7 unit tests in `tests/unit/test_order_gateway.py` cover isinstance
+check, method presence, stub substitutability, lifecycle, send_order routing,
+partial-impl rejection, and end-to-end through `ValidatedZmqAdapter`.
+
+**Follow-up items (not actionable in this PR):**
+1. Rename `zmq_adapter` parameter → `gateway` when the first alternative
+   gateway (e.g., Rithmic) is implemented.
+2. Add mypy to dev dependencies for full Protocol signature enforcement at
+   type-check time.
+
+### P0.13 — CommissionProfile per-firm + backtest venue config (shipped 2026-04-28)
+
+Three converters in `src/backtesting/commission.py` address different call sites:
+
+- `resolve_commission_profile(firm, product_id)` — picks `product.commission_overrides` over
+  `firm.commission`; use this when you have a loaded `FirmProfile`.
+- `commission_profile_to_fee_model(profile, currency)` — wraps `CommissionProfile.per_lot_usd`
+  in a Nautilus `PerContractFeeModel`; use when you have a `CommissionProfile` struct.
+- `commission_per_lot_to_fee_model(per_lot_usd, currency)` — bare-value escape hatch for
+  callers that already extracted the USD amount.
+
+`VenueSpec` in `job_config.py` gains `commission_per_lot_usd: Decimal = Decimal("0")` (with
+`ge=0` validator). The zero default keeps all existing callers unchanged. `run_backtest` in
+`runner_facade.py` constructs a `PerContractFeeModel` from this field and passes it to
+`add_venue(fee_model=...)` — `fee_model=None` is Nautilus-safe so no conditional wrapping
+is needed.
+
+**USD-only assertion is a deliberate guardrail, not a limitation.** Currency is asserted
+USD-only at the boundary (loud failure for EUR or other currencies). This guard will be
+lifted when `CommissionProfile` gains an explicit `currency_code` field.
+
+**Future work queued:** `spread_pips` and swap fields are not yet wired into the backtest
+venue. This is scope for P0.14 E2E parity — the E2E test will surface which venue params
+remain zero and whether that is acceptable for MVP.
+
+18 tests in `tests/unit/test_backtest_commission.py`: resolver branches (firm-level /
+product-override / none / unknown product), converter paths (zero / positive / negative),
+non-USD currency rejection, `VenueSpec` validation, runner_facade plumbing, and a
+real-YAML integration test loading `configs/firms/ftmo.yaml` end-to-end asserting the
+documented 7 USD/lot.
+
+### P0.14 — Multi-firm E2E test (shipped 2026-04-28)
+
+`tests/integration/test_multi_firm_e2e.py` (22 tests) exercises the full composition
+path: one `FirmRegistry` loads `configs/firms/{ftmo,the5ers}.yaml`, one
+`RuleAssignmentService` resolves rule sets for 4 firm-bound `AccountConfig` instances
+(FTMO challenge, The5ers bootstrap / high_stakes / hyper_growth), then instantiates 4
+separate `RuleEngine` instances, each holding only the rules declared for its product.
+
+**Engine isolation guarantee tested:** all 4 engines receive the same 5% drawdown
+context and produce 4 different verdicts based on per-product thresholds — confirming
+that shared input does not leak across engine boundaries. 6% daily loss independently
+blocks each engine. The consistency and weekly_target signature rules are verified
+per-product (consistency on FTMO + High Stakes; weekly_target only on Bootstrap; Hyper
+Growth has neither).
+
+**Phase chains covered:** FTMO Challenge (evaluation → verification → funded) and all 3
+The5ers products (bootstrap, high_stakes, hyper_growth) are exercised in a dedicated
+`TestThe5ersPhaseStructures` class.
+
+**Design checkpoint:** the multi-firm abstraction (registry → assignment → per-account
+engine) is now proved by test. No further structural changes to this composition path
+are expected within Epic 9.
+
+### P0.15 — Consistency rule latency SLO test (shipped 2026-04-30)
+
+`tests/integration/test_consistency_rule_latency.py` (4 tests) asserts
+`ConsistencyRule.validate()` p99 < 10ms across the three semantic verdicts
+(ALLOW / WARN / BLOCK) over a 60-day `daily_profits_history` fixture, plus a
+365-day stress case that proves headroom against any future increase to
+`DailyProfitHistory.lookback_days`.
+
+**Methodology:** 200 warm-up + 5,000 timed iterations per case using
+`time.perf_counter_ns`. The cyclic GC is suppressed (`gc.disable()` /
+`gc.enable()`) across the timing loop to prevent a stochastic GC pause from
+flipping the assertion on a loaded CI runner — same approach
+`pytest-benchmark` uses internally. Nearest-rank percentile, fixed-size
+sample.
+
+**Measured baseline (developer hardware, 2026-04-30):**
+| Verdict | p50 | p95 | p99 | max |
+|---|---|---|---|---|
+| ALLOW (60d) | 0.0008ms | 0.0008ms | 0.0022ms | 0.0098ms |
+| WARN (60d)  | 0.0323ms | 0.0386ms | 0.0636ms | 0.5185ms |
+| BLOCK (60d) | 0.0305ms | 0.0355ms | 0.0728ms | 0.5008ms |
+| BLOCK (365d) | 0.0709ms | 0.0908ms | 0.1942ms | 0.6808ms |
+
+Worst observed p99 is **51× under the SLO**, so the 10ms threshold acts as a
+regression alarm rather than a tight microbenchmark — CI runners 50× slower
+than the dev machine still pass with margin.
+
+**Scope decision:** test exercises `rule.validate()` directly with a
+hand-built context dict (not through `RuleContextBuilder` /
+`ValidatedZmqAdapter`). The live wiring follow-up from P0.7 (inject
+`current_day_pnl` + `daily_profits_history` keys) is still open and tracked
+separately; this test does not block on it.
+
+**Note on the rule's positive-sum loop:** `_compute_ratio_percent`
+re-iterates `daily_profits_history.values()` each call — it does not consult
+`DailyProfitHistory._positive_sum` precomputed cache. Even at 365 entries
+the iteration cost is sub-millisecond, so the O(N)→O(1) refactor is not
+worth doing on these numbers. Documented for future readers; no action.
+
+### P0.2 — Rule overrides validation deferred to P0.16 (shipped 2026-04-26)
 
 `FirmRegistry` stores `rule_overrides` dicts as-is (no key/value validation
 against known rule types). A typo like `profit_taret` would silently be

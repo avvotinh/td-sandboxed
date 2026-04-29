@@ -130,3 +130,27 @@ development_status:
   8-8-walk-forward-parameter-sweep-cli: done
   8-9-documentation: done
   epic-8-retrospective: optional
+
+  # Epic 9: Multi-firm Foundation (16 tasks P0.1–P0.16; P0.9 dropped)
+  # Commit → task mapping: story 9.X commit = P0.X task
+  epic-9: in-progress
+  # done — shipped 2026-04-26
+  9-1-firm-profile-dataclasses: done          # e732842 2026-04-26 FirmProfile/AccountProduct/AccountPhase frozen dataclasses
+  9-2-firm-registry-yaml-loader: done         # ca7895a 2026-04-26 FirmRegistry load from configs/firms/*.yaml
+  9-3-account-model-firm-binding: done        # 8f4bb35 2026-04-26 Account firm_id+product_id+phase coexistence + migration 009
+  9-4-ftmo-to-propfirm-rename: done           # f3357a5 2026-04-26 FTMO* → PropFirm* hard cutover + migration 010
+  # done — shipped 2026-04-27
+  9-5-timezone-aware-daily-reset: done        # 467a886 2026-04-27 Timezone-aware daily reset (fixes Review 1 C1)
+  9-6-dd-calculation-variant: done            # 7e1b66c 2026-04-27 MaxDrawdownRule equity_peak vs balance_based
+  9-7-consistency-rule: done                  # af142ba 2026-04-27 ConsistencyRule + DailyProfitHistory + backtest parity
+  9-8-weekly-target-rule: done               # d980183 2026-04-27 WeeklyTargetRule (The5ers Bootstrap)
+  9-9-min-holding-duration: dropped          # P0.9 dropped — no MVP product requires it
+  9-10-accounts-promote-cli: done            # faa5cac 2026-04-27 accounts promote CLI + audit entry
+  # backlog — not yet started
+  9-11-migrate-firm-yaml-profiles: done      # 0ca52f7 2026-04-28 configs/firms/ftmo.yaml + the5ers.yaml (3 products) + 30 integration tests
+  9-12-order-gateway-protocol: done          # a13f936 2026-04-28 OrderGateway Protocol (6 members) + ZmqAdapter + ValidatedZmqAdapter retrofit
+  9-13-commission-profile-per-firm: done      # 35d6bcf 2026-04-28 CommissionProfile per-firm + backtest venue config
+  9-14-e2e-ftmo-the5ers-test: done           # 3468dda 2026-04-28 E2E test FTMO + 3 The5ers products in one engine (22 tests)
+  9-15-consistency-rule-latency-test: done   # P0.15 — integration test consistency rule latency < 10ms (4 tests, worst p99 0.19ms @ 365 days)
+  9-16-rule-overrides-merge-guard: backlog   # P0.16 — per-account rule_overrides merge + safety guard (no loosening)
+  epic-9-retrospective: optional
