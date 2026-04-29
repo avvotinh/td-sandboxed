@@ -116,9 +116,10 @@ class _ReportTemplateSchema(_StrictModel):
 class _PhaseSchema(_StrictModel):
     phase_id: str
     name: str
-    # TODO(P0.16): rule_overrides keys are not validated against known rule
-    # types here. P0.16 adds the merge-and-safety-guard layer that rejects
-    # unknown rule names (and loosened thresholds) at account-binding time.
+    # rule_overrides keys are validated against the resolved product
+    # baseline at account-binding time by ``rules.override_merger``.
+    # Storing as raw dict here keeps the YAML schema layer simple and
+    # delegates the cross-rule semantic check to merge time.
     rule_overrides: dict[str, Any] = Field(default_factory=dict)
     allowed_transitions: list[str] = Field(default_factory=list)
 
@@ -303,7 +304,11 @@ class FirmRegistry:
         )
 
     def _schema_to_product(self, schema: _ProductSchema) -> AccountProduct:
-        rules = self._parser.parse_rules({"rules": list(schema.rules)})
+        # Keep the raw spec dicts aligned with the instantiated rules so the
+        # P0.16 override merger can operate on the YAML-shaped dicts and
+        # re-parse the merged result, instead of reaching into rule internals.
+        rule_specs = tuple(dict(spec) for spec in schema.rules)
+        rules = self._parser.parse_rules({"rules": list(rule_specs)})
         phases = tuple(
             AccountPhase(
                 phase_id=p.phase_id,
@@ -318,6 +323,7 @@ class FirmRegistry:
             name=schema.name,
             rules=tuple(rules),
             phases=phases,
+            rule_specs=rule_specs,
             drawdown_method=schema.drawdown_method,
             commission_overrides=_commission(schema.commission_overrides),
             symbol_overrides=_symbol_policy(schema.symbol_overrides),

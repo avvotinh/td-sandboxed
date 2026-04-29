@@ -163,12 +163,20 @@ class ReportTemplate:
 
 @dataclass(frozen=True)
 class AccountProduct:
-    """A product offered by a firm (e.g., FTMO Challenge, The5ers Bootstrap)."""
+    """A product offered by a firm (e.g., FTMO Challenge, The5ers Bootstrap).
+
+    ``rules`` carries the instantiated baseline used directly when an account
+    has no overrides. ``rule_specs`` retains the parser-shaped dicts behind
+    those rules so per-account / per-phase overrides can be merged at the
+    spec level and re-parsed (see ``rules/override_merger.py``). The two are
+    aligned by index.
+    """
 
     product_id: str
     name: str
     rules: Sequence[BaseRule]
     phases: Sequence[AccountPhase]
+    rule_specs: Sequence[Mapping[str, Any]] = field(default_factory=tuple)
     drawdown_method: DrawdownMethod = DrawdownMethod.BALANCE_BASED
     commission_overrides: CommissionProfile | None = None
     symbol_overrides: SymbolPolicy | None = None
@@ -190,6 +198,17 @@ class AccountProduct:
 
         object.__setattr__(self, "rules", tuple(self.rules))
         object.__setattr__(self, "phases", tuple(self.phases))
+        # rule_specs is optional for back-compat with hand-built test products;
+        # FirmRegistry always populates it. When present, freeze each entry so
+        # the override merger cannot accidentally mutate stored baselines.
+        if self.rule_specs:
+            object.__setattr__(
+                self,
+                "rule_specs",
+                tuple(_freeze_mapping(spec) for spec in self.rule_specs),
+            )
+        else:
+            object.__setattr__(self, "rule_specs", ())
 
         phase_ids = [p.phase_id for p in self.phases]
         if len(phase_ids) != len(set(phase_ids)):

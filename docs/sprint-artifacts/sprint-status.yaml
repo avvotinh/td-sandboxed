@@ -152,5 +152,5 @@ development_status:
   9-13-commission-profile-per-firm: done      # 35d6bcf 2026-04-28 CommissionProfile per-firm + backtest venue config
   9-14-e2e-ftmo-the5ers-test: done           # 3468dda 2026-04-28 E2E test FTMO + 3 The5ers products in one engine (22 tests)
   9-15-consistency-rule-latency-test: done   # P0.15 — integration test consistency rule latency < 10ms (4 tests, worst p99 0.19ms @ 365 days)
-  9-16-rule-overrides-merge-guard: backlog   # P0.16 — per-account rule_overrides merge + safety guard (no loosening)
+  9-16-rule-overrides-merge-guard: done      # P0.16 — per-account rule_overrides merge + safety guard (39 tests; product → phase → account; no loosening)
   epic-9-retrospective: optional

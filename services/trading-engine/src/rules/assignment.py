@@ -44,7 +44,9 @@ class RuleAssignment:
         product_id: Firm product id (assignment_type == "firm").
         phase: Firm phase id (assignment_type == "firm").
         rule_overrides: Per-account overrides (assignment_type == "firm").
-            Merge + safety-guard happens in P0.16.
+            Merged against product + phase baseline by
+            :func:`rules.override_merger.merge_rule_overrides`; account
+            overrides may only tighten guarded block thresholds.
         rules: List of instantiated rule objects (populated after loading).
     """
 

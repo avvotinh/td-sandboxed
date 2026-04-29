@@ -101,7 +101,9 @@ class AccountConfig(BaseModel):
         firm_id: FirmRegistry firm id (Epic 9)
         product_id: FirmRegistry product id (Epic 9)
         phase: Product phase id (Epic 9)
-        rule_overrides: Per-account rule overrides (validated in P0.16)
+        rule_overrides: Per-account rule overrides; merged + safety-guarded
+            at rule-assignment time by ``rules.override_merger`` (Epic 9 P0.16).
+            Account overrides may only tighten guarded block thresholds.
         prop_firm: Legacy prop firm preset name (Epic 4)
         rules_file: Path to custom rules file
         mt5: MT5 connection configuration
@@ -117,11 +119,13 @@ class AccountConfig(BaseModel):
     firm_id: Optional[str] = Field(default=None, description="FirmRegistry firm id")
     product_id: Optional[str] = Field(default=None, description="FirmRegistry product id")
     phase: Optional[str] = Field(default=None, description="FirmRegistry phase id")
-    # TODO(P0.16): rule_overrides keys/values validated against known rule
-    # types and safety guard (no loosening) applied at bind time.
     rule_overrides: dict[str, Any] = Field(
         default_factory=dict,
-        description="Per-account rule overrides (merged against product defaults in P0.16)",
+        description=(
+            "Per-account rule overrides keyed by rule_type. Merged against "
+            "the product + phase baseline at rule-assignment time; account "
+            "overrides may only tighten guarded block thresholds."
+        ),
     )
     prop_firm: Optional[str] = Field(default=None, description="Legacy prop firm preset name")
     rules_file: Optional[str] = Field(default=None, description="Custom rules file path")

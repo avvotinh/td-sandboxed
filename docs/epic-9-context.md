@@ -2,7 +2,7 @@
 
 **Created:** 2026-04-19
 **Last updated:** 2026-04-30
-**Status:** In Progress — 14 of 15 active tasks done (P0.9 dropped); P0.16 next (final task)
+**Status:** **Done** — 15 of 15 active tasks shipped (P0.9 dropped). Epic 9 closed.
 **Epic:** 9 of 9+
 **Stories:** 16 (P0.1 – P0.16, P0.9 dropped)
 **Predecessor:** Epic 8 (Strategies & Backtesting) — complete as of 2026-04-20
@@ -559,6 +559,70 @@ re-iterates `daily_profits_history.values()` each call — it does not consult
 `DailyProfitHistory._positive_sum` precomputed cache. Even at 365 entries
 the iteration cost is sub-millisecond, so the O(N)→O(1) refactor is not
 worth doing on these numbers. Documented for future readers; no action.
+
+### P0.16 — Per-account rule_overrides merge + safety guard (shipped 2026-04-30)
+
+Closes Epic 9. New module `src/rules/override_merger.py` resolves the final
+rule set for a firm-bound account by layering three sources::
+
+    product baseline → phase overrides → account overrides
+
+**Phase layer is firm-controlled and trusted** — phases legitimately relax
+informational rules (FTMO funded phase removes the profit target). **Account
+layer is ops-controlled and guarded**: tightening allowed, loosening
+rejected at rule-assignment time so a misconfigured account never starts.
+
+`_TIGHTNESS_GUARDS` registry declares which fields on which rule types
+carry block thresholds and which direction means "tighter":
+
+| Rule type | Guarded field | Direction |
+|---|---|---|
+| `daily_loss_limit` | `threshold_percent` | lower is tighter |
+| `max_drawdown` | `threshold_percent` | lower is tighter |
+| `max_position_size` | `max_lots` | lower is tighter |
+| `consistency` | `block_at` | lower is tighter |
+
+Informational rules (`profit_target`, `min_trading_days`, `weekly_target`)
+have no guarded fields — they are advisory and may be set freely at either
+layer. Warn ladders (`warning_at`, `warn_at`) are intentionally unguarded;
+the operator may tune them independently of the block threshold.
+
+**Wired through `RuleAssignmentService`** by replacing the firm-binding
+branch with an unconditional merge → re-parse round trip. The unconditional
+merge is deliberate — it gives every account fresh rule instances, so any
+future stateful field on a `BaseRule` subclass cannot leak across accounts
+via the cached `product.rules` tuple.
+
+**`AccountProduct` gained a `rule_specs` field** — the parser-shaped dicts
+behind the instantiated baseline rules. The merger operates on these specs
+and the merged result re-feeds `RuleParser.parse_rules`, avoiding any need
+to reach into rule internals.
+
+**Typo guards:** an override that names an unknown `rule_type` or sets a
+field absent from the baseline rule spec raises `RuleOverrideError` with
+the available alternatives. Account-id is included in the message when the
+caller passes it, so misconfigured accounts are identifiable in logs.
+
+**NaN guard:** `float('nan')` compares False against everything and would
+silently bypass the `>` / `<` tightness check. The guard rejects NaN before
+the comparison; `+inf` is allowed through to the comparison and correctly
+flagged as loosening.
+
+**Audit visibility unchanged:** rules are instantiated with the merged
+threshold, so `RuleResult.metadata` already records the effective value
+when the rule fires. No parallel logging pipe needed.
+
+**Tests:** 30 unit tests in `tests/unit/test_override_merger.py` cover the
+merge contract in isolation (no overrides, phase-only, account-only,
+stacked, typo guards, NaN guard, malformed baseline). 9 integration tests
+in `tests/integration/test_rule_overrides_e2e.py` exercise the full path
+through `FirmRegistry → RuleAssignmentService` against the shipped
+`configs/firms/*.yaml`. One E2E test
+(`test_tightening_block_only_without_warn_update_surfaces_rule_error`)
+documents that the merger does NOT inspect cross-field semantic
+constraints (warn < block) — that's the rule's own __init__ contract, and
+the parser surfaces the conflict loudly at merge time so a misconfiguration
+cannot reach runtime.
 
 ### P0.2 — Rule overrides validation deferred to P0.16 (shipped 2026-04-26)
 

@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 from .assignment import RuleAssignment
 from .custom_loader import CustomRuleLoader
+from .override_merger import merge_rule_overrides
+from .parser import RuleParser
 from .preset_loader import RulePresetLoader
 
 if TYPE_CHECKING:
@@ -46,6 +48,7 @@ class RuleAssignmentService:
         preset_loader: RulePresetLoader | None = None,
         custom_loader: CustomRuleLoader | None = None,
         firm_registry: "FirmRegistry | None" = None,
+        rule_parser: RuleParser | None = None,
     ):
         """Initialize rule assignment service.
 
@@ -55,10 +58,14 @@ class RuleAssignmentService:
             firm_registry: Optional firm registry for ``assignment_type=="firm"``
                 accounts. If an account is firm-bound but this is ``None``,
                 :meth:`get_rules_for_account` raises :class:`ValueError`.
+            rule_parser: Optional rule parser used to re-instantiate the
+                merged rule specs when phase or account overrides are
+                present (creates default if None).
         """
         self._preset_loader = preset_loader or RulePresetLoader()
         self._custom_loader = custom_loader or CustomRuleLoader()
         self._firm_registry = firm_registry
+        self._rule_parser = rule_parser or RuleParser()
 
     @property
     def preset_loader(self) -> RulePresetLoader:
@@ -104,13 +111,28 @@ class RuleAssignmentService:
                     f"({assignment.source_description}) but no FirmRegistry "
                     "is configured on this RuleAssignmentService."
                 )
-            _firm, product, _phase = self._firm_registry.resolve(
+            _firm, product, phase = self._firm_registry.resolve(
                 assignment.firm_id, assignment.product_id, assignment.phase
             )
-            # TODO(P0.16): merge product.rules with phase.rule_overrides and
-            # assignment.rule_overrides (with safety guard: no loosening of
-            # block thresholds). For now, return the product's baseline rules.
-            rules = list(product.rules)
+            # Always run the merger, even when both override layers are empty.
+            # Re-parsing from rule_specs gives every account its own fresh rule
+            # instances, so any future stateful field on a BaseRule subclass
+            # cannot leak across accounts via the cached product.rules tuple.
+            merged_specs = merge_rule_overrides(
+                product.rule_specs,
+                phase.rule_overrides,
+                assignment.rule_overrides,
+                account_id=account.id,
+            )
+            rules = self._rule_parser.parse_rules({"rules": merged_specs})
+            if phase.rule_overrides or assignment.rule_overrides:
+                logger.info(
+                    "Account '%s' rule set rebuilt with overrides "
+                    "(phase=%d types, account=%d types)",
+                    account.id,
+                    len(phase.rule_overrides),
+                    len(assignment.rule_overrides),
+                )
             logger.info(
                 "Assigned %d rules from %s to account '%s'",
                 len(rules),
