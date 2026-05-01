@@ -283,10 +283,8 @@ class DailySnapshotService:
         )
 
         if self._audit_service and success_count > 0:
-            from ..rules.audit_logger import audit_task_done_callback
-
-            task = asyncio.create_task(
-                self._audit_service.log_system_event(
+            try:
+                await self._audit_service.log_system_event(
                     event_subtype="daily_snapshot",
                     message=(
                         f"Daily snapshots taken: {success_count}/{len(account_ids)} "
@@ -299,10 +297,11 @@ class DailySnapshotService:
                         "success_count": success_count,
                         "total_accounts": len(account_ids),
                     },
-                ),
-                name="audit_daily_snapshot",
-            )
-            task.add_done_callback(audit_task_done_callback)
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to enqueue daily_snapshot audit entry", exc_info=True
+                )
 
     async def _collect_snapshot_data(
         self,

@@ -178,7 +178,7 @@ class OrderExecutionService:
             )
 
             # Handle result
-            self._handle_result(order, result)
+            await self._handle_result(order, result)
 
         except asyncio.TimeoutError:
             order.transition_to(OrderState.ERROR)
@@ -267,7 +267,7 @@ class OrderExecutionService:
             signal_type=signal.signal_type,
         )
 
-    def _handle_result(self, order: InternalOrder, result: OrderResult) -> None:
+    async def _handle_result(self, order: InternalOrder, result: OrderResult) -> None:
         """Handle order execution result.
 
         CRITICAL: Handles position updates and trade recording:
@@ -290,9 +290,9 @@ class OrderExecutionService:
 
             # CRITICAL: Handle position updates based on signal type
             if order.is_close_order:
-                self._handle_close_fill(order)
+                await self._handle_close_fill(order)
             else:
-                self._handle_entry_fill(order)
+                await self._handle_entry_fill(order)
 
             logger.info(
                 "Order FILLED: %s %s %s %.2f @ %.4f (slippage=%.4f)",
@@ -314,7 +314,7 @@ class OrderExecutionService:
                 result.error,
             )
 
-    def _handle_entry_fill(self, order: InternalOrder) -> None:
+    async def _handle_entry_fill(self, order: InternalOrder) -> None:
         """Handle entry order fill (BUY/SELL).
 
         Opens a new position and creates an open trade record.
@@ -358,22 +358,22 @@ class OrderExecutionService:
                 trade.trade_id[:8],
             )
 
-        # Fire-and-forget audit log (AFTER trade write to ensure FK ordering)
+        # Synchronous audit row — double-entry discipline: audit MUST hit DB
+        # before the caller continues (see .claude/rules/database/audit.md).
+        # If the audit row cannot be persisted, propagate so the order goes
+        # to ERROR; we cannot acknowledge a state mutation that has no audit
+        # trail.
         if self._audit_service:
-            audit_task = asyncio.create_task(
-                self._audit_service.log_trade_executed(
-                    account_id=order.account_id,
-                    trade_id=trade.trade_id,
-                    symbol=trade.symbol,
-                    side=order.action.value,
-                    quantity=trade.quantity,
-                    entry_price=trade.entry_price,
-                    strategy_name=signal.strategy_name if signal else "unknown",
-                    order_id=order.order_id,
-                ),
-                name=f"audit_trade_{trade.trade_id[:8]}",
+            await self._audit_service.log_trade_executed_sync(
+                account_id=order.account_id,
+                trade_id=trade.trade_id,
+                symbol=trade.symbol,
+                side=order.action.value,
+                quantity=trade.quantity,
+                entry_price=trade.entry_price,
+                strategy_name=signal.strategy_name if signal else "unknown",
+                order_id=order.order_id,
             )
-            audit_task.add_done_callback(audit_task_done_callback)
 
         logger.debug(
             "Trade opened: %s %s @ %.4f",
@@ -382,7 +382,7 @@ class OrderExecutionService:
             trade.entry_price,
         )
 
-    def _handle_close_fill(self, order: InternalOrder) -> None:
+    async def _handle_close_fill(self, order: InternalOrder) -> None:
         """Handle close order fill.
 
         Closes the position and updates the existing trade with exit details and PnL.
@@ -461,21 +461,17 @@ class OrderExecutionService:
             )
             self._trades.append(trade)
 
-        # Fire-and-forget audit log for position close
+        # Synchronous audit row — see _handle_entry_fill for rationale.
         if self._audit_service:
-            audit_task = asyncio.create_task(
-                self._audit_service.log_position_closed(
-                    account_id=order.account_id,
-                    trade_id=trade.trade_id,
-                    symbol=order.symbol,
-                    side=closed_position.side.value,
-                    exit_price=exit_price,
-                    pnl_dollars=pnl_dollars,
-                    order_id=order.order_id,
-                ),
-                name=f"audit_close_{trade.trade_id[:8]}",
+            await self._audit_service.log_position_closed_sync(
+                account_id=order.account_id,
+                trade_id=trade.trade_id,
+                symbol=order.symbol,
+                side=closed_position.side.value,
+                exit_price=exit_price,
+                pnl_dollars=pnl_dollars,
+                order_id=order.order_id,
             )
-            audit_task.add_done_callback(audit_task_done_callback)
 
         logger.info(
             "Position CLOSED: %s %s PnL: $%.2f (%.2f%%)",

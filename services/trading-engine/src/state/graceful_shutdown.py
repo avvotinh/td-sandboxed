@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..accounts.account_manager import AccountManager
     from ..adapters.zmq_adapter import ZmqAdapter
+    from ..audit.audit_service import AuditService
     from .cold_storage_service import ColdStorageService
     from .crash_recovery import CrashRecoveryManager
     from .redis_state import RedisStateManager
@@ -93,6 +94,7 @@ class GracefulShutdown:
     """
 
     PENDING_ORDER_TIMEOUT_SECONDS = 30
+    AUDIT_DRAIN_TIMEOUT_SECONDS = 10
 
     def __init__(
         self,
@@ -102,6 +104,7 @@ class GracefulShutdown:
         zmq_adapter: ZmqAdapter | None = None,
         crash_recovery: CrashRecoveryManager | None = None,
         cold_storage_service: ColdStorageService | None = None,
+        audit_service: AuditService | None = None,
     ) -> None:
         """Initialize GracefulShutdown.
 
@@ -112,6 +115,9 @@ class GracefulShutdown:
             zmq_adapter: ZMQ adapter for pending order tracking (optional)
             crash_recovery: Crash recovery manager for clean shutdown flag
             cold_storage_service: Cold storage service for final TimescaleDB snapshot
+            audit_service: Audit service whose writer must be drained before
+                we close the DB connection (story 10.3 — bounded queue must
+                not lose pending entries on shutdown)
         """
         self._redis = redis_manager
         self._account_manager = account_manager
@@ -119,6 +125,7 @@ class GracefulShutdown:
         self._zmq = zmq_adapter
         self._crash_recovery = crash_recovery
         self._cold_storage_service = cold_storage_service
+        self._audit_service = audit_service
         self._shutdown_event = asyncio.Event()
         self._shutdown_in_progress = False
         self._current_phase = ShutdownPhase.NOT_STARTED
@@ -307,6 +314,27 @@ class GracefulShutdown:
                 logger.info("Final TimescaleDB cold storage snapshot persisted")
             except Exception as e:
                 logger.error("Failed to persist final cold storage state: %s", e)
+
+        # Drain the bounded audit queue BEFORE we close the DB connection.
+        # Story 10.3 — every queued audit entry must reach TimescaleDB;
+        # back-pressure callers may have blocked waiting for space, so we
+        # cannot drop them. The writer is intentionally left running so
+        # that the lifecycle's final ``engine_stopped`` audit row can still
+        # use ``log_sync``; lifecycle will call ``stop()`` once its trailing
+        # audits are written.
+        if self._audit_service is not None:
+            try:
+                await self._audit_service.drain(
+                    timeout=self.AUDIT_DRAIN_TIMEOUT_SECONDS
+                )
+                logger.info("Audit writer drained")
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Audit writer drain timed out after %ds — entries may be lost",
+                    self.AUDIT_DRAIN_TIMEOUT_SECONDS,
+                )
+            except Exception as e:
+                logger.error("Audit writer drain raised: %s", e)
 
         return active_accounts
 

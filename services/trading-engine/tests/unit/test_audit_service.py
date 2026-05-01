@@ -267,7 +267,8 @@ class TestAuditServiceLogTradeExecuted:
     @pytest.fixture
     def mock_db_writer(self):
         writer = AsyncMock()
-        writer.add_entry = AsyncMock()
+        writer.log_async = AsyncMock()
+        writer.log_sync = AsyncMock()
         return writer
 
     @pytest.fixture
@@ -290,8 +291,8 @@ class TestAuditServiceLogTradeExecuted:
             order_id="ORDER-123",
         )
 
-        mock_db_writer.add_entry.assert_called_once()
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        mock_db_writer.log_async.assert_called_once()
+        entry = mock_db_writer.log_async.call_args[0][0]
 
         assert entry.account_id == "ftmo-gold-001"
         assert entry.event_type == "trade_executed"
@@ -317,7 +318,7 @@ class TestAuditServiceLogTradeExecuted:
             strategy_name="rsi_bounce",
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
         assert entry.context["symbol"] == "EURUSD"
         assert entry.context["side"] == "SELL"
         assert entry.context["quantity"] == 0.5
@@ -339,7 +340,7 @@ class TestAuditServiceLogTradeExecuted:
             context=custom,
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
         assert entry.context == custom
 
 
@@ -349,7 +350,8 @@ class TestAuditServiceLogPositionClosed:
     @pytest.fixture
     def mock_db_writer(self):
         writer = AsyncMock()
-        writer.add_entry = AsyncMock()
+        writer.log_async = AsyncMock()
+        writer.log_sync = AsyncMock()
         return writer
 
     @pytest.fixture
@@ -370,8 +372,8 @@ class TestAuditServiceLogPositionClosed:
             pnl_dollars=10.05,
         )
 
-        mock_db_writer.add_entry.assert_called_once()
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        mock_db_writer.log_async.assert_called_once()
+        entry = mock_db_writer.log_async.call_args[0][0]
 
         assert entry.account_id == "ftmo-gold-001"
         assert entry.event_type == "position_closed"
@@ -394,7 +396,7 @@ class TestAuditServiceLogPositionClosed:
             pnl_dollars=-10.50,
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
         assert entry.level == "WARNING"
 
     @pytest.mark.asyncio
@@ -409,7 +411,7 @@ class TestAuditServiceLogPositionClosed:
             pnl_dollars=10.0,
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
         assert entry.level == "INFO"
 
 
@@ -419,7 +421,8 @@ class TestAuditServiceLogSystemEvent:
     @pytest.fixture
     def mock_db_writer(self):
         writer = AsyncMock()
-        writer.add_entry = AsyncMock()
+        writer.log_async = AsyncMock()
+        writer.log_sync = AsyncMock()
         return writer
 
     @pytest.fixture
@@ -435,8 +438,8 @@ class TestAuditServiceLogSystemEvent:
             context={"version": "0.1.0"},
         )
 
-        mock_db_writer.add_entry.assert_called_once()
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        mock_db_writer.log_async.assert_called_once()
+        entry = mock_db_writer.log_async.call_args[0][0]
 
         assert entry.account_id is None
         assert entry.event_type == "system_event"
@@ -456,7 +459,7 @@ class TestAuditServiceLogSystemEvent:
             context={"accounts": ["ftmo-001"]},
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
 
         assert entry.level == "WARNING"
         assert entry.event_subtype == "crash_recovery"
@@ -470,7 +473,7 @@ class TestAuditServiceLogSystemEvent:
             context={"graceful": True},
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
 
         assert entry.event_subtype == "engine_stop"
         assert entry.context == {"graceful": True}
@@ -483,7 +486,7 @@ class TestAuditServiceLogSystemEvent:
             message="Started",
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
 
         assert entry.rule_name == ""
         assert entry.rule_result == ""

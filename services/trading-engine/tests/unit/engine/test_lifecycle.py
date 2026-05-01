@@ -144,8 +144,10 @@ async def test_run_with_graceful_shutdown_late_binds_recovery_artifacts():
 async def test_audit_engine_start_stop_emitted_when_audit_service_present():
     """audit_service receives engine_start + engine_stop + engine_stopped events."""
     audit_service = MagicMock()
-    audit_service.log_system_event = AsyncMock()
+    audit_service.start = AsyncMock()
     audit_service.stop = AsyncMock()
+    audit_service.log_system_event = AsyncMock()
+    audit_service.log_system_event_sync = AsyncMock()
 
     crash_result = MagicMock()
     crash_result.recovery_mode = True
@@ -161,24 +163,29 @@ async def test_audit_engine_start_stop_emitted_when_audit_service_present():
     await lifecycle.shutdown()
     await run_task
 
-    event_subtypes = [
+    async_subtypes = [
         c.kwargs["event_subtype"]
         for c in audit_service.log_system_event.await_args_list
     ]
-    assert "engine_start" in event_subtypes
-    assert "engine_stop" in event_subtypes
-    assert "engine_stopped" in event_subtypes
+    sync_subtypes = [
+        c.kwargs["event_subtype"]
+        for c in audit_service.log_system_event_sync.await_args_list
+    ]
+    assert "engine_start" in async_subtypes
+    assert "engine_stop" in async_subtypes
+    assert "engine_stopped" in sync_subtypes
+    audit_service.start.assert_awaited_once()
     audit_service.stop.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_on_lock_lost_emits_audit_event():
     audit_service = MagicMock()
-    audit_service.log_system_event = AsyncMock()
+    audit_service.log_system_event_sync = AsyncMock()
     lifecycle, _, _, _ = _make_lifecycle(audit_service=audit_service)
     lifecycle._on_lock_lost()
     await asyncio.sleep(0)
-    audit_service.log_system_event.assert_awaited()
+    audit_service.log_system_event_sync.assert_awaited()
     assert lifecycle._shutdown_event.is_set()
 
 

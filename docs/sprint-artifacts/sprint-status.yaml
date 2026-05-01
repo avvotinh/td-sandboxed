@@ -164,7 +164,7 @@ development_status:
   10-1-engine-split: done                     # XL — split TradingEngine god-object → RecoveryOrchestrator + LiveOrchestrator + EngineLifecycle (D1+D5); 31 unit tests, 96% coverage; AC2/AC3/AC4 interface tightening deferred to 10.2 DI container
   10-2-di-container: done                     # M  — EngineConfig DI container with feature flags + LockLostMediator + collaborator bundles; resolves all three TODO(10.2) deviations from 10.1; 35 unit tests, 95% coverage
   # Phase 2 — Audit double-entry & race fix
-  10-3-audit-writer-bounded-queue: backlog    # L  — AuditWriter bounded queue + worker; sync DB before mutation; drain on graceful_shutdown (D3)
+  10-3-audit-writer-bounded-queue: done        # L  — AuditWriter bounded asyncio.Queue + worker; log_sync/log_async surfaces; drain wired into GracefulShutdown._persist_final_state; double-entry call sites migrated (execution_service trade fill/close, lifecycle engine_start/stop/lock_lost, recovery_orchestrator, daily_snapshot_service); 21 audit_writer tests + full unit suite 2465 passing (D3)
   10-4-atomic-validate-send: backlog          # M  — atomic validate+send via Redis Lua (atomic_reserve.lua + atomic_release.lua) (D6)
   # Phase 3 — Live trading P0 blockers
   10-5-live-orchestrator: backlog             # XL — LiveOrchestrator full: LiveNode + PropFirmComplianceActor per account + RedisDataClient + ZmqExecutionClient (D5+D7#1)

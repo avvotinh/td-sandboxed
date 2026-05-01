@@ -157,6 +157,7 @@ def _build_graceful_shutdown(
         account_manager=config.account_manager,
         snapshot_service=config.snapshot_service,
         zmq_adapter=config.zmq_adapter,
+        audit_service=config.audit_service,
     )
 
 

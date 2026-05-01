@@ -8,7 +8,6 @@ supplied by the DI container, matching the spec sketch in
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -16,7 +15,6 @@ from decimal import Decimal
 
 from ..accounts.risk_registry import RiskStateRegistry
 from ..audit.audit_service import AuditService
-from ..rules.audit_logger import audit_task_done_callback
 from ..state.cold_storage_writer import ColdStorageWriter
 from ..state.crash_recovery import CrashRecoveryManager
 from ..state.crash_recovery import RecoveryResult as CrashRecoveryResult
@@ -97,7 +95,7 @@ class RecoveryOrchestrator:
                 "Entering recovery mode for %d accounts",
                 len(crash_result.accounts_needing_recovery),
             )
-            self._audit_crash_recovery(crash_result.accounts_needing_recovery)
+            await self._audit_crash_recovery(crash_result.accounts_needing_recovery)
 
             reconciler = self._collaborators.position_reconciler
             if reconciler is not None:
@@ -150,19 +148,20 @@ class RecoveryOrchestrator:
             cold_storage_writer=self._collaborators.cold_storage_writer,
         )
 
-    def _audit_crash_recovery(self, accounts: list[str]) -> None:
+    async def _audit_crash_recovery(self, accounts: list[str]) -> None:
         if self._audit_service is None:
             return
-        task = asyncio.create_task(
-            self._audit_service.log_system_event(
+        try:
+            await self._audit_service.log_system_event(
                 event_subtype="crash_recovery",
                 message=f"Crash recovery initiated for {len(accounts)} accounts",
                 level="WARNING",
                 context={"accounts": accounts},
-            ),
-            name="audit_crash_recovery",
-        )
-        task.add_done_callback(audit_task_done_callback)
+            )
+        except Exception:
+            logger.warning(
+                "Failed to enqueue crash_recovery audit entry", exc_info=True
+            )
 
     async def _run_pnl_recalculation(
         self,

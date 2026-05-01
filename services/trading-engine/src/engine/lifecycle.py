@@ -13,7 +13,6 @@ import asyncio
 import logging
 
 from ..audit.audit_service import AuditService
-from ..rules.audit_logger import audit_task_done_callback
 from ..state.crash_recovery import RecoveryResult as CrashRecoveryResult
 from ..state.daily_pnl_recalculator import RecalculationResult
 from ..state.graceful_shutdown import GracefulShutdown, ShutdownResult
@@ -24,6 +23,15 @@ from .lock_lost import LockLostMediator
 from .recovery_orchestrator import RecoveryOrchestrator, RecoveryOutcome
 
 logger = logging.getLogger(__name__)
+
+
+def _log_audit_task_exception(task: asyncio.Task) -> None:
+    """done-callback for fire-and-forget audit tasks (sync-callback contexts)."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("Audit task %s failed: %s", task.get_name(), exc)
 
 
 class EngineLifecycle:
@@ -95,8 +103,12 @@ class EngineLifecycle:
         """Triggered when CrashRecoveryManager detects the process lock was lost."""
         logger.critical("Process lock lost! Triggering emergency shutdown.")
         if self._audit_service is not None:
+            # Sync write — the process is about to be killed; we need this row
+            # durable. The mediator hook is sync so we still have to spawn a
+            # task; attach a done-callback so a DB failure is logged instead
+            # of becoming an unhandled task exception.
             task = asyncio.create_task(
-                self._audit_service.log_system_event(
+                self._audit_service.log_system_event_sync(
                     event_subtype="lock_lost",
                     message="Process lock lost - emergency shutdown triggered",
                     level="ERROR",
@@ -104,7 +116,7 @@ class EngineLifecycle:
                 ),
                 name="audit_lock_lost",
             )
-            task.add_done_callback(audit_task_done_callback)
+            task.add_done_callback(_log_audit_task_exception)
         self._running = False
         self._shutdown_event.set()
 
@@ -123,10 +135,12 @@ class EngineLifecycle:
             self._graceful_shutdown.register_signal_handlers()
 
         await self._live.start()
+        if self._audit_service is not None:
+            await self._audit_service.start()
 
         logger.info("Trading Engine v0.1.0 running")
         self._running = True
-        self._audit_engine_start()
+        await self._audit_engine_start()
 
         if self._graceful_shutdown is not None:
             try:
@@ -159,15 +173,16 @@ class EngineLifecycle:
         logger.info("Shutdown requested via Engine.shutdown()")
 
         if self._audit_service is not None:
-            task = asyncio.create_task(
-                self._audit_service.log_system_event(
+            try:
+                await self._audit_service.log_system_event(
                     event_subtype="engine_stop",
                     message="Trading Engine shutdown requested",
                     context={"graceful": self._graceful_shutdown is not None},
-                ),
-                name="audit_engine_stop",
-            )
-            task.add_done_callback(audit_task_done_callback)
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to enqueue engine_stop audit entry", exc_info=True
+                )
 
         if self._graceful_shutdown is not None:
             self._graceful_shutdown.trigger_shutdown()
@@ -182,7 +197,7 @@ class EngineLifecycle:
             if crash_recovery is not None:
                 await crash_recovery.shutdown_sequence()
 
-    def _audit_engine_start(self) -> None:
+    async def _audit_engine_start(self) -> None:
         if self._audit_service is None:
             return
         start_context: dict = {"version": "0.1.0"}
@@ -192,15 +207,16 @@ class EngineLifecycle:
         if crash_result is not None and crash_result.recovery_mode:
             start_context["recovery_mode"] = True
             start_context["accounts_recovered"] = crash_result.accounts_needing_recovery
-        task = asyncio.create_task(
-            self._audit_service.log_system_event(
+        try:
+            await self._audit_service.log_system_event(
                 event_subtype="engine_start",
                 message="Trading Engine started",
                 context=start_context,
-            ),
-            name="audit_engine_start",
-        )
-        task.add_done_callback(audit_task_done_callback)
+            )
+        except Exception:
+            logger.warning(
+                "Failed to enqueue engine_start audit entry", exc_info=True
+            )
 
     async def _audit_engine_stopped(self) -> None:
         if self._audit_service is None:
@@ -208,8 +224,10 @@ class EngineLifecycle:
         shutdown_success = (
             self._shutdown_result.success if self._shutdown_result else True
         )
-        task = asyncio.create_task(
-            self._audit_service.log_system_event(
+        try:
+            # Sync — the writer is about to stop; this row must be durable
+            # before we drain and tear down the queue.
+            await self._audit_service.log_system_event_sync(
                 event_subtype="engine_stopped",
                 message="Trading Engine stopped",
                 level="INFO" if shutdown_success else "ERROR",
@@ -217,13 +235,8 @@ class EngineLifecycle:
                     "graceful": self._graceful_shutdown is not None,
                     "success": shutdown_success,
                 },
-            ),
-            name="audit_engine_stopped",
-        )
-        task.add_done_callback(audit_task_done_callback)
-        try:
-            await asyncio.wait_for(task, timeout=2.0)
+            )
         except Exception:
             logger.warning(
-                "Failed to buffer engine_stopped audit entry", exc_info=True
+                "Failed to persist engine_stopped audit entry", exc_info=True
             )

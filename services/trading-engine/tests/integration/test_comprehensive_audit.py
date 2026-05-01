@@ -8,18 +8,16 @@ Tests cover:
 - Existing rule_check audit entries still work after rule_type removal
 """
 
-import asyncio
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from src.audit.audit_service import AuditService
 from src.orders.execution_service import OrderExecutionService
 from src.orders.position_tracker import PositionTracker
-from src.rules.audit_db_writer import AuditDBWriter, AuditLogModel
+from src.rules.audit_db_writer import AuditLogModel
 from src.rules.audit_logger import AuditEntry, AuditEventType, AuditLogger
 from src.rules.base_rule import RuleAction, RuleResult
 
@@ -37,8 +35,9 @@ class TestTradeExecutionAuditIntegration:
 
     @pytest.fixture
     def mock_db_writer(self):
-        writer = AsyncMock(spec=AuditDBWriter)
-        writer.add_entry = AsyncMock()
+        writer = AsyncMock()
+        writer.log_async = AsyncMock()
+        writer.log_sync = AsyncMock()
         return writer
 
     @pytest.fixture
@@ -61,7 +60,7 @@ class TestTradeExecutionAuditIntegration:
             order_id="ORDER-123",
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
 
         # Verify correct event type
         assert entry.event_type == AuditEventType.TRADE_EXECUTED.value
@@ -83,8 +82,9 @@ class TestPositionCloseAuditIntegration:
 
     @pytest.fixture
     def mock_db_writer(self):
-        writer = AsyncMock(spec=AuditDBWriter)
-        writer.add_entry = AsyncMock()
+        writer = AsyncMock()
+        writer.log_async = AsyncMock()
+        writer.log_sync = AsyncMock()
         return writer
 
     @pytest.fixture
@@ -105,7 +105,7 @@ class TestPositionCloseAuditIntegration:
             pnl_dollars=10.05,
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
 
         assert entry.event_type == AuditEventType.POSITION_CLOSED.value
         assert entry.event_subtype == "exit_fill"
@@ -124,8 +124,9 @@ class TestEngineLifecycleAuditIntegration:
 
     @pytest.fixture
     def mock_db_writer(self):
-        writer = AsyncMock(spec=AuditDBWriter)
-        writer.add_entry = AsyncMock()
+        writer = AsyncMock()
+        writer.log_async = AsyncMock()
+        writer.log_sync = AsyncMock()
         return writer
 
     @pytest.fixture
@@ -141,7 +142,7 @@ class TestEngineLifecycleAuditIntegration:
             context={"version": "0.1.0"},
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
 
         assert entry.account_id is None
         assert entry.event_type == AuditEventType.SYSTEM_EVENT.value
@@ -162,7 +163,7 @@ class TestEngineLifecycleAuditIntegration:
             context={"accounts": ["ftmo-001", "ftmo-002"]},
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
         model = AuditLogModel.from_audit_entry(entry)
 
         assert model.level == "WARNING"
@@ -177,7 +178,7 @@ class TestEngineLifecycleAuditIntegration:
             context={"graceful": True},
         )
 
-        entry = mock_db_writer.add_entry.call_args[0][0]
+        entry = mock_db_writer.log_async.call_args[0][0]
         model = AuditLogModel.from_audit_entry(entry)
 
         assert model.event_subtype == "engine_stop"
@@ -279,11 +280,13 @@ class TestExecutionServiceAuditIntegration:
         service = AsyncMock(spec=AuditService)
         service.log_trade_executed = AsyncMock()
         service.log_position_closed = AsyncMock()
+        service.log_trade_executed_sync = AsyncMock()
+        service.log_position_closed_sync = AsyncMock()
         return service
 
     @pytest.mark.asyncio
     async def test_entry_fill_fires_audit_task(self, mock_zmq, mock_audit_service):
-        """_handle_entry_fill creates fire-and-forget audit task."""
+        """_handle_entry_fill awaits a synchronous audit row before returning."""
         from src.orders.signal import Signal, SignalType
 
         tracker = PositionTracker()
@@ -306,11 +309,8 @@ class TestExecutionServiceAuditIntegration:
             price=1850.0,
         )
 
-        # Allow fire-and-forget tasks to run
-        await asyncio.sleep(0.05)
-
-        mock_audit_service.log_trade_executed.assert_called_once()
-        call_kwargs = mock_audit_service.log_trade_executed.call_args
+        mock_audit_service.log_trade_executed_sync.assert_called_once()
+        call_kwargs = mock_audit_service.log_trade_executed_sync.call_args
         assert call_kwargs.kwargs["account_id"] == "ftmo-001"
         assert call_kwargs.kwargs["symbol"] == "XAUUSD"
         assert call_kwargs.kwargs["side"] == "BUY"
@@ -318,7 +318,7 @@ class TestExecutionServiceAuditIntegration:
 
     @pytest.mark.asyncio
     async def test_close_fill_fires_audit_task(self, mock_zmq, mock_audit_service):
-        """_handle_close_fill creates fire-and-forget audit task with order_id."""
+        """_handle_close_fill awaits a synchronous audit row with order_id."""
         from src.adapters.zmq_models import OrderResult, OrderStatus
         from src.orders.signal import Signal, SignalType
 
@@ -363,10 +363,8 @@ class TestExecutionServiceAuditIntegration:
             price=1860.0,
         )
 
-        await asyncio.sleep(0.05)
-
-        mock_audit_service.log_position_closed.assert_called_once()
-        call_kwargs = mock_audit_service.log_position_closed.call_args
+        mock_audit_service.log_position_closed_sync.assert_called_once()
+        call_kwargs = mock_audit_service.log_position_closed_sync.call_args
         assert call_kwargs.kwargs["account_id"] == "ftmo-001"
         assert call_kwargs.kwargs["symbol"] == "XAUUSD"
         assert call_kwargs.kwargs["order_id"] == close_order.order_id
