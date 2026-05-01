@@ -185,7 +185,11 @@ def build_lifecycle(config: EngineConfig) -> EngineLifecycle:
         risk_registry=config.risk_registry,
         audit_service=config.audit_service,
     )
-    live = LiveOrchestrator(services=live_services)
+    live = LiveOrchestrator(
+        services=live_services,
+        account_manager=config.account_manager,
+        audit_service=config.audit_service,
+    )
 
     return EngineLifecycle(
         recovery=recovery,

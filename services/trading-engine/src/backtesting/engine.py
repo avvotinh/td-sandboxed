@@ -22,10 +22,7 @@ from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.objects import Currency
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.backtesting.prop_firm_actor import (
-    PropFirmComplianceActor,
-    PropFirmComplianceActorConfig,
-)
+from src.backtesting.prop_firm_actor import PropFirmComplianceActor
 from src.backtesting.prop_firm_preset import PropFirmPreset
 from src.backtesting.metrics.calculator import calculate_metrics
 from src.backtesting.result import BacktestResult, TradeRecord
@@ -127,16 +124,24 @@ class BacktestRunner:
         ``venue`` + ``currency`` let the actor read real equity from the
         portfolio. When omitted (unit-test path) equity reads return
         ``None`` and ``on_bar`` is a no-op.
+
+        Delegates to :func:`src.engine.actors.build_compliance_actor` so
+        backtest and live (story 10.5d) construct the actor identically.
         """
-        actor_config = PropFirmComplianceActorConfig(
+        # Lazy import to break the cycle:
+        #   backtesting.engine → engine.actors → backtesting.prop_firm_actor
+        # would otherwise re-enter backtesting.engine at module load time.
+        from src.engine.actors import build_compliance_actor
+
+        actor = build_compliance_actor(
             account_id=account_id,
             initial_balance=self.config.initial_balance,
+            rule_engine=rule_engine,
             daily_session_tz=daily_session_tz,
             bar_type=bar_type,
             venue=venue,
             currency=currency,
         )
-        actor = PropFirmComplianceActor(config=actor_config, rule_engine=rule_engine)
         self._engine.add_actor(actor)
         self._prop_firm_actor = actor
         return actor

@@ -167,7 +167,12 @@ development_status:
   10-3-audit-writer-bounded-queue: done        # L  — AuditWriter bounded asyncio.Queue + worker; log_sync/log_async surfaces; drain wired into GracefulShutdown._persist_final_state; double-entry call sites migrated (execution_service trade fill/close, lifecycle engine_start/stop/lock_lost, recovery_orchestrator, daily_snapshot_service); 21 audit_writer tests + full unit suite 2465 passing (D3)
   10-4-atomic-validate-send: done              # M  — atomic_reserve.lua + atomic_release.lua + ExposureReservation Python wrapper; integrated into ValidatedZmqAdapter via opt-in max_lots_provider; release after PnL update; wired into EngineConfig + EngineLifecycle.run; 15 reservation + 14 adapter atomic tests; full unit suite 2494 passing (D6)
   # Phase 3 — Live trading P0 blockers
-  10-5-live-orchestrator: backlog             # XL — LiveOrchestrator full: LiveNode + PropFirmComplianceActor per account + RedisDataClient + ZmqExecutionClient (D5+D7#1)
+  10-5a-live-orchestrator-foundation: done    # part of XL 10.5 — LiveAccountSession state machine + per-account lifecycle (start/stop/add/remove/reload) + shared build_compliance_actor factory + crash isolation (pause + node_crashed audit) + sync health() snapshot; 25 new tests; full unit suite 2519 passing
+  10-5b-redis-data-client: backlog             # part of XL 10.5 — RedisDataClient Nautilus subclass subscribing bars:* per account (AC3)
+  10-5c-zmq-execution-client: backlog          # part of XL 10.5 — ZmqExecutionClient wrapping ValidatedZmqAdapter + 10.4 atomic gate (AC4)
+  10-5d-live-compliance-actor: backlog         # part of XL 10.5 — per-account PropFirmComplianceActor in live mode (AC5)
+  10-5e-health-and-e2e: backlog                # part of XL 10.5 — health surface push to Redis 5s + crash isolation full + E2E test (AC6+AC7+AC8 full+AC9)
+  10-5f-backtest-parity: backlog               # part of XL 10.5 — multi_firm_e2e baseline diff verification (AC10)
   10-6-strategy-validation-gate-audit: backlog  # S  — audit all strategies route through ValidatedZmqAdapter, no order_factory.bracket() bypass (D7#2)
   10-7-kill-switch-flat-positions: backlog    # M  — emergency:stop closes open positions via OrderGateway.flatten_position (D7#4)
   10-8-news-blackout-rule: backlog            # M  — NewsBlackoutRule + EconomicCalendarService (ForexFactory feed) (D7#5)
