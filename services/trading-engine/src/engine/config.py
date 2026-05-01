@@ -29,6 +29,7 @@ from ..accounts.risk_registry import RiskStateRegistry
 from ..adapters.zmq_adapter import ZmqAdapter
 from ..audit.audit_service import AuditService
 from ..config.firm_registry import FirmRegistry
+from ..execution.exposure_reservation import ExposureReservation
 from ..state.redis_state import RedisStateManager
 from ..state.snapshot_service import SnapshotService
 
@@ -55,6 +56,7 @@ class EngineFeatureFlags:
     violation_tracking: bool
     daily_snapshots: bool
     graceful_shutdown: bool
+    atomic_exposure_gate: bool
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,7 @@ class EngineConfig:
     database_url: str | None = None
     audit_service: AuditService | None = None
     firm_registry: FirmRegistry | None = None
+    exposure_reservation: ExposureReservation | None = None
 
     def __post_init__(self) -> None:
         if self.database_url is not None and self.db_session_factory is None:
@@ -117,6 +120,7 @@ class EngineConfig:
         graceful_shutdown = (
             self.redis_manager is not None and self.account_manager is not None
         )
+        atomic_exposure_gate = self.exposure_reservation is not None
         return EngineFeatureFlags(
             crash_recovery=crash_recovery,
             cold_storage=cold_storage,
@@ -127,4 +131,5 @@ class EngineConfig:
             violation_tracking=violation_tracking,
             daily_snapshots=daily_snapshots,
             graceful_shutdown=graceful_shutdown,
+            atomic_exposure_gate=atomic_exposure_gate,
         )

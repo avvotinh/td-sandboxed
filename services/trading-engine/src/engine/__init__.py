@@ -193,6 +193,7 @@ def build_lifecycle(config: EngineConfig) -> EngineLifecycle:
         graceful_shutdown=graceful_shutdown,
         audit_service=config.audit_service,
         lock_lost_mediator=lock_lost_mediator,
+        exposure_reservation=config.exposure_reservation,
     )
 
 

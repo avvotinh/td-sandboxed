@@ -13,6 +13,7 @@ import asyncio
 import logging
 
 from ..audit.audit_service import AuditService
+from ..execution.exposure_reservation import ExposureReservation
 from ..state.crash_recovery import RecoveryResult as CrashRecoveryResult
 from ..state.daily_pnl_recalculator import RecalculationResult
 from ..state.graceful_shutdown import GracefulShutdown, ShutdownResult
@@ -44,11 +45,13 @@ class EngineLifecycle:
         graceful_shutdown: GracefulShutdown | None,
         audit_service: AuditService | None,
         lock_lost_mediator: LockLostMediator,
+        exposure_reservation: ExposureReservation | None = None,
     ) -> None:
         self._recovery = recovery
         self._live = live
         self._graceful_shutdown = graceful_shutdown
         self._audit_service = audit_service
+        self._exposure_reservation = exposure_reservation
 
         self._running = False
         self._shutdown_event = asyncio.Event()
@@ -137,6 +140,10 @@ class EngineLifecycle:
         await self._live.start()
         if self._audit_service is not None:
             await self._audit_service.start()
+        if self._exposure_reservation is not None:
+            # Loads the atomic_reserve / atomic_release Lua scripts into
+            # Redis once; subsequent calls use EVALSHA.
+            await self._exposure_reservation.start()
 
         logger.info("Trading Engine v0.1.0 running")
         self._running = True
