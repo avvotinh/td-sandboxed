@@ -2485,7 +2485,105 @@ def test_signal_routing_performance(benchmark):
 
 ---
 
-_This Architecture Document v3.0 reflects the complete multi-account trading system design._
+---
 
-_Last Updated: 2025-12-07_
+## Epic 10 Additions — Operational Hardening (2026-05-01)
+
+The following modules were introduced in Epic 10 and are not reflected in the original directory tree above. All live under `services/trading-engine/`.
+
+### Engine refactor — god-object split (10.1 + 10.2)
+
+`src/engine/` now contains:
+
+| File | Purpose |
+|------|---------|
+| `config.py` | `EngineConfig` frozen dataclass — DI container replacing 9 optional deps |
+| `collaborators.py` | Typed collaborator bundles passed into lifecycle components |
+| `lifecycle.py` | `EngineLifecycle` — top-level coordinator: recovery → live → graceful shutdown |
+| `recovery_orchestrator.py` | `RecoveryOrchestrator` — cold-start: snapshot load, reconcile, rearm |
+| `live_orchestrator.py` | `LiveOrchestrator` — per-account `LiveAccountSession` management |
+| `account_session.py` | `LiveAccountSession` state machine (start/stop/add/remove/reload/crash) |
+| `actors.py` | Shared `build_compliance_actor` factory used by live + backtest |
+| `lock_lost.py` | `LockLostMediator` — Redis lock-lost event propagation |
+| `clients/bar_translator.py` | Timeframe parse + Pydantic Bar → Nautilus Bar conversion |
+| `clients/order_translator.py` | Nautilus Order → internal `Order`; MARKET only |
+| `clients/submit_dispatcher.py` | validate/send/translate → Nautilus filled/rejected/denied/timeout events |
+| `clients/redis_data_client.py` | `RedisDataClient` Nautilus `LiveDataClient` subclass; pubsub drain |
+| `clients/zmq_execution_client.py` | `ZmqExecutionClient` Nautilus `LiveExecutionClient` subclass |
+
+Original `engine.py` reduced to thin wrapper (~200 LOC); logic split into components above.
+
+### Audit double-entry (10.3)
+
+`src/audit/audit_writer.py` — `AuditWriter` replaces the fire-and-forget `asyncio.create_task(audit.log_*(...))` pattern:
+
+- `log_sync()` — blocks caller until DB commit; required on all `account.*` write paths.
+- `log_async()` — enqueues to bounded `asyncio.Queue(10_000)`; back-pressure if full.
+- `worker()` — drain loop; batch INSERT every 100 entries or 0.5s.
+- `drain()` — called by `GracefulShutdown._persist_final_state()` before DB close.
+
+### Atomic exposure gate (10.4)
+
+`src/execution/exposure_reservation.py` + `src/execution/lua_scripts/`:
+
+- `atomic_reserve.lua` — compare-and-set: read snapshot, check `used + required ≤ max`, write atomically.
+- `atomic_release.lua` — rollback reservation on MT5 timeout/reject.
+- `ExposureReservation` Python wrapper integrated into `ValidatedZmqAdapter` via opt-in `max_lots_provider`.
+
+### Kill-switch flat positions (10.7)
+
+`src/state/emergency_stop_handler.py` — `EmergencyStopHandler`:
+
+- Subscribes to `emergency:stop` Redis channel.
+- For each active account: `query_positions` → opposite-side MARKET close per position → `pause_account`.
+- Writes sync audit rows: `EMERGENCY_STOP_TRIGGERED` + `EMERGENCY_STOP_COMPLETE`.
+- Wired into `EngineConfig.feature_flags.emergency_stop` + `EngineLifecycle.start/stop`.
+
+### Orders package
+
+`src/orders/close_order_builder.py` — builds opposite-side MARKET close orders for flat-positions flow.
+
+### News blackout rule (10.8)
+
+`src/calendar/` — new package:
+
+| File | Purpose |
+|------|---------|
+| `calendar_models.py` | `CalendarEvent` + `EventIndex` (bisect-based `active_events_at`) |
+| `forex_factory_parser.py` | Tolerant ForexFactory weekly XML parser |
+| `economic_calendar_service.py` | Background fetch (1×/day) + Redis 26h TTL cache + static fallback + refresh loop |
+
+`src/rules/types/news_blackout.py` — `NewsBlackoutRule(BaseRule)`:
+
+- Registered in rule parser; late-binds `snapshot_provider`.
+- Fail-open WARN when calendar unavailable (never hard-blocks on feed failure).
+- Configurable `blackout_minutes_before/after`, `impact_levels`, `symbols_filter`.
+
+### Backtest spread parity (10.9)
+
+`src/backtesting/spread_fee_model.py` — `SpreadAwareFeeModel(FeeModel)` Nautilus subclass:
+
+- Charges `per_lot_usd + spread_pips × pip_value × fill_qty` per fill.
+- `commission_profile_to_fee_model` dispatches to `SpreadAwareFeeModel` when `spread_pips` is non-empty; falls back to legacy `PerContractFeeModel`.
+- Per-symbol `pip_value` mapping with default 10 USD/pip/lot.
+- Swap accrual (`swap_long`/`swap_short`) deferred to 10.9b — requires Nautilus `SimulationModule` for rollover-time accrual.
+
+### Alembic bootstrap (10.10)
+
+`services/trading-engine/alembic/` — replaces raw SQL migration workflow:
+
+| Path | Purpose |
+|------|---------|
+| `alembic.ini` | Points `sqlalchemy.url` to `DATABASE_URL` env; `postgres+asyncpg→postgres` coercion in `env.py` |
+| `alembic/env.py` | Manual revisions only (autogenerate disabled) |
+| `alembic/versions/005_state_snapshots.py` … `010_rename_ftmo_audit_events.py` | 6 ported revisions; `upgrade()` executes original SQL; `downgrade()` raises `NotImplementedError` for hypertable-destructive paths |
+
+Run `alembic stamp 010` on an existing DB (already manually migrated) to mark head without re-running. Fresh DB: `alembic upgrade head` runs all 6 revisions.
+
+---
+
+_This Architecture Document v3.0 reflects the complete multi-account trading system design._
+_Epic 10 additions appended 2026-05-01._
+
+_Last Updated: 2025-12-07 (original); Epic 10 section added 2026-05-01_
 _Author: Winston (Architect Agent)_

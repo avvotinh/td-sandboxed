@@ -129,6 +129,26 @@ This is a high-complexity fintech project requiring:
 - Rule violation history and compliance reporting
 - Warning thresholds (70%, 80%, 90% of limits)
 
+### Operational Hardening (Epic 10 — in progress, 2026-05-01)
+
+Closes 10 architecture-review findings (D1–D10) gating live trading with capital.
+Phase 1–4 shipped 2026-05-01; Phase 5 (legacy cleanup) gated by ops sign-off.
+
+**Shipped capabilities (Phase 1–4):**
+- `TradingEngine` god-object split → `RecoveryOrchestrator` + `LiveOrchestrator` + `EngineLifecycle` + `EngineConfig` DI container
+- `AuditWriter` bounded queue — sync DB write before every `account.*` mutation (double-entry)
+- Atomic expose-gate: Redis Lua `atomic_reserve/release` on every `validate_and_send` (race-condition fix)
+- `LiveOrchestrator` partial: `LiveAccountSession` state machine, `RedisDataClient`, `ZmqExecutionClient`, orchestrator health surface (TradingNode wiring still backlog)
+- Kill-switch `EmergencyStopHandler` — `emergency:stop` Redis → close all open positions → pause accounts
+- News blackout rule + `EconomicCalendarService` (ForexFactory XML; Redis 26h TTL cache; fail-open fallback)
+- `SpreadAwareFeeModel` — backtest spread parity per-firm (swap deferred)
+- Alembic bootstrap — 6 raw migrations (005–010) ported to versioned revisions
+
+**Remaining backlog (Phase 3 partial + Phase 5):**
+- `TradingNode` per-account wiring + strategy registration + reload subscriber (10.5d/e2/f)
+- Legacy `prop_firm` field + `prop_firms` table removal (10.12–10.14; gated by 10.11 ops audit)
+- `.gitignore` compliance report files (10.15)
+
 ### Vision (Future)
 
 - Web dashboard for multi-account monitoring

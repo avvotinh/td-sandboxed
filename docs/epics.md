@@ -3056,6 +3056,82 @@ So that **a new contributor can run a backtest end-to-end without reading source
 
 ---
 
+## Epic 9: Multi-firm Foundation
+
+**Status:** Done (closed 2026-04-30, head `e9e9b5f`)
+
+**Goal:** Replace FTMO-only assumptions with `FirmProfile` abstraction so adding a new prop firm is config-only, not refactor-of-core. Ship FTMO + The5ers (3 products) on the same engine.
+
+**User Value:** Trader can run FTMO + The5ers Bootstrap + High Stakes + Hyper Growth concurrently, each with correct rules, session timezone, commission model, and per-account override capability.
+
+**Stories:** 16 (P0.1 – P0.16; P0.9 dropped)
+
+See [`docs/epic-9-context.md`](./epic-9-context.md) for full architectural decisions, scope (in/out), 4-review summary, and per-story details.
+
+**Key deliverables shipped:**
+- `FirmProfile` + `AccountProduct` + `AccountPhase` frozen dataclasses
+- `FirmRegistry` loader from `configs/firms/*.yaml`
+- `Account.firm_id + product_id + phase + rule_overrides` (migration `009`)
+- `FTMO*` → `PropFirm*` hard cutover (migration `010`)
+- 3 new rule types: `consistency` (real-time, FTMO 50%), `weekly_target`, DD variants (`equity_peak` vs `balance_based`)
+- Timezone-aware daily reset per `FirmProfile.session`
+- CLI `accounts promote --phase` with audit
+- Per-account `rule_overrides` merge + safety guard (no loosening)
+- `OrderGateway` Protocol (interface only, MVP `ZmqOrderGateway`)
+- `CommissionProfile` per-firm in backtest venue
+- E2E test: FTMO + 3 The5ers products in one engine (22 tests)
+
+---
+
+## Epic 10: Operational Hardening
+
+**Status:** In Progress (Phase 1–4 shipped 2026-05-01, 10 of 15 stories done; Phase 5 gated by 10.11)
+
+**Goal:** Close 10 architecture-review findings (D1-D10) blocking live trading with capital. Take engine from ~55-65% production-ready to 80%+. Source: [`docs/architecture-review-2026-04-30.md`](./architecture-review-2026-04-30.md).
+
+**User Value:** Trader can deploy live with prop-firm capital safely — audit double-entry holds, kill-switch flattens positions, news blackout enforced, no race condition in validate↔send, dedicated live orchestrator with per-account isolation.
+
+**Stories:** 15 (10.1 – 10.15) across 5 sequential phases
+
+See [`docs/epic-10-context.md`](./epic-10-context.md) for full architectural decisions, finding-to-story mapping, risk analysis, and success criteria.
+
+### Phase 1 — Architectural foundation (done 2026-05-01)
+- **10.1** ✓ Split `TradingEngine` god-object → `RecoveryOrchestrator` + `LiveOrchestrator` + `EngineLifecycle` (XL — D1+D5) — see [`10-1-engine-split.md`](./sprint-artifacts/10-1-engine-split.md)
+- **10.2** ✓ DI container `EngineConfig` replacing 9 optional deps (M — D1)
+
+### Phase 2 — Audit double-entry & race fix (done 2026-05-01)
+- **10.3** ✓ `AuditWriter` bounded queue + worker; sync DB before mutation; drain on graceful_shutdown (L — D3)
+- **10.4** ✓ Atomic validate+send via Redis Lua (`atomic_reserve.lua` + `atomic_release.lua`) (M — D6)
+
+### Phase 3 — Live trading P0 blockers (partial — 10.5d/e2/f backlog)
+- **10.5a** ✓ `LiveAccountSession` state machine + per-account lifecycle + crash isolation (D5)
+- **10.5b** ✓ `RedisDataClient` Nautilus subclass + `bar_translator` + pubsub drain (D5 AC3)
+- **10.5c** ✓ `ZmqExecutionClient` Nautilus subclass + `order_translator` + `submit_dispatcher` (D5 AC4)
+- **10.5d** `PropFirmComplianceActor` in live mode (D5 AC5) — backlog
+- **10.5e1** ✓ Orchestrator wiring + health surface (5s SETEX TTL 30s) (D5 AC7)
+- **10.5e2** `TradingNode` per account + strategy registration + reload subscriber — backlog
+- **10.5f** Backtest parity baseline diff + E2E live test — backlog
+- **10.6** ✓ Audit all strategies route through `ValidatedZmqAdapter` (S — D7#2)
+- **10.7** ✓ Kill-switch CLI flat positions — `emergency:stop` closes open positions (M — D7#4)
+- **10.8** ✓ News blackout rule + `EconomicCalendarService` (ForexFactory feed) (M — D7#5)
+
+### Phase 4 — Backtest parity + infra debt (done 2026-05-01)
+- **10.9** ✓ `SpreadAwareFeeModel` spread parity per-firm; swap deferred to 10.9b (M — D8)
+- **10.10** ✓ Bootstrap Alembic + port 6 raw migrations (005-010) (M — Epic 9 carry-over)
+
+### Phase 5 — Legacy cleanup (gated by 10.11 ops cutover sign-off)
+- **10.11** Migration audit CLI + production cutover sign-off (S — Pre-Phase 5 gate)
+- **10.12** Drop `prop_firm` field + `VALID_PROP_FIRMS` + `validate_prop_firm_preset` (S — D2)
+- **10.13** Drop preset YAML legacy + `PresetLoader` (S — D2)
+- **10.14** Migration drop `accounts.prop_firm_id` + `prop_firms` table (S — D2+D10)
+- **10.15** `.gitignore` compliance reports (XS — D9)
+
+**Out of Scope (YAGNI):** Multi-port `mt5-bridge` (D4) — defer until second broker is needed.
+
+**Total effort:** ~3-4 sprint (6-8 weeks) 1 dev FT.
+
+---
+
 ## Summary
 
 ### Epic Overview
@@ -3070,8 +3146,10 @@ So that **a new contributor can run a backtest end-to-end without reading source
 | 6 | Notifications & Emergency Control | 6 | FR36,38,40 | Stay informed, emergency stop |
 | 7 | Audit & Compliance Logging | 6 | FR42-45,53 | Complete audit trail |
 | 8 | Strategies & Backtesting Framework | 10 | Post-MVP vision | Validate strategies offline, trust live alignment |
+| 9 | Multi-firm Foundation | 16 (P0.9 dropped → 15 active) | FirmProfile / multi-product / multi-phase | Run FTMO + The5ers (3 products) concurrently |
+| 10 | Operational Hardening | 15 | Live readiness (D1-D10) | Live trading with capital safely |
 
-**Total: 63 Stories across 8 Epics**
+**Total: 93 Stories across 10 Epics** (Epic 1-9 done, Epic 10 in-progress — 10 of 15 stories done)
 
 ---
 
