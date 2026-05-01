@@ -189,6 +189,25 @@ class TestEngineLifecycle:
         from src.engine import EngineConfig, build_lifecycle
 
         redis_manager = AsyncMock()
+        # Story 10.5e3 — LiveOrchestrator.start subscribes to the
+        # phase-changed pattern via ``redis_manager.client.pubsub()``;
+        # stub the pubsub object so the listener task starts without
+        # tripping on AsyncMock's coroutine-by-default behaviour.
+        pubsub_stub = MagicMock()
+        pubsub_stub.psubscribe = AsyncMock()
+        pubsub_stub.punsubscribe = AsyncMock()
+        pubsub_stub.aclose = AsyncMock()
+
+        async def _empty_listen():
+            if False:
+                yield  # pragma: no cover
+
+        pubsub_stub.listen = _empty_listen
+        client_stub = MagicMock()
+        client_stub.setex = AsyncMock()
+        client_stub.pubsub = MagicMock(return_value=pubsub_stub)
+        redis_manager.client = client_stub
+
         account_manager = MagicMock()
         account_manager.get_all_accounts.return_value = []
         session_factory = MagicMock()

@@ -99,7 +99,6 @@ class TestAccountConfigFirmBinding:
         assert acc.product_id == "challenge"
         assert acc.phase == "evaluation"
         assert acc.rule_overrides == {}
-        assert acc.prop_firm is None
         assert acc.rules_file is None
 
     def test_normalizes_firm_id_to_lowercase(self):
@@ -122,37 +121,23 @@ class TestAccountConfigFirmBinding:
         with pytest.raises(ValidationError, match="firm binding is incomplete"):
             AccountConfig(**_firm_bound_kwargs(phase=None))
 
-    def test_rejects_firm_binding_mixed_with_prop_firm(self):
-        with pytest.raises(ValidationError, match="exactly one rule source"):
-            AccountConfig(**_firm_bound_kwargs(prop_firm="ftmo"))
-
     def test_rejects_firm_binding_mixed_with_rules_file(self):
         with pytest.raises(ValidationError, match="exactly one rule source"):
             AccountConfig(**_firm_bound_kwargs(rules_file="configs/custom.yaml"))
 
     def test_rejects_rule_overrides_without_firm_binding(self):
+        """Story 10.12 — rule_overrides require a firm binding; a
+        personal account must not declare them."""
         with pytest.raises(ValidationError, match="rule_overrides only apply"):
             AccountConfig(
-                id="ftmo-001",
-                name="FTMO Gold",
-                type=AccountType.PROP_FIRM,
-                prop_firm="ftmo",
+                id="personal-001",
+                name="Personal",
+                type=AccountType.PERSONAL,
+                rules_file="configs/custom.yaml",
                 rule_overrides={"consistency": {"block_at": 45}},
                 mt5=_mt5(),
                 strategy="ma_crossover",
             )
-
-    def test_prop_firm_still_works_unchanged(self):
-        acc = AccountConfig(
-            id="ftmo-001",
-            name="FTMO Gold",
-            type=AccountType.PROP_FIRM,
-            prop_firm="ftmo",
-            mt5=_mt5(),
-            strategy="ma_crossover",
-        )
-        assert acc.prop_firm == "ftmo"
-        assert acc.firm_id is None
 
     def test_demo_still_requires_no_rule_source(self):
         acc = AccountConfig(
@@ -163,22 +148,11 @@ class TestAccountConfigFirmBinding:
             strategy="ma_crossover",
         )
         assert acc.firm_id is None
-        assert acc.prop_firm is None
+        assert acc.rules_file is None
 
     def test_demo_rejects_firm_binding(self):
         with pytest.raises(ValidationError, match="demo.*must have no rule source"):
             AccountConfig(**_firm_bound_kwargs(type=AccountType.DEMO))
-
-    def test_demo_rejects_prop_firm(self):
-        with pytest.raises(ValidationError, match="demo.*must have no rule source"):
-            AccountConfig(
-                id="demo-001",
-                name="Demo",
-                type=AccountType.DEMO,
-                prop_firm="ftmo",
-                mt5=_mt5(),
-                strategy="ma_crossover",
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -304,15 +278,8 @@ class TestRuleAssignmentServiceFirmBound:
         with pytest.raises(PhaseNotFoundError):
             service.get_rules_for_account(acc)
 
-    def test_legacy_preset_path_still_works(self):
-        service = RuleAssignmentService()
-        acc = AccountConfig(
-            id="ftmo-001",
-            name="Legacy",
-            type=AccountType.PROP_FIRM,
-            prop_firm="ftmo",
-            mt5=_mt5(),
-            strategy="ma_crossover",
-        )
-        rules = service.get_rules_for_account(acc)
-        assert len(rules) > 0
+    # Story 10.12 removed the legacy ``prop_firm`` preset path; the
+    # corresponding test (``test_legacy_preset_path_still_works``) is
+    # gone — coverage of personal/firm paths is provided by the
+    # ``TestRuleAssignmentServiceFirmBound`` and rule-assignment unit
+    # tests above.

@@ -49,25 +49,24 @@
 
 accounts:
   # ============================================================================
-  # PROP FIRM ACCOUNT EXAMPLE
+  # PROP FIRM ACCOUNT EXAMPLE — FIRM-BOUND (Epic 9+, the only supported path)
   # ============================================================================
-  # Prop firm accounts require either:
-  #   - prop_firm: Name of a supported prop firm preset (e.g., "ftmo")
-  #   - rules_file: Path to a custom rules configuration file
+  # Prop firm accounts must reference a FirmRegistry entry by
+  # firm_id + product_id + phase. Rule sets are resolved from the firm
+  # profile's product (configs/firms/*.yaml).
   #
-  # The prop_firm preset applies the firm's specific compliance rules:
-  #   - Daily loss limits
-  #   - Maximum drawdown limits
-  #   - Position size restrictions
-  #   - Trading session restrictions
+  # Story 10.12 — the legacy ``prop_firm: <preset_name>`` field was
+  # removed. Operators on the old preset path must migrate to firm
+  # bindings before upgrading.
   #
   - id: ftmo-gold-001
     name: "FTMO Gold Challenge"
     type: prop_firm
 
-    # Compliance rules source (choose one):
-    prop_firm: ftmo          # Use FTMO's preset rules
-    # rules_file: "configs/rules/custom-ftmo.yaml"  # OR use custom rules
+    # Compliance rules source — firm binding (Epic 9+).
+    firm_id: ftmo                # Matches firm_id in configs/firms/ftmo.yaml
+    product_id: challenge        # Product within the firm profile
+    phase: evaluation            # One of the product's phase_ids
 
     # MT5 Connection Configuration
     mt5:
@@ -98,16 +97,15 @@ accounts:
     status: active
 
   # ============================================================================
-  # FIRM-BOUND ACCOUNT EXAMPLE (Epic 9+)
+  # FIRM-BOUND ACCOUNT EXAMPLE — with rule overrides
   # ============================================================================
-  # Firm-bound accounts reference a FirmRegistry entry (loaded from
-  # configs/firms/*.yaml) by firm_id + product_id + phase. Rule sets are
-  # resolved from the firm profile's product; per-account rule_overrides can
-  # TIGHTEN (not loosen) thresholds per P0.16.
+  # Firm-bound accounts can also tighten thresholds per-account via
+  # ``rule_overrides``. Per P0.16, overrides may only make rules
+  # STRICTER, never looser.
   #
   # Requirements:
   #   - firm_id, product_id, and phase must all be set together
-  #   - Mutually exclusive with prop_firm (legacy) and rules_file (personal)
+  #   - Mutually exclusive with rules_file (personal)
   #
   - id: ftmo-challenge-001
     name: "FTMO Challenge (Firm-bound)"
@@ -136,14 +134,16 @@ accounts:
     status: active
 
   # ============================================================================
-  # THE5ERS ACCOUNT EXAMPLE
+  # THE5ERS ACCOUNT EXAMPLE — also firm-bound
   # ============================================================================
-  # Another prop firm with different preset rules
+  # Another prop firm referenced via firm binding.
   #
   - id: the5ers-swing-001
     name: "The5ers Swing Trading"
     type: prop_firm
-    prop_firm: the5ers            # Note: Case-insensitive ("THE5ERS", "The5ers" also work)
+    firm_id: the5ers              # Case-insensitive (normalised to lowercase)
+    product_id: bootstrap         # See configs/firms/the5ers.yaml
+    phase: funded                 # Bootstrap goes straight to funded
 
     mt5:
       server: "The5ers-Server"

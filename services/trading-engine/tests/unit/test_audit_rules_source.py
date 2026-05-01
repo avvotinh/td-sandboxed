@@ -47,17 +47,6 @@ def _firm_bound(account_id: str = "firm-001") -> AccountConfig:
     )
 
 
-def _preset_legacy(account_id: str = "preset-001") -> AccountConfig:
-    return AccountConfig(
-        id=account_id,
-        name="Preset Legacy",
-        type=AccountType.PROP_FIRM,
-        prop_firm="ftmo",
-        mt5=_mt5(),
-        strategy="ma_crossover",
-    )
-
-
 def _personal(account_id: str = "personal-001") -> AccountConfig:
     return AccountConfig(
         id=account_id,
@@ -91,13 +80,6 @@ class TestClassifyAccount:
         assert row.firm_id == "ftmo"
         assert row.product_id == "challenge"
         assert row.phase == "evaluation"
-        assert row.preset_name is None
-
-    def test_preset_legacy(self) -> None:
-        row = classify_account(_preset_legacy())
-        assert row.rules_source == "preset_legacy"
-        assert row.preset_name == "ftmo"
-        assert row.firm_id is None
 
     def test_personal_rules_file(self) -> None:
         row = classify_account(_personal())
@@ -125,20 +107,18 @@ class TestClassifyAccounts:
             [
                 _firm_bound("firm-a"),
                 _firm_bound("firm-b"),
-                _preset_legacy("legacy-a"),
                 _personal("personal-a"),
                 _demo("demo-a"),
             ]
         )
         assert report.counts == {
             "firm_bound": 2,
-            "preset_legacy": 1,
             "personal_rules_file": 1,
             "none": 1,
         }
-        assert report.prop_firm_account_total == 3  # 2 firm + 1 legacy
-        assert report.prop_firm_legacy_count == 1
-        assert report.all_prop_firm_accounts_migrated is False
+        assert report.prop_firm_account_total == 2
+        assert report.prop_firm_legacy_count == 0
+        assert report.all_prop_firm_accounts_migrated is True
 
     def test_all_firm_bound_passes_strict_check(self) -> None:
         report = classify_accounts(
@@ -161,13 +141,12 @@ class TestClassifyAccounts:
         assert report.all_prop_firm_accounts_migrated is True
 
     def test_row_order_preserved(self) -> None:
-        order = ["a", "b", "c", "d"]
+        order = ["a", "b", "c"]
         report = classify_accounts(
             [
                 _firm_bound(order[0]),
-                _preset_legacy(order[1]),
-                _personal(order[2]),
-                _demo(order[3]),
+                _personal(order[1]),
+                _demo(order[2]),
             ]
         )
         assert [r.account_id for r in report.rows] == order
@@ -184,10 +163,6 @@ class TestSerialisation:
         rendered = row.to_table_row()
         assert rendered == ("acct-1", "prop_firm", "firm_bound", "ftmo/challenge/evaluation")
 
-    def test_to_table_row_preset_legacy(self) -> None:
-        row = classify_account(_preset_legacy("acct-2"))
-        assert row.to_table_row() == ("acct-2", "prop_firm", "preset_legacy", "ftmo")
-
     def test_to_table_row_personal(self) -> None:
         row = classify_account(_personal("acct-3"))
         assert row.to_table_row() == (
@@ -202,12 +177,12 @@ class TestSerialisation:
         assert row.to_table_row() == ("acct-4", "demo", "none", "")
 
     def test_report_to_dict_round_trips_through_json(self) -> None:
-        report = classify_accounts([_firm_bound("a"), _preset_legacy("b")])
+        report = classify_accounts([_firm_bound("a"), _personal("b")])
         payload = json.dumps(report.to_dict())
         decoded = json.loads(payload)
         assert decoded["counts"]["firm_bound"] == 1
-        assert decoded["counts"]["preset_legacy"] == 1
-        assert decoded["all_prop_firm_accounts_migrated"] is False
+        assert decoded["counts"]["personal_rules_file"] == 1
+        assert decoded["all_prop_firm_accounts_migrated"] is True
         assert len(decoded["rows"]) == 2
 
 
@@ -233,7 +208,6 @@ def _yaml_account(
     firm_id: str | None = None,
     product_id: str | None = None,
     phase: str | None = None,
-    prop_firm: str | None = None,
     rules_file: str | None = None,
 ) -> dict[str, Any]:
     entry: dict[str, Any] = {
@@ -249,8 +223,6 @@ def _yaml_account(
         entry["product_id"] = product_id
     if phase is not None:
         entry["phase"] = phase
-    if prop_firm is not None:
-        entry["prop_firm"] = prop_firm
     if rules_file is not None:
         entry["rules_file"] = rules_file
     return entry
@@ -276,9 +248,9 @@ class TestCli:
                     phase="evaluation",
                 ),
                 _yaml_account(
-                    "legacy-a",
-                    type_="prop_firm",
-                    prop_firm="ftmo",
+                    "personal-a",
+                    type_="personal",
+                    rules_file="configs/custom.yaml",
                 ),
             ],
         )
@@ -287,9 +259,9 @@ class TestCli:
         result = runner.invoke(accounts_app, ["audit-rules-source"])
         assert result.exit_code == 0, result.output
         assert "firm-a" in result.output
-        assert "legacy-a" in result.output
+        assert "personal-a" in result.output
         assert "firm_bound" in result.output
-        assert "preset_legacy" in result.output
+        assert "personal_rules_file" in result.output
 
     def test_strict_exits_zero_when_all_firm_bound(
         self, tmp_path: Path, runner: CliRunner, monkeypatch
@@ -314,9 +286,13 @@ class TestCli:
         assert result.exit_code == 0, result.output
         assert "Phase 5 cleanup unblocked" in result.output
 
-    def test_strict_exits_one_when_legacy_remains(
+    def test_strict_exits_zero_with_only_firm_and_personal_accounts(
         self, tmp_path: Path, runner: CliRunner, monkeypatch
     ) -> None:
+        """Story 10.12 — the legacy preset path was removed, so
+        ``--strict`` can no longer fail on it. Mixed firm + personal
+        rosters all pass.
+        """
         cfg = _write_accounts_yaml(
             tmp_path,
             accounts=[
@@ -328,7 +304,9 @@ class TestCli:
                     phase="evaluation",
                 ),
                 _yaml_account(
-                    "legacy-a", type_="prop_firm", prop_firm="ftmo"
+                    "personal-a",
+                    type_="personal",
+                    rules_file="configs/custom.yaml",
                 ),
             ],
         )
@@ -337,8 +315,7 @@ class TestCli:
         result = runner.invoke(
             accounts_app, ["audit-rules-source", "--strict"]
         )
-        assert result.exit_code == 1, result.output
-        assert "Phase 5 cleanup blocked" in result.output
+        assert result.exit_code == 0, result.output
 
     def test_json_output_is_valid_json(
         self, tmp_path: Path, runner: CliRunner, monkeypatch

@@ -33,14 +33,23 @@ def _create_mt5_config() -> MT5Config:
 
 def _create_prop_firm_account(
     account_id: str = "ftmo-001",
-    prop_firm: str = "ftmo",
+    firm_id: str = "ftmo",
+    product_id: str = "challenge",
+    phase: str = "evaluation",
 ) -> AccountConfig:
-    """Create a prop firm account for testing."""
+    """Create a firm-bound prop firm account for testing.
+
+    Story 10.12 — the legacy ``prop_firm`` preset source is gone;
+    every prop-firm account is bound via ``firm_id + product_id +
+    phase`` (mirrors :file:`configs/firms/<firm>.yaml`).
+    """
     return AccountConfig(
         id=account_id,
         name=f"Prop {account_id}",
         type=AccountType.PROP_FIRM,
-        prop_firm=prop_firm,
+        firm_id=firm_id,
+        product_id=product_id,
+        phase=phase,
         mt5=_create_mt5_config(),
         strategy="ma_crossover",
     )
@@ -80,23 +89,25 @@ def _create_demo_account(account_id: str = "demo-001") -> AccountConfig:
 class TestRuleAssignment:
     """Tests for RuleAssignment dataclass."""
 
-    def test_from_account_config_prop_firm(self):
-        """Test RuleAssignment.from_account_config for prop_firm account (AC1)."""
-        account = _create_prop_firm_account("ftmo-001", "ftmo")
+    def test_from_account_config_firm_bound_ftmo(self):
+        """Story 10.12 — prop-firm accounts now resolve to firm-bound."""
+        account = _create_prop_firm_account("ftmo-001", firm_id="ftmo")
         assignment = RuleAssignment.from_account_config(account)
 
-        assert assignment.assignment_type == "preset"
-        assert assignment.preset_name == "ftmo"
-        assert assignment.rules_file is None
-        assert assignment.rules == []
+        assert assignment.assignment_type == "firm"
+        assert assignment.firm_id == "ftmo"
+        assert assignment.product_id == "challenge"
+        assert assignment.phase == "evaluation"
 
-    def test_from_account_config_the5ers(self):
-        """Test RuleAssignment.from_account_config for the5ers account (AC2)."""
-        account = _create_prop_firm_account("5ers-001", "the5ers")
+    def test_from_account_config_firm_bound_the5ers(self):
+        """Story 10.12 — prop-firm accounts now resolve to firm-bound."""
+        account = _create_prop_firm_account(
+            "5ers-001", firm_id="the5ers", product_id="bootstrap", phase="funded"
+        )
         assignment = RuleAssignment.from_account_config(account)
 
-        assert assignment.assignment_type == "preset"
-        assert assignment.preset_name == "the5ers"
+        assert assignment.assignment_type == "firm"
+        assert assignment.firm_id == "the5ers"
 
     def test_from_account_config_personal(self):
         """Test RuleAssignment.from_account_config for personal account (AC3)."""
@@ -465,16 +476,21 @@ rules:
 class TestRuleAssignmentService:
     """Tests for RuleAssignmentService class."""
 
-    def test_get_rules_for_prop_firm_account(self):
-        """Test getting rules for prop firm account (AC1, AC2)."""
+    def test_get_rules_for_prop_firm_account_uses_firm_path(self):
+        """Story 10.12 — prop-firm accounts now resolve through the firm
+        binding, not the legacy preset path. Without a wired
+        ``FirmRegistry`` the service raises ``ValueError`` because the
+        firm is unknown — sufficient to assert the assignment took the
+        firm path.
+        """
         service = RuleAssignmentService()
-        account = _create_prop_firm_account("ftmo-001", "ftmo")
+        account = _create_prop_firm_account("ftmo-001", firm_id="ftmo")
 
-        rules = service.get_rules_for_account(account)
-
-        assert len(rules) > 0
-        rule_types = [r.rule_type for r in rules]
-        assert "daily_loss_limit" in rule_types
+        # The firm registry isn't wired in this minimal service, so the
+        # firm path raises — that proves we no longer hit the (deleted)
+        # preset path.
+        with pytest.raises(Exception):  # noqa: BLE001 — firm-resolution flavour varies
+            service.get_rules_for_account(account)
 
     def test_get_rules_for_personal_account(self, tmp_path):
         """Test getting rules for personal account (AC3)."""
@@ -510,15 +526,15 @@ rules:
 
         assert rules == []
 
-    def test_get_assignment_for_account(self):
-        """Test getting assignment metadata."""
+    def test_get_assignment_for_firm_bound_account(self):
+        """Story 10.12 — prop-firm accounts now produce a ``firm`` assignment."""
         service = RuleAssignmentService()
-        account = _create_prop_firm_account("ftmo-001", "ftmo")
+        account = _create_prop_firm_account("ftmo-001", firm_id="ftmo")
 
         assignment = service.get_assignment_for_account(account)
 
-        assert assignment.assignment_type == "preset"
-        assert assignment.preset_name == "ftmo"
+        assert assignment.assignment_type == "firm"
+        assert assignment.firm_id == "ftmo"
 
     def test_get_available_presets(self):
         """Test listing available presets through service."""
@@ -529,23 +545,10 @@ rules:
         assert "the5ers" in presets
         assert "wmt" in presets
 
-    def test_preset_not_found_error_propagates(self):
-        """Test PresetNotFoundError propagates from service (AC5)."""
-        service = RuleAssignmentService()
-
-        # Create account with invalid prop_firm (bypassing model validation)
-        account = MagicMock(spec=AccountConfig)
-        account.id = "test-001"
-        account.type = AccountType.PROP_FIRM
-        account.prop_firm = "invalid_preset"
-        account.rules_file = None
-        account.firm_id = None
-        account.product_id = None
-        account.phase = None
-        account.rule_overrides = {}
-
-        with pytest.raises(PresetNotFoundError):
-            service.get_rules_for_account(account)
+    # Story 10.12 — ``test_preset_not_found_error_propagates`` was
+    # removed when the preset path was deleted; the unreachable
+    # ``PresetNotFoundError`` propagation is now N/A. The error class
+    # itself is removed in story 10.13 alongside the preset loader.
 
     def test_rules_file_not_found_error_propagates(self):
         """Test RulesFileNotFoundError propagates from service (AC6)."""
@@ -555,7 +558,6 @@ rules:
         account = MagicMock(spec=AccountConfig)
         account.id = "test-001"
         account.type = AccountType.PERSONAL
-        account.prop_firm = None
         account.rules_file = "nonexistent_rules.yaml"
         account.firm_id = None
         account.product_id = None

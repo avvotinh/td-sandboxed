@@ -8,17 +8,29 @@ Tests cover:
 """
 
 import time
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
 from src.accounts.account_manager import AccountManager
 from src.accounts.models import AccountConfig, AccountsConfig, AccountType, MT5Config
+from src.config.firm_registry import FirmRegistry
 from src.rules.assignment_service import RuleAssignmentService
 from src.rules.base_rule import RuleAction, RuleResult
 from src.rules.context_builder import RuleContextBuilder
 from src.rules.engine import RuleEngine
 from src.rules.engine_factory import RuleEngineFactory
+
+
+# Story 10.12 — see test_rule_assignment_flow.py for rationale.
+_FIRMS_DIR = Path(__file__).resolve().parents[4] / "configs" / "firms"
+
+
+def _service_with_firm_registry(**kwargs) -> RuleAssignmentService:
+    registry = FirmRegistry(_FIRMS_DIR)
+    registry.load()
+    return RuleAssignmentService(firm_registry=registry, **kwargs)
 
 
 # =============================================================================
@@ -33,14 +45,21 @@ def _create_mt5_config() -> MT5Config:
 
 def _create_prop_firm_account(
     account_id: str = "ftmo-001",
-    prop_firm: str = "ftmo",
+    firm_id: str = "ftmo",
+    product_id: str = "challenge",
+    phase: str = "evaluation",
 ) -> AccountConfig:
-    """Create a prop firm account for testing."""
+    """Create a firm-bound prop firm account for testing.
+
+    Story 10.12 — the legacy ``prop_firm`` preset source is gone.
+    """
     return AccountConfig(
         id=account_id,
         name=f"Prop {account_id}",
         type=AccountType.PROP_FIRM,
-        prop_firm=prop_firm,
+        firm_id=firm_id,
+        product_id=product_id,
+        phase=phase,
         mt5=_create_mt5_config(),
         strategy="ma_crossover",
     )
@@ -120,7 +139,7 @@ class TestAccountManagerRuleEngineFlow:
         """Test AccountManager creates RuleEngine for account with rules."""
         # Setup
         manager = AccountManager(mock_redis_manager)
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
         manager.set_rule_assignment_service(service)
 
         # Load FTMO account
@@ -141,7 +160,7 @@ class TestAccountManagerRuleEngineFlow:
         """Test RuleEngine validates context correctly."""
         # Setup
         manager = AccountManager(mock_redis_manager)
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
         manager.set_rule_assignment_service(service)
 
         account = _create_prop_firm_account("ftmo-001", "ftmo")
@@ -175,7 +194,7 @@ class TestAccountManagerRuleEngineFlow:
     def test_demo_account_has_no_engine(self, mock_redis_manager):
         """Test demo accounts don't have a RuleEngine."""
         manager = AccountManager(mock_redis_manager)
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
         manager.set_rule_assignment_service(service)
 
         account = _create_demo_account("demo-001")
@@ -193,13 +212,15 @@ class TestMultipleAccountRuleEngines:
     def test_accounts_have_independent_engines(self, mock_redis_manager):
         """Test each account has its own independent RuleEngine."""
         manager = AccountManager(mock_redis_manager)
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
         manager.set_rule_assignment_service(service)
 
         # Create multiple accounts
         accounts = [
             _create_prop_firm_account("ftmo-001", "ftmo"),
-            _create_prop_firm_account("the5ers-001", "the5ers"),
+            _create_prop_firm_account(
+                "the5ers-001", firm_id="the5ers", product_id="bootstrap", phase="funded"
+            ),
         ]
         config = AccountsConfig(accounts=accounts)
         manager.load_accounts(config)
@@ -222,7 +243,7 @@ class TestMultipleAccountRuleEngines:
     def test_validation_isolated_between_accounts(self, mock_redis_manager):
         """Test validation on one account doesn't affect another."""
         manager = AccountManager(mock_redis_manager)
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
         manager.set_rule_assignment_service(service)
 
         accounts = [
@@ -277,7 +298,7 @@ class TestRuleEngineMixedRules:
     def test_ftmo_preset_rules_load_correctly(self, mock_redis_manager):
         """Test FTMO preset rules are loaded into engine correctly."""
         manager = AccountManager(mock_redis_manager)
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
         manager.set_rule_assignment_service(service)
 
         account = _create_prop_firm_account("ftmo-001", "ftmo")
@@ -299,7 +320,7 @@ class TestRuleEngineMixedRules:
     def test_rules_sorted_by_priority(self, mock_redis_manager):
         """Test rules in engine are sorted by priority."""
         manager = AccountManager(mock_redis_manager)
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
         manager.set_rule_assignment_service(service)
 
         account = _create_prop_firm_account("ftmo-001", "ftmo")

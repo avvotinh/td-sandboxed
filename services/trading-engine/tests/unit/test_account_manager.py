@@ -39,7 +39,9 @@ def sample_accounts_config():
                 id="test-account-001",
                 name="Test Account 1",
                 type=AccountType.PROP_FIRM,
-                prop_firm="ftmo",
+                firm_id="ftmo",
+                product_id="challenge",
+                phase="evaluation",
                 mt5=MT5Config(
                     server="TestServer",
                     login=12345,

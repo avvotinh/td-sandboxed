@@ -18,9 +18,6 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 MAX_ACCOUNTS = 5
 """Maximum number of trading accounts supported."""
 
-VALID_PROP_FIRMS = frozenset({"ftmo", "the5ers", "wmt"})
-"""Valid prop firm presets for compliance rules."""
-
 
 class AccountType(str, Enum):
     """Trading account type enumeration."""
@@ -87,12 +84,13 @@ class AccountConfig(BaseModel):
     1. **Firm-bound (Epic 9+)** — ``firm_id`` + ``product_id`` + ``phase``
        (+ optional ``rule_overrides``). Resolved against :class:`FirmRegistry`
        to load a ``FirmProfile`` → ``AccountProduct`` → ``AccountPhase``.
-    2. **Preset (legacy, Epic 4)** — ``prop_firm`` points at a built-in
-       preset in ``services/trading-engine/src/rules/presets/``. Still
-       supported; will be phased out after P0.11 migrates presets to firm
-       profiles.
-    3. **Personal** — ``rules_file`` pointing at a custom YAML.
-    4. **Demo** — no rule source required.
+    2. **Personal** — ``rules_file`` pointing at a custom YAML.
+    3. **Demo** — no rule source required.
+
+    Story 10.12 — the legacy preset path (``prop_firm: <name>`` pointing
+    at a built-in preset YAML) was removed. Operators migrating from the
+    legacy path before Epic 9 should use firm bindings published under
+    ``configs/firms/*.yaml``.
 
     Attributes:
         id: Unique account identifier (alphanumeric with dashes/underscores)
@@ -104,7 +102,6 @@ class AccountConfig(BaseModel):
         rule_overrides: Per-account rule overrides; merged + safety-guarded
             at rule-assignment time by ``rules.override_merger`` (Epic 9 P0.16).
             Account overrides may only tighten guarded block thresholds.
-        prop_firm: Legacy prop firm preset name (Epic 4)
         rules_file: Path to custom rules file
         mt5: MT5 connection configuration
         strategy: Strategy name to execute on this account
@@ -127,7 +124,6 @@ class AccountConfig(BaseModel):
             "overrides may only tighten guarded block thresholds."
         ),
     )
-    prop_firm: Optional[str] = Field(default=None, description="Legacy prop firm preset name")
     rules_file: Optional[str] = Field(default=None, description="Custom rules file path")
     mt5: MT5Config
     strategy: str = Field(..., min_length=1, description="Strategy name")
@@ -141,14 +137,6 @@ class AccountConfig(BaseModel):
         """Validate account ID format (alphanumeric with dashes/underscores)."""
         if not v.replace("-", "").replace("_", "").isalnum():
             raise ValueError("id must be alphanumeric with dashes/underscores only")
-        return v
-
-    @field_validator("prop_firm", mode="before")
-    @classmethod
-    def normalize_prop_firm(cls, v: Optional[str]) -> Optional[str]:
-        """Normalize prop_firm to lowercase for case-insensitive matching."""
-        if v is not None:
-            return v.lower()
         return v
 
     @field_validator("firm_id", mode="before")
@@ -165,31 +153,29 @@ class AccountConfig(BaseModel):
 
         Valid rule sources (pick one):
           * Firm-bound: ``firm_id`` + ``product_id`` + ``phase`` (Epic 9+)
-          * Preset (legacy): ``prop_firm``
           * Personal: ``rules_file``
           * (Demo accounts need none.)
 
-        The three sources are mutually exclusive to prevent ambiguity about
-        which rule set wins.
+        The two sources are mutually exclusive to prevent ambiguity about
+        which rule set wins. Story 10.12 dropped the legacy preset
+        source (``prop_firm`` field).
         """
         sources = []
         if self.firm_id is not None or self.product_id is not None or self.phase is not None:
             sources.append("firm")
-        if self.prop_firm is not None:
-            sources.append("preset")
         if self.rules_file is not None:
             sources.append("personal")
 
         if len(sources) > 1:
             raise ValueError(
                 f"Account '{self.id}' must specify exactly one rule source; "
-                f"got {sources}. Use firm_id+product_id+phase OR prop_firm OR rules_file."
+                f"got {sources}. Use firm_id+product_id+phase OR rules_file."
             )
 
         if self.type != AccountType.DEMO and not sources:
             raise ValueError(
                 f"Account '{self.id}' of type '{self.type.value}' must have a rule source: "
-                "firm_id+product_id+phase, prop_firm, or rules_file."
+                "firm_id+product_id+phase or rules_file."
             )
 
         if self.type == AccountType.DEMO and sources:
@@ -216,20 +202,6 @@ class AccountConfig(BaseModel):
                 "rule_overrides only apply when firm_id+product_id+phase are set."
             )
 
-        return self
-
-    @model_validator(mode="after")
-    def validate_prop_firm_preset(self) -> "AccountConfig":
-        """Validate prop_firm preset against known prop firms.
-
-        If prop_firm is specified, validates it against VALID_PROP_FIRMS.
-        Note: prop_firm is already normalized to lowercase by field_validator.
-        """
-        if self.prop_firm and self.prop_firm not in VALID_PROP_FIRMS:
-            raise ValueError(
-                f"Unknown prop firm preset: '{self.prop_firm}'. "
-                f"Valid presets: {', '.join(sorted(VALID_PROP_FIRMS))}"
-            )
         return self
 
 

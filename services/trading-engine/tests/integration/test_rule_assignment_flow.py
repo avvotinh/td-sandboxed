@@ -15,9 +15,27 @@ import pytest
 
 from src.accounts.account_manager import AccountManager
 from src.accounts.models import AccountConfig, AccountsConfig, AccountType, MT5Config
+from src.config.firm_registry import FirmRegistry
 from src.rules.assignment_service import RuleAssignmentService
 from src.rules.custom_loader import CustomRuleLoader
 from src.rules.preset_loader import RulePresetLoader
+
+
+# Story 10.12 — every prop-firm-flavoured test now resolves rules
+# through the firm registry. Loading the shipped configs once keeps
+# the firm-bound branch hot without each test re-reading YAML.
+_FIRMS_DIR = Path(__file__).resolve().parents[4] / "configs" / "firms"
+
+
+def _service_with_firm_registry(**kwargs) -> RuleAssignmentService:
+    """Build a :class:`RuleAssignmentService` with the firm registry wired.
+
+    Mirrors what the production lifecycle does — every test that exercises
+    a prop-firm account needs the registry to resolve ``firm:ftmo/...``.
+    """
+    registry = FirmRegistry(_FIRMS_DIR)
+    registry.load()
+    return RuleAssignmentService(firm_registry=registry, **kwargs)
 
 
 # =============================================================================
@@ -32,14 +50,21 @@ def _create_mt5_config() -> MT5Config:
 
 def _create_prop_firm_account(
     account_id: str = "ftmo-001",
-    prop_firm: str = "ftmo",
+    firm_id: str = "ftmo",
+    product_id: str = "challenge",
+    phase: str = "evaluation",
 ) -> AccountConfig:
-    """Create a prop firm account for testing."""
+    """Create a firm-bound prop firm account for testing.
+
+    Story 10.12 — the legacy ``prop_firm`` preset source is gone.
+    """
     return AccountConfig(
         id=account_id,
         name=f"Prop {account_id}",
         type=AccountType.PROP_FIRM,
-        prop_firm=prop_firm,
+        firm_id=firm_id,
+        product_id=product_id,
+        phase=phase,
         mt5=_create_mt5_config(),
         strategy="ma_crossover",
     )
@@ -99,7 +124,7 @@ class TestFullFlowFTMORules:
         account = _create_prop_firm_account("ftmo-gold-001", "ftmo")
 
         # Create rule assignment service
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
 
         # Get rules for account
         rules = service.get_rules_for_account(account)
@@ -114,8 +139,10 @@ class TestFullFlowFTMORules:
 
     def test_the5ers_rules_full_flow(self):
         """Test complete flow for The5ers prop firm account (AC2)."""
-        account = _create_prop_firm_account("5ers-001", "the5ers")
-        service = RuleAssignmentService()
+        account = _create_prop_firm_account(
+            "5ers-001", firm_id="the5ers", product_id="bootstrap", phase="funded"
+        )
+        service = _service_with_firm_registry()
 
         rules = service.get_rules_for_account(account)
 
@@ -174,7 +201,7 @@ class TestDemoAccountNoRules:
     def test_demo_account_no_rules(self):
         """Test that demo accounts get no rules assigned."""
         account = _create_demo_account("demo-001")
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
 
         rules = service.get_rules_for_account(account)
 
@@ -201,9 +228,9 @@ rules:
         account_b = _create_personal_account("personal-001", "account_b_rules.yaml")
         account_c = _create_demo_account("demo-001")
 
-        # Create service
+        # Service with both firm registry (for account_a) and custom loader (for account_b).
         custom_loader = CustomRuleLoader(config_dir=tmp_path)
-        service = RuleAssignmentService(custom_loader=custom_loader)
+        service = _service_with_firm_registry(custom_loader=custom_loader)
 
         # Get rules for each account
         rules_a = service.get_rules_for_account(account_a)
@@ -231,7 +258,7 @@ class TestAccountManagerRuleIntegration:
     def test_set_rule_assignment_service(self, mock_redis_manager):
         """Test setting rule assignment service on AccountManager."""
         manager = AccountManager(mock_redis_manager)
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
 
         manager.set_rule_assignment_service(service)
 
@@ -248,7 +275,7 @@ class TestAccountManagerRuleIntegration:
     def test_initialize_account_rules_loads_preset(self, mock_redis_manager):
         """Test _initialize_account_rules loads preset rules."""
         manager = AccountManager(mock_redis_manager)
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
         manager.set_rule_assignment_service(service)
 
         # Load account config
@@ -268,7 +295,7 @@ class TestAccountManagerRuleIntegration:
     def test_initialize_account_rules_demo_no_rules(self, mock_redis_manager):
         """Test _initialize_account_rules gives empty list for demo."""
         manager = AccountManager(mock_redis_manager)
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
         manager.set_rule_assignment_service(service)
 
         account = _create_demo_account("demo-001")
@@ -310,7 +337,7 @@ rules:
         # Setup AccountManager
         manager = AccountManager(mock_redis_manager)
         custom_loader = CustomRuleLoader(config_dir=tmp_path)
-        service = RuleAssignmentService(custom_loader=custom_loader)
+        service = _service_with_firm_registry(custom_loader=custom_loader)
         manager.set_rule_assignment_service(service)
 
         # Load multiple accounts

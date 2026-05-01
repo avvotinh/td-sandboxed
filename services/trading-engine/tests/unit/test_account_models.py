@@ -15,7 +15,6 @@ from pydantic import ValidationError
 
 from src.accounts.models import (
     MAX_ACCOUNTS,
-    VALID_PROP_FIRMS,
     AccountConfig,
     AccountsConfig,
     AccountType,
@@ -142,7 +141,9 @@ class TestAccountConfig:
             id="ftmo-gold-001",
             name="FTMO Gold Challenge",
             type=AccountType.PROP_FIRM,
-            prop_firm="ftmo",
+            firm_id="ftmo",
+            product_id="challenge",
+            phase="evaluation",
             mt5=MT5Config(
                 server="FTMO-Server",
                 login=12345678,
@@ -171,7 +172,7 @@ class TestAccountConfig:
             strategy="breakout",
         )
         assert config.rules_file == "configs/custom_rules.yaml"
-        assert config.prop_firm is None
+# 10.12: prop_firm field removed
 
     def test_default_values(self):
         """Test that optional fields have sensible defaults."""
@@ -189,7 +190,7 @@ class TestAccountConfig:
         assert config.status == "active"
         assert config.strategy_params == {}
         assert config.signal_filter.symbols == []
-        assert config.prop_firm is None
+# 10.12: prop_firm field removed
         assert config.rules_file is None
 
     def test_missing_required_field_name(self):
@@ -302,7 +303,7 @@ class TestAccountConfig:
             strategy="test",
         )
         assert config.type == AccountType.DEMO
-        assert config.prop_firm is None
+# 10.12: prop_firm field removed
         assert config.rules_file is None
 
     def test_invalid_status_value(self):
@@ -507,7 +508,9 @@ accounts:
   - id: ftmo-001
     name: FTMO Gold
     type: prop_firm
-    prop_firm: ftmo
+    firm_id: ftmo
+    product_id: challenge
+    phase: evaluation
     mt5:
       server: FTMO-Server
       login: 11111
@@ -618,21 +621,25 @@ def _create_demo_account(account_id: str) -> AccountConfig:
     )
 
 
-def _create_prop_firm_account(account_id: str, prop_firm: str = "ftmo") -> AccountConfig:
-    """Create a prop firm account for testing.
+def _create_prop_firm_account(
+    account_id: str,
+    firm_id: str = "ftmo",
+    product_id: str = "challenge",
+    phase: str = "evaluation",
+) -> AccountConfig:
+    """Create a firm-bound prop firm account for testing.
 
-    Args:
-        account_id: Unique identifier for the account.
-        prop_firm: Prop firm preset name. Defaults to "ftmo".
-
-    Returns:
-        A prop firm AccountConfig instance.
+    Story 10.12 — the legacy ``prop_firm: <preset>`` source is gone;
+    every prop-firm account here is bound via ``firm_id + product_id +
+    phase``. The defaults match :file:`configs/firms/ftmo.yaml`.
     """
     return AccountConfig(
         id=account_id,
         name=f"Prop {account_id}",
         type=AccountType.PROP_FIRM,
-        prop_firm=prop_firm,
+        firm_id=firm_id,
+        product_id=product_id,
+        phase=phase,
         mt5=MT5Config(server="FTMO-Server", login=12345, password_env="FTMO_PASS"),
         strategy="ma_crossover",
     )
@@ -662,9 +669,8 @@ class TestMaxAccountsValidation:
     """Tests for maximum accounts validation (AC2)."""
 
     def test_constants_defined(self):
-        """Verify MAX_ACCOUNTS and VALID_PROP_FIRMS constants are defined."""
+        """Verify MAX_ACCOUNTS constant is defined."""
         assert MAX_ACCOUNTS == 5
-        assert VALID_PROP_FIRMS == frozenset({"ftmo", "the5ers", "wmt"})
 
     def test_zero_accounts_allowed(self):
         """Boundary: zero accounts should be valid (well under max)."""
@@ -760,63 +766,6 @@ class TestDuplicateIdValidation:
         assert len(config.accounts) == 3
 
 
-class TestPropFirmValidation:
-    """Tests for prop firm preset validation (AC4)."""
-
-    def test_invalid_prop_firm_preset(self):
-        """Unknown prop firm must fail with helpful error (AC4)."""
-        with pytest.raises(ValidationError) as exc_info:
-            AccountConfig(
-                id="test-001",
-                name="Test Account",
-                type=AccountType.PROP_FIRM,
-                prop_firm="Invalid_Firm",
-                mt5=MT5Config(server="S", login=1, password_env="P"),
-                strategy="test",
-            )
-        error_msg = str(exc_info.value)
-        # AC4: Error must be "Unknown prop firm preset: {prop_firm}"
-        # Note: prop_firm is normalized to lowercase before validation
-        assert "Unknown prop firm preset: 'invalid_firm'" in error_msg
-        # Should list valid presets
-        assert "ftmo" in error_msg
-        assert "the5ers" in error_msg
-        assert "wmt" in error_msg
-
-    def test_prop_firm_case_insensitive_uppercase(self):
-        """FTMO (uppercase) should be normalized to lowercase."""
-        acc = _create_prop_firm_account("test-001", prop_firm="FTMO")
-        assert acc.prop_firm == "ftmo"
-
-    def test_prop_firm_case_insensitive_mixed(self):
-        """Ftmo (mixed case) should be normalized to lowercase."""
-        acc = _create_prop_firm_account("test-001", prop_firm="Ftmo")
-        assert acc.prop_firm == "ftmo"
-
-    def test_prop_firm_case_insensitive_lowercase(self):
-        """ftmo (lowercase) should work as-is."""
-        acc = _create_prop_firm_account("test-001", prop_firm="ftmo")
-        assert acc.prop_firm == "ftmo"
-
-    def test_all_valid_prop_firms(self):
-        """All valid prop firm presets should be accepted."""
-        for prop_firm in VALID_PROP_FIRMS:
-            acc = _create_prop_firm_account(f"test-{prop_firm}", prop_firm=prop_firm)
-            assert acc.prop_firm == prop_firm
-
-    def test_the5ers_case_variations(self):
-        """The5ers case variations should all work."""
-        for variant in ["the5ers", "THE5ERS", "The5ers"]:
-            acc = _create_prop_firm_account("test-001", prop_firm=variant)
-            assert acc.prop_firm == "the5ers"
-
-    def test_wmt_case_variations(self):
-        """WMT case variations should all work."""
-        for variant in ["wmt", "WMT", "Wmt"]:
-            acc = _create_prop_firm_account("test-001", prop_firm=variant)
-            assert acc.prop_firm == "wmt"
-
-
 class TestMT5ConfigValidation:
     """Tests for MT5 configuration validation (AC5)."""
 
@@ -867,23 +816,23 @@ class TestMixedAccountTypes:
         assert types == {AccountType.PROP_FIRM, AccountType.PERSONAL, AccountType.DEMO}
 
     def test_multiple_prop_firm_accounts(self):
-        """Multiple prop firm accounts with different firms should load."""
+        """Multiple prop firm accounts bound to different firms load."""
         accounts = [
-            _create_prop_firm_account("ftmo-001", prop_firm="ftmo"),
-            _create_prop_firm_account("5ers-001", prop_firm="the5ers"),
-            _create_prop_firm_account("wmt-001", prop_firm="wmt"),
+            _create_prop_firm_account("ftmo-001", firm_id="ftmo"),
+            _create_prop_firm_account("5ers-001", firm_id="the5ers"),
+            _create_prop_firm_account("wmt-001", firm_id="wmt"),
         ]
         config = AccountsConfig(accounts=accounts)
         assert len(config.accounts) == 3
 
-        prop_firms = {acc.prop_firm for acc in config.accounts}
-        assert prop_firms == {"ftmo", "the5ers", "wmt"}
+        firm_ids = {acc.firm_id for acc in config.accounts}
+        assert firm_ids == {"ftmo", "the5ers", "wmt"}
 
     def test_mixed_five_accounts_at_limit(self):
         """5 mixed accounts (the limit) should load successfully."""
         accounts = [
             _create_prop_firm_account("ftmo-001"),
-            _create_prop_firm_account("5ers-001", prop_firm="the5ers"),
+            _create_prop_firm_account("5ers-001", firm_id="the5ers"),
             _create_personal_account("personal-001"),
             _create_demo_account("demo-001"),
             _create_demo_account("demo-002"),
@@ -1061,8 +1010,14 @@ accounts:
             loader.load()
         assert "Duplicate account ID: same-id" in str(exc_info.value)
 
-    def test_load_invalid_prop_firm_fails(self, tmp_path):
-        """Loading config with invalid prop_firm should fail with clear error."""
+    def test_load_prop_firm_without_firm_binding_fails(self, tmp_path):
+        """Loading a prop_firm-type account with no rule source must fail.
+
+        Story 10.12 dropped the legacy ``prop_firm`` preset field; an
+        account whose rules-source is missing now fails on
+        ``validate_rules_source`` with a clear message that the firm
+        binding (or rules_file) is required.
+        """
         config_file = tmp_path / "accounts.yaml"
         config_file.write_text(
             """
@@ -1070,7 +1025,6 @@ accounts:
   - id: prop-001
     name: Prop Account
     type: prop_firm
-    prop_firm: nonexistent_firm
     mt5: {server: S, login: 1, password_env: P}
     strategy: test
 """
@@ -1079,7 +1033,7 @@ accounts:
         loader = ConfigLoader(config_file)
         with pytest.raises(ConfigValidationError) as exc_info:
             loader.load()
-        assert "Unknown prop firm preset" in str(exc_info.value)
+        assert "must have a rule source" in str(exc_info.value)
 
     def test_load_mixed_account_types_from_yaml(self, tmp_path):
         """Load mixed account types from YAML file."""
@@ -1090,7 +1044,9 @@ accounts:
   - id: ftmo-001
     name: FTMO Gold
     type: prop_firm
-    prop_firm: FTMO
+    firm_id: ftmo
+    product_id: challenge
+    phase: evaluation
     mt5:
       server: FTMO-Server
       login: 12345678
@@ -1123,9 +1079,9 @@ accounts:
 
         assert len(config.accounts) == 3
 
-        # Verify prop_firm was normalized to lowercase
+        # Verify firm_id was normalized to lowercase
         ftmo_acc = next(a for a in config.accounts if a.id == "ftmo-001")
-        assert ftmo_acc.prop_firm == "ftmo"  # Normalized from "FTMO"
+        assert ftmo_acc.firm_id == "ftmo"
 
         # Verify all types are present
         types = {acc.type for acc in config.accounts}

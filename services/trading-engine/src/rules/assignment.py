@@ -88,10 +88,15 @@ class RuleAssignment:
         """Create RuleAssignment from account configuration.
 
         Resolution order (matches ``AccountConfig.validate_rules_source``):
-          1. ``firm_id`` set → firm assignment (Epic 9 path)
-          2. ``prop_firm`` set → preset assignment (legacy Epic 4 path)
-          3. ``rules_file`` set → personal assignment
-          4. Otherwise (demo or no source) → none
+          1. ``firm_id`` set → firm assignment (Epic 9+ path).
+          2. ``rules_file`` set → personal assignment.
+          3. Otherwise (demo or no source) → none.
+
+        Story 10.12 dropped the legacy ``prop_firm`` preset branch
+        once ops sign-off confirmed no production accounts remain on
+        the legacy path. ``RuleAssignment(assignment_type="preset")``
+        is still constructable for historical-data inspection but
+        :class:`AccountConfig` no longer produces it.
         """
         from ..accounts.models import AccountType
 
@@ -102,11 +107,6 @@ class RuleAssignment:
                 product_id=account.product_id,
                 phase=account.phase,
                 rule_overrides=deepcopy(account.rule_overrides),
-            )
-        if account.type == AccountType.PROP_FIRM and account.prop_firm:
-            return cls(
-                assignment_type="preset",
-                preset_name=account.prop_firm,
             )
         if account.type == AccountType.PERSONAL and account.rules_file:
             return cls(

@@ -8,12 +8,14 @@ Tests cover:
 - Multiple accounts with different thresholds (FTMO 5%, The5ers 5%, custom 3%)
 """
 
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
 from src.accounts.account_manager import AccountManager
 from src.accounts.models import AccountConfig, AccountsConfig, AccountType, MT5Config
+from src.config.firm_registry import FirmRegistry
 from src.rules.assignment_service import RuleAssignmentService
 from src.rules.base_rule import RuleAction, RuleResult
 from src.rules.context_builder import RuleContextBuilder
@@ -21,6 +23,16 @@ from src.rules.engine import RuleEngine
 from src.rules.parser import RuleParser
 from src.rules.preset_loader import RulePresetLoader
 from src.rules.types.drawdown import DailyLossLimitRule
+
+
+# Story 10.12 — see test_rule_assignment_flow.py for rationale.
+_FIRMS_DIR = Path(__file__).resolve().parents[4] / "configs" / "firms"
+
+
+def _service_with_firm_registry(**kwargs) -> RuleAssignmentService:
+    registry = FirmRegistry(_FIRMS_DIR)
+    registry.load()
+    return RuleAssignmentService(firm_registry=registry, **kwargs)
 
 
 # =============================================================================
@@ -35,14 +47,18 @@ def _create_mt5_config() -> MT5Config:
 
 def _create_prop_firm_account(
     account_id: str = "ftmo-001",
-    prop_firm: str = "ftmo",
+    firm_id: str = "ftmo",
+    product_id: str = "challenge",
+    phase: str = "evaluation",
 ) -> AccountConfig:
-    """Create a prop firm account for testing."""
+    """Story 10.12 — firm-bound replaces the dropped ``prop_firm`` preset."""
     return AccountConfig(
         id=account_id,
         name=f"Prop {account_id}",
         type=AccountType.PROP_FIRM,
-        prop_firm=prop_firm,
+        firm_id=firm_id,
+        product_id=product_id,
+        phase=phase,
         mt5=_create_mt5_config(),
         strategy="ma_crossover",
     )
@@ -444,13 +460,15 @@ class TestMultipleAccountsWithDifferentThresholds:
     def test_account_manager_assigns_correct_rules(self, mock_redis_manager):
         """Test AccountManager assigns correct rules to each account."""
         manager = AccountManager(mock_redis_manager)
-        service = RuleAssignmentService()
+        service = _service_with_firm_registry()
         manager.set_rule_assignment_service(service)
 
         # Create FTMO and The5ers accounts
         accounts = [
-            _create_prop_firm_account("ftmo-001", "ftmo"),
-            _create_prop_firm_account("the5ers-001", "the5ers"),
+            _create_prop_firm_account("ftmo-001", firm_id="ftmo"),
+            _create_prop_firm_account(
+                "the5ers-001", firm_id="the5ers", product_id="bootstrap", phase="funded"
+            ),
         ]
         config = AccountsConfig(accounts=accounts)
         manager.load_accounts(config)
