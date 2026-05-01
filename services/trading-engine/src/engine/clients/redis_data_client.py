@@ -283,6 +283,53 @@ class RedisDataClient(LiveMarketDataClient):
             len(channels),
         )
 
+    # ------------------------------------------------------------------
+    # Subscription requests from strategies
+    # ------------------------------------------------------------------
+
+    async def _subscribe_bars(self, command) -> None:  # noqa: D401
+        """Acknowledge ``subscribe_bars`` from a strategy.
+
+        ``RedisDataClient`` already psubscribes its full ``bar_subscriptions``
+        set at :meth:`_connect`, so this is a no-op rather than a
+        per-bar-type subscribe. The override exists because the
+        :class:`LiveMarketDataClient` base class's default implementation
+        raises ``NotImplementedError`` — without this override, every
+        strategy's ``on_start`` ``subscribe_bars`` call would crash the
+        data engine before the first bar arrived.
+
+        We log a WARNING when the requested ``bar_type`` was not in the
+        ``bar_subscriptions`` we psubscribed at connect time. Without
+        the warning, an orchestrator/strategy timeframe mismatch would
+        silently starve the strategy — bars would be filtered out by
+        :func:`run_redis_bar_listener`'s channel filter without any
+        observable signal at the subscription seam.
+        """
+        bar_type = getattr(command, "bar_type", None)
+        if bar_type is None:
+            return
+        symbol = str(bar_type.instrument_id.symbol)
+        configured = {sym for sym, _ in self._bar_subscriptions}
+        if symbol not in configured:
+            logger.warning(
+                "RedisDataClient[%s]: strategy subscribed to %s but its "
+                "symbol is not in bar_subscriptions=%s — bars will be "
+                "silently dropped",
+                self._account_id,
+                bar_type,
+                sorted(configured),
+            )
+        return
+
+    async def _unsubscribe_bars(self, command) -> None:  # noqa: D401
+        """Acknowledge ``unsubscribe_bars`` from a strategy.
+
+        Symmetric with :meth:`_subscribe_bars` — the lifetime of the
+        underlying psubscribe is bound to ``_connect`` / ``_disconnect``,
+        not to per-strategy subscription state.
+        """
+        return
+
     async def _disconnect(self) -> None:
         if self._listener_task is not None:
             self._listener_task.cancel()

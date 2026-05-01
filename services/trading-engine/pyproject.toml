@@ -61,4 +61,8 @@ dev = [
     "ruff>=0.14.9",
     "hypothesis>=6.100",
     "pytest-benchmark>=4.0",
+    # Story 10.5f — E2E live-trading integration tests need a fake
+    # Redis with full pubsub semantics. ``fakeredis[lua]`` ships the
+    # Lua extension required for the 10.4 atomic exposure scripts.
+    "fakeredis[lua]>=2.20",
 ]

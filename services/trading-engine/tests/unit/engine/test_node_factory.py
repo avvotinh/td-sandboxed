@@ -157,12 +157,12 @@ class TestNodeBuild:
         assert isinstance(node, _RecordingTradingNode)
         assert node.built is True
         # Factory registered under the sanitised client name (uppercase).
-        assert "FTMO-007" in node.data_factories
-        assert "FTMO-007" in node.exec_factories
+        assert "FTMO_007" in node.data_factories
+        assert "FTMO_007" in node.exec_factories
         # The factories are subclasses of the expected Nautilus base
         # classes (closure-built classes preserve the inheritance).
-        data_factory = node.data_factories["FTMO-007"]
-        exec_factory = node.exec_factories["FTMO-007"]
+        data_factory = node.data_factories["FTMO_007"]
+        exec_factory = node.exec_factories["FTMO_007"]
         assert issubclass(data_factory, LiveDataClientFactory)
         assert issubclass(exec_factory, LiveExecClientFactory)
 
@@ -251,8 +251,8 @@ class TestPerAccountIsolation:
             trading_node_cls=_RecordingTradingNode,
         )
 
-        factory_a = node_a.data_factories["ACCT-A"]
-        factory_b = node_b.data_factories["ACCT-B"]
+        factory_a = node_a.data_factories["ACCT_A"]
+        factory_b = node_b.data_factories["ACCT_B"]
         # Distinct factory classes (each built per call).
         assert factory_a is not factory_b
         # The factories' ``create`` methods are distinct closures.
@@ -296,8 +296,8 @@ class TestPerAccountIsolation:
 
         # Sanity — different factory classes per call.
         assert (
-            node_a.exec_factories["ACCT-A"]
-            is not node_b.exec_factories["ACCT-B"]
+            node_a.exec_factories["ACCT_A"]
+            is not node_b.exec_factories["ACCT_B"]
         )
 
 

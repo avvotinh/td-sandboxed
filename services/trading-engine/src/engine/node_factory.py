@@ -193,13 +193,15 @@ def build_account_trading_node(
 def _client_name_for(account_id: str) -> str:
     """Stable, sanitised client name used for both data + exec clients.
 
-    Nautilus ``ClientId`` accepts ``str`` and is stricter than the rest
-    of the codebase about characters. Account IDs in Sandboxed are
-    already alphanumeric + dashes/underscores (validated at config
-    load), so we forward verbatim — but uppercase to match the Nautilus
-    convention in stock factories.
+    Nautilus's :class:`TradingNodeBuilder` looks up registered factories
+    by ``parts.partition("-")[0]`` of the data_clients/exec_clients
+    dict key — i.e., it splits on the first ``-`` and uses the prefix
+    as the factory name. Account IDs in Sandboxed are alphanumeric +
+    dashes/underscores; replacing ``-`` with ``_`` keeps the key
+    intact through Nautilus's split, so our factory registration name
+    matches the lookup name.
     """
-    return account_id.upper()
+    return account_id.upper().replace("-", "_")
 
 
 def _build_instrument_id(symbol: str, venue: Venue) -> InstrumentId:

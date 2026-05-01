@@ -23,6 +23,7 @@ Story 10.5d/e will:
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING
 
 from nautilus_trader.execution.messages import (
@@ -38,6 +39,8 @@ from nautilus_trader.model.enums import AccountType, OmsType
 from nautilus_trader.model.identifiers import ClientId, Venue
 
 from .submit_dispatcher import dispatch_submit_order
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from nautilus_trader.cache.cache import Cache
@@ -162,6 +165,61 @@ class ZmqExecutionClient(LiveExecutionClient):
             emitter=self,
             clock=self._clock,
         )
+
+    # ------------------------------------------------------------------
+    # State reconciliation reports — required by ``LiveExecutionClient``.
+    # ------------------------------------------------------------------
+    #
+    # Production risk: with these stubs returning empty, a warm restart
+    # while MT5 holds open positions silently boots the engine into a
+    # "flat" view — strategies will submit fresh entries on top of the
+    # real exposure, doubling risk. The warnings below make the gap
+    # observable so ops can hold the engine until the real reports are
+    # wired (TODO 10.5+: route to mt5-bridge query endpoints).
+    #
+    # The orchestrator should additionally compare these reports against
+    # the Redis ``account:{id}:snapshot`` baseline before unpausing
+    # sessions; that guard lives in the recovery flow, not here.
+
+    async def generate_order_status_reports(self, command):
+        """Return outstanding orders for boot-time reconciliation.
+
+        Empty list until the MT5 query path is plumbed. Logged at
+        WARNING so a phantom-flat reconciliation (real positions exist,
+        engine sees none) is observable in logs.
+        """
+        logger.warning(
+            "ZmqExecutionClient[%s]: generate_order_status_reports stub "
+            "returned [] — phantom-flat risk if MT5 holds open orders",
+            self._account_id,
+        )
+        return []
+
+    async def generate_fill_reports(self, command):
+        """Return recent fills for boot-time reconciliation."""
+        logger.warning(
+            "ZmqExecutionClient[%s]: generate_fill_reports stub returned "
+            "[] — recent MT5 fills will not be reconciled",
+            self._account_id,
+        )
+        return []
+
+    async def generate_position_status_reports(self, command):
+        """Return open positions for boot-time reconciliation.
+
+        **Critical** in the warm-restart path — see module-level note.
+        """
+        logger.warning(
+            "ZmqExecutionClient[%s]: generate_position_status_reports "
+            "stub returned [] — engine will see flat even if MT5 holds "
+            "open positions; double-entry risk",
+            self._account_id,
+        )
+        return []
+
+    async def generate_order_status_report(self, command):
+        """Return a single order's status (used by ad-hoc query path)."""
+        return None
 
     # ------------------------------------------------------------------
     # Unsupported commands (deferred to Epic 11+)
