@@ -59,12 +59,21 @@ temp/
 benchmark_results/
 *.benchmark
 
+# Compliance report artifacts (Epic 10 / D9 — story 10.15).
+# ``trading-engine compliance-report`` writes a dated JSON per run to
+# ``services/trading-engine/compliance-report-<account>-<YYYY-MM-DD>.json``;
+# they are reproducible from the audit log + Redis state so we keep
+# them out of git.
+compliance-report-*.json
+services/trading-engine/compliance-report-*.json
+
 # Docker
 docker-compose.override.yml
 
 .bmad/
 .gemini/
-.claude/
+# .claude/ — track shared config (rules, agents, skills, commands), ignore local settings
+.claude/settings.local.json
 .specify/
 specs/
 .vscode/

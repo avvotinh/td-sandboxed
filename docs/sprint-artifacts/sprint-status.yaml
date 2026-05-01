@@ -185,5 +185,5 @@ development_status:
   10-12-drop-prop-firm-field: backlog         # S  — drop AccountConfig.prop_firm + VALID_PROP_FIRMS + validate_prop_firm_preset (D2)
   10-13-drop-preset-yaml: backlog             # S  — drop src/rules/presets/*.yaml + PresetLoader (D2)
   10-14-drop-prop-firm-id-schema: backlog     # S  — migration drop accounts.prop_firm_id + prop_firms table (D2+D10)
-  10-15-gitignore-compliance-reports: backlog # XS — .gitignore services/trading-engine/compliance-report-*.json (D9)
+  10-15-gitignore-compliance-reports: done     # XS — .gitignore patterns added; one stale report (2026-02-27, accidentally committed in 7.6) untracked via git rm --cached (D9)
   epic-10-retrospective: optional
