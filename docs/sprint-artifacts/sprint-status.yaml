@@ -159,7 +159,7 @@ development_status:
   # Source: docs/architecture-review-2026-04-30.md (10 findings D1-D10)
   # Context: docs/epic-10-context.md
   # Goal: live trading readiness (audit double-entry, live orchestrator, kill-switch, news blackout)
-  epic-10: in-progress
+  epic-10: done
   # Phase 1 — Architectural foundation (precondition)
   10-1-engine-split: done                     # XL — split TradingEngine god-object → RecoveryOrchestrator + LiveOrchestrator + EngineLifecycle (D1+D5); 31 unit tests, 96% coverage; AC2/AC3/AC4 interface tightening deferred to 10.2 DI container
   10-2-di-container: done                     # M  — EngineConfig DI container with feature flags + LockLostMediator + collaborator bundles; resolves all three TODO(10.2) deviations from 10.1; 35 unit tests, 95% coverage
@@ -183,8 +183,9 @@ development_status:
   10-10-alembic-bootstrap: done                # M  — alembic.ini + env.py (DATABASE_URL resolution, postgres+asyncpg→postgres coercion) + script template + 6 ported revisions (005-010) with op.execute SQL + sane downgrade story (NotImplementedError for hypertable destructive paths); 24 tests verify chain integrity + per-revision content + raw-SQL parity; full unit suite 2609 passing; committed dd6702a 2026-05-01
   # Phase 5 — Legacy cleanup (gated by 10.11 ops cutover sign-off)
   10-11-migration-audit-cli: done              # S  — `accounts audit-rules-source [--strict] [--json]` CLI; pure classify_accounts via RuleAssignment.from_account_config; per-account roster + aggregate counts + prop_firm_legacy_count; --strict exits 1 when any prop_firm-type account still on preset_legacy (gates 10.12-10.14); 22 tests; full unit suite 2769 passing
-  10-12-drop-prop-firm-field: backlog         # S  — drop AccountConfig.prop_firm + VALID_PROP_FIRMS + validate_prop_firm_preset (D2)
-  10-13-drop-preset-yaml: backlog             # S  — drop src/rules/presets/*.yaml + PresetLoader (D2)
-  10-14-drop-prop-firm-id-schema: backlog     # S  — migration drop accounts.prop_firm_id + prop_firms table (D2+D10)
+  10-12-drop-prop-firm-field: done            # S  — AccountConfig.prop_firm + VALID_PROP_FIRMS + validate_prop_firm_preset + normalize_prop_firm dropped; validate_rules_source rewritten (only firm-bound + personal); RuleAssignment.from_account_config preset branch removed; audit_rules_source dropped preset_legacy classification; configs/accounts.yaml.example migrated to firm-bound; ~80 affected tests rewired (firm_registry fixture loaded from configs/firms in 4 integration files); committed ae2e10d 2026-05-02
+  10-13-drop-preset-yaml: done                # S  — src/rules/preset_loader.py deleted; src/rules/presets/*.yaml relocated to src/backtesting/presets/ (backtest-only consumer); RuleAssignmentService preset branch raises NotImplementedError; tests/unit/test_rule_assignment.py preset class deleted; tests/integration/test_prop_firm_preset.py deleted; remaining test files use _load_preset_rules helper that reads backtest-local YAML + RuleParser; committed aff1de1 2026-05-02
+  10-14-drop-prop-firm-id-schema: done        # S  — alembic revision 011_drop_prop_firm_legacy + raw SQL mirror; pre-flight gate refuses if any accounts.prop_firm_id IS NOT NULL; LOCK TABLE accounts SHARE ROW EXCLUSIVE prevents race; audit_logs INSERT before destructive DDL (financial-table audit discipline); DROP TABLE without CASCADE; downgrade NotImplementedError → pg_dump runbook. init.sql cleaned of prop_firms/prop_firm_id. 29 alembic tests (added head=011, downgrade-raises, init.sql consistency); database-reviewer + security-reviewer dual signoff applied (HIGH-1 audit_logs insert + HIGH-2 nested transaction fix); committed 56b7a62 2026-05-02
   10-15-gitignore-compliance-reports: done     # XS — .gitignore patterns added; one stale report (2026-02-27, accidentally committed in 7.6) untracked via git rm --cached (D9)
+  # Epic 10 — DONE 2026-05-02 (15/15 stories shipped); only 10.9b swap accrual remains as a follow-up tracked outside the epic.
   epic-10-retrospective: optional
