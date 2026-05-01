@@ -1,11 +1,11 @@
 """Service for assigning rules to accounts.
 
 Determines which rules apply to each account based on its configuration
-(prop firm preset, custom rules, or none).
+(firm-bound profile or personal rules file).
 
 Example:
     >>> from src.rules.assignment_service import RuleAssignmentService
-    >>> service = RuleAssignmentService()
+    >>> service = RuleAssignmentService(firm_registry=registry)
     >>> rules = service.get_rules_for_account(account_config)
     >>> print(f"Assigned {len(rules)} rules")
 """
@@ -18,7 +18,6 @@ from .assignment import RuleAssignment
 from .custom_loader import CustomRuleLoader
 from .override_merger import merge_rule_overrides
 from .parser import RuleParser
-from .preset_loader import RulePresetLoader
 
 if TYPE_CHECKING:
     from ..accounts.models import AccountConfig
@@ -32,20 +31,21 @@ class RuleAssignmentService:
     """Service for assigning rules to accounts.
 
     Determines which rules apply to each account based on its
-    configuration (firm binding, prop firm preset, custom rules, or none).
+    configuration (firm binding or personal rules file).
 
-    This service acts as the main interface for rule assignment,
-    delegating to specialized loaders based on account type.
+    Story 10.13 — the legacy ``RulePresetLoader`` was removed once
+    Story 10.12 dropped the ``prop_firm`` field from ``AccountConfig``.
+    Pre-existing ``RuleAssignment(assignment_type="preset", ...)``
+    objects (constructed in tests for backwards compatibility) raise on
+    :meth:`get_rules_for_account` rather than silently returning ``[]``.
 
     Attributes:
-        _preset_loader: Loader for legacy prop firm presets (Epic 4).
         _custom_loader: Loader for custom rule files.
         _firm_registry: Optional FirmRegistry for firm-bound accounts (Epic 9).
     """
 
     def __init__(
         self,
-        preset_loader: RulePresetLoader | None = None,
         custom_loader: CustomRuleLoader | None = None,
         firm_registry: "FirmRegistry | None" = None,
         rule_parser: RuleParser | None = None,
@@ -53,7 +53,6 @@ class RuleAssignmentService:
         """Initialize rule assignment service.
 
         Args:
-            preset_loader: Optional preset loader (creates default if None).
             custom_loader: Optional custom loader (creates default if None).
             firm_registry: Optional firm registry for ``assignment_type=="firm"``
                 accounts. If an account is firm-bound but this is ``None``,
@@ -62,15 +61,9 @@ class RuleAssignmentService:
                 merged rule specs when phase or account overrides are
                 present (creates default if None).
         """
-        self._preset_loader = preset_loader or RulePresetLoader()
         self._custom_loader = custom_loader or CustomRuleLoader()
         self._firm_registry = firm_registry
         self._rule_parser = rule_parser or RuleParser()
-
-    @property
-    def preset_loader(self) -> RulePresetLoader:
-        """Get the preset loader."""
-        return self._preset_loader
 
     @property
     def custom_loader(self) -> CustomRuleLoader:
@@ -142,14 +135,14 @@ class RuleAssignmentService:
             return rules
 
         if assignment.assignment_type == "preset":
-            rules = self._preset_loader.load_preset(assignment.preset_name)
-            logger.info(
-                "Assigned %d rules from preset '%s' to account '%s'",
-                len(rules),
-                assignment.preset_name,
-                account.id,
+            # Story 10.12 dropped the AccountConfig field; story 10.13
+            # dropped the loader. Surfaces as a clear error if any test
+            # or migration tool still constructs a preset assignment.
+            raise NotImplementedError(
+                f"Account '{account.id}' carries a legacy 'preset' "
+                "assignment, but the preset path was removed in story "
+                "10.13. Migrate the account to firm_id+product_id+phase."
             )
-            return rules
 
         if assignment.assignment_type == "personal":
             rules = self._custom_loader.load_custom_rules(assignment.rules_file)
@@ -186,14 +179,6 @@ class RuleAssignmentService:
         """
         return RuleAssignment.from_account_config(account)
 
-    def get_available_presets(self) -> list[str]:
-        """Get list of available preset names.
-
-        Returns:
-            List of preset names.
-        """
-        return self._preset_loader.get_available_presets()
-
     def set_config_dir(self, config_dir: Path | str) -> None:
         """Set the configuration directory for custom rules.
 
@@ -205,11 +190,3 @@ class RuleAssignmentService:
 
         self._custom_loader = CustomRuleLoader(config_dir=config_dir)
         logger.debug(f"Updated custom rules config_dir to: {config_dir}")
-
-    def clear_preset_cache(self) -> None:
-        """Clear the preset cache.
-
-        Forces presets to be reloaded from disk on next access.
-        Useful for testing or when preset files are updated.
-        """
-        self._preset_loader.clear_cache()

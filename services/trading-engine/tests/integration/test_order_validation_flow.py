@@ -25,7 +25,31 @@ from src.execution.exceptions import OrderBlockedError
 from src.execution.order_validator import OrderValidator
 from src.execution.validated_adapter import ValidatedZmqAdapter
 from src.rules import RuleEngine
-from src.rules.preset_loader import RulePresetLoader
+from pathlib import Path as _Path
+
+import yaml as _yaml
+
+from src.rules.parser import RuleParser as _RuleParser
+
+
+# Story 10.13 — RulePresetLoader was removed. Tests that need the same
+# rule set the old FTMO preset produced now load it directly from the
+# backtest-local preset YAML and parse with :class:`RuleParser`.
+_PRESETS_DIR = (
+    _Path(__file__).resolve().parents[2] / "src" / "backtesting" / "presets"
+)
+
+
+def _load_preset_rules(name: str) -> list:
+    """Build a rule list from a backtest-local preset YAML.
+
+    Drop-in replacement for the deleted ``RulePresetLoader.load_preset``.
+    Returns freshly parsed rule instances each call (no caching) — fine
+    for integration tests, slightly slower than the old loader.
+    """
+    yaml_path = _PRESETS_DIR / f"{name.lower()}.yaml"
+    data = _yaml.safe_load(yaml_path.read_text())
+    return _RuleParser().parse_rules({"rules": data["rules"]})
 
 
 def create_test_order(
@@ -85,9 +109,9 @@ class TestFullValidationFlow:
     @pytest.fixture
     def ftmo_engine(self):
         """Create RuleEngine with FTMO rules."""
-        loader = RulePresetLoader()
-        loader.clear_cache()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced by _load_preset_rules
+        
+        rules = _load_preset_rules("ftmo")
         return RuleEngine(account_id="test-account", rules=rules)
 
     @pytest.fixture
@@ -124,9 +148,9 @@ class TestDailyLossLimitBlocking:
     @pytest.fixture
     def ftmo_engine(self):
         """Create RuleEngine with FTMO rules."""
-        loader = RulePresetLoader()
-        loader.clear_cache()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced by _load_preset_rules
+        
+        rules = _load_preset_rules("ftmo")
         return RuleEngine(account_id="test-account", rules=rules)
 
     @pytest.fixture
@@ -165,9 +189,9 @@ class TestMaxDrawdownBlocking:
     @pytest.fixture
     def ftmo_engine(self):
         """Create RuleEngine with FTMO rules."""
-        loader = RulePresetLoader()
-        loader.clear_cache()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced by _load_preset_rules
+        
+        rules = _load_preset_rules("ftmo")
         return RuleEngine(account_id="test-account", rules=rules)
 
     @pytest.fixture
@@ -213,9 +237,9 @@ class TestPositionSizeBlocking:
     @pytest.fixture
     def ftmo_engine(self):
         """Create RuleEngine with FTMO rules."""
-        loader = RulePresetLoader()
-        loader.clear_cache()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced by _load_preset_rules
+        
+        rules = _load_preset_rules("ftmo")
         return RuleEngine(account_id="test-account", rules=rules)
 
     @pytest.mark.asyncio
@@ -259,9 +283,9 @@ class TestWarningsFromInformationalRules:
     @pytest.fixture
     def ftmo_engine(self):
         """Create RuleEngine with FTMO rules."""
-        loader = RulePresetLoader()
-        loader.clear_cache()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced by _load_preset_rules
+        
+        rules = _load_preset_rules("ftmo")
         return RuleEngine(account_id="test-account", rules=rules)
 
     @pytest.fixture
@@ -331,9 +355,9 @@ class TestValidatedZmqAdapterIntegration:
     def setup_validated_adapter(self):
         """Set up ValidatedZmqAdapter with mocks."""
         # Create FTMO engine
-        loader = RulePresetLoader()
-        loader.clear_cache()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced by _load_preset_rules
+        
+        rules = _load_preset_rules("ftmo")
         engine = RuleEngine(account_id="test-account", rules=rules)
 
         # Create mocks
@@ -453,9 +477,9 @@ class TestValidationPerformance:
     @pytest.fixture
     def ftmo_engine(self):
         """Create RuleEngine with FTMO rules."""
-        loader = RulePresetLoader()
-        loader.clear_cache()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced by _load_preset_rules
+        
+        rules = _load_preset_rules("ftmo")
         return RuleEngine(account_id="test-account", rules=rules)
 
     @pytest.fixture
@@ -522,9 +546,9 @@ class TestValidationWithNoRiskState:
     def setup_adapter_no_risk_state(self):
         """Set up ValidatedZmqAdapter with no risk state."""
         # Create FTMO engine
-        loader = RulePresetLoader()
-        loader.clear_cache()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced by _load_preset_rules
+        
+        rules = _load_preset_rules("ftmo")
         engine = RuleEngine(account_id="test-account", rules=rules)
 
         # Create mocks
@@ -570,9 +594,9 @@ class TestPositionSizeViaAdapter:
     def setup_position_test_adapter(self):
         """Set up ValidatedZmqAdapter for position size testing."""
         # Create FTMO engine
-        loader = RulePresetLoader()
-        loader.clear_cache()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced by _load_preset_rules
+        
+        rules = _load_preset_rules("ftmo")
         engine = RuleEngine(account_id="test-account", rules=rules)
 
         # Create mocks
@@ -650,9 +674,9 @@ class TestWarningsWithBlock:
     @pytest.fixture
     def ftmo_engine(self):
         """Create RuleEngine with FTMO rules."""
-        loader = RulePresetLoader()
-        loader.clear_cache()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced by _load_preset_rules
+        
+        rules = _load_preset_rules("ftmo")
         return RuleEngine(account_id="test-account", rules=rules)
 
     @pytest.fixture

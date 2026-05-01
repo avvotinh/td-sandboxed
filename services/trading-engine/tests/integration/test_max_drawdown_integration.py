@@ -22,7 +22,20 @@ from src.rules.base_rule import RuleAction, RuleResult
 from src.rules.context_builder import RuleContextBuilder
 from src.rules.engine import RuleEngine
 from src.rules.parser import RuleParser
-from src.rules.preset_loader import RulePresetLoader
+import yaml as _yaml
+
+
+# Story 10.13 — drop-in for the deleted RulePresetLoader. See
+# test_order_validation_flow.py for design rationale.
+_PRESETS_DIR = (
+    Path(__file__).resolve().parents[2] / "src" / "backtesting" / "presets"
+)
+
+
+def _load_preset_rules(name: str) -> list:
+    yaml_path = _PRESETS_DIR / f"{name.lower()}.yaml"
+    data = _yaml.safe_load(yaml_path.read_text())
+    return RuleParser().parse_rules({"rules": data["rules"]})
 from src.rules.types.drawdown import DailyLossLimitRule, MaxDrawdownRule
 
 
@@ -317,8 +330,8 @@ class TestFTMOPresetLoading:
 
     def test_ftmo_preset_loads_max_drawdown_rule(self):
         """Test FTMO preset loads MaxDrawdownRule correctly."""
-        loader = RulePresetLoader()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced
+        rules = _load_preset_rules("ftmo")
 
         # Find max_drawdown rule
         max_drawdown_rules = [r for r in rules if r.rule_type == "max_drawdown"]
@@ -329,8 +342,8 @@ class TestFTMOPresetLoading:
 
     def test_ftmo_preset_threshold_is_10_percent(self):
         """Test FTMO preset max drawdown threshold is 10%."""
-        loader = RulePresetLoader()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced
+        rules = _load_preset_rules("ftmo")
 
         max_drawdown_rule = next(r for r in rules if r.rule_type == "max_drawdown")
 
@@ -338,8 +351,8 @@ class TestFTMOPresetLoading:
 
     def test_ftmo_preset_warning_thresholds(self):
         """Test FTMO preset warning thresholds are [50, 70, 85]."""
-        loader = RulePresetLoader()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced
+        rules = _load_preset_rules("ftmo")
 
         max_drawdown_rule = next(r for r in rules if r.rule_type == "max_drawdown")
 
@@ -347,8 +360,8 @@ class TestFTMOPresetLoading:
 
     def test_ftmo_preset_validates_correctly(self):
         """Test FTMO preset rule validates correctly."""
-        loader = RulePresetLoader()
-        rules = loader.load_preset("ftmo")
+        # Story 10.13: preset loader replaced
+        rules = _load_preset_rules("ftmo")
 
         max_drawdown_rule = next(r for r in rules if r.rule_type == "max_drawdown")
 

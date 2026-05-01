@@ -18,7 +18,7 @@ from src.accounts.models import AccountConfig, AccountsConfig, AccountType, MT5C
 from src.config.firm_registry import FirmRegistry
 from src.rules.assignment_service import RuleAssignmentService
 from src.rules.custom_loader import CustomRuleLoader
-from src.rules.preset_loader import RulePresetLoader
+# Story 10.13 — RulePresetLoader was removed.
 
 
 # Story 10.12 — every prop-firm-flavoured test now resolves rules
@@ -371,37 +371,10 @@ rules:
 # =============================================================================
 
 
-class TestPresetFilesExist:
-    """Tests to verify preset files exist and are valid."""
-
-    def test_ftmo_preset_exists(self):
-        """Test FTMO preset file exists and is valid."""
-        loader = RulePresetLoader()
-        rules = loader.load_preset("ftmo")
-        assert len(rules) > 0
-
-    def test_the5ers_preset_exists(self):
-        """Test The5ers preset file exists and is valid."""
-        loader = RulePresetLoader()
-        rules = loader.load_preset("the5ers")
-        assert len(rules) > 0
-
-    def test_wmt_preset_exists(self):
-        """Test WMT preset file exists and is valid."""
-        loader = RulePresetLoader()
-        rules = loader.load_preset("wmt")
-        assert len(rules) > 0
-
-    def test_preset_info_available(self):
-        """Test preset info can be retrieved."""
-        loader = RulePresetLoader()
-
-        for preset in ["ftmo", "the5ers", "wmt"]:
-            info = loader.get_preset_info(preset)
-            assert "name" in info
-            assert "version" in info
-            assert "rule_count" in info
-            assert info["rule_count"] > 0
+# Story 10.13 — ``TestPresetFilesExist`` removed when the rule-engine
+# preset loader was deleted. Backtest still consumes the YAMLs
+# (relocated to ``src/backtesting/presets/``) — covered by the
+# backtest's own preset tests.
 
 
 class TestExampleCustomRulesFile:

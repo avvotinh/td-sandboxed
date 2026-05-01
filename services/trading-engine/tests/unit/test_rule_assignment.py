@@ -3,7 +3,7 @@
 Tests cover:
 - RuleAssignment dataclass and from_account_config factory
 - RuleParser YAML parsing
-- RulePresetLoader preset loading
+- (Story 10.13 removed the legacy preset loader path)
 - CustomRuleLoader custom file loading
 - RuleAssignmentService orchestration
 """
@@ -18,7 +18,6 @@ from src.rules.assignment_service import RuleAssignmentService
 from src.rules.base_rule import BaseRule, RuleAction, RuleResult
 from src.rules.custom_loader import CustomRuleLoader, RulesFileInvalidError, RulesFileNotFoundError
 from src.rules.parser import RuleParseError, RuleParser
-from src.rules.preset_loader import PresetNotFoundError, RulePresetLoader
 
 
 # =============================================================================
@@ -256,99 +255,8 @@ class TestRuleParser:
         assert "min_trading_days" in types
 
 
-# =============================================================================
-# RulePresetLoader Tests (Task 2)
-# =============================================================================
-
-
-class TestRulePresetLoader:
-    """Tests for RulePresetLoader class."""
-
-    def test_get_available_presets(self):
-        """Test listing available presets."""
-        loader = RulePresetLoader()
-        presets = loader.get_available_presets()
-
-        assert "ftmo" in presets
-        assert "the5ers" in presets
-        assert "wmt" in presets
-
-    def test_load_preset_ftmo(self):
-        """Test loading FTMO preset (AC1)."""
-        loader = RulePresetLoader()
-        rules = loader.load_preset("ftmo")
-
-        assert len(rules) > 0
-        # FTMO should have daily loss limit and max drawdown rules
-        rule_types = [r.rule_type for r in rules]
-        assert "daily_loss_limit" in rule_types
-        assert "max_drawdown" in rule_types
-
-    def test_load_preset_the5ers(self):
-        """Test loading The5ers preset (AC2)."""
-        loader = RulePresetLoader()
-        rules = loader.load_preset("the5ers")
-
-        assert len(rules) > 0
-        rule_types = [r.rule_type for r in rules]
-        assert "daily_loss_limit" in rule_types
-        assert "max_drawdown" in rule_types
-
-    def test_load_preset_wmt(self):
-        """Test loading WMT preset."""
-        loader = RulePresetLoader()
-        rules = loader.load_preset("wmt")
-
-        assert len(rules) > 0
-
-    def test_load_preset_case_insensitive(self):
-        """Test preset loading is case-insensitive."""
-        loader = RulePresetLoader()
-
-        # All these should load the same preset
-        rules_lower = loader.load_preset("ftmo")
-        loader.clear_cache()  # Clear cache between tests
-        rules_upper = loader.load_preset("FTMO")
-        loader.clear_cache()
-        rules_mixed = loader.load_preset("Ftmo")
-
-        assert len(rules_lower) == len(rules_upper) == len(rules_mixed)
-
-    def test_load_preset_not_found(self):
-        """Test PresetNotFoundError for unknown preset (AC5)."""
-        loader = RulePresetLoader()
-
-        with pytest.raises(PresetNotFoundError) as exc_info:
-            loader.load_preset("nonexistent_preset")
-
-        error = exc_info.value
-        assert "nonexistent_preset" in str(error)
-        # Should list available presets
-        assert "ftmo" in str(error).lower()
-        assert "the5ers" in str(error).lower()
-
-    def test_load_preset_caching(self):
-        """Test preset caching works."""
-        loader = RulePresetLoader()
-
-        # First load
-        rules1 = loader.load_preset("ftmo")
-        # Second load should return cached result
-        rules2 = loader.load_preset("ftmo")
-
-        # Same objects (cached)
-        assert rules1 is rules2
-
-    def test_clear_cache(self):
-        """Test clearing preset cache."""
-        loader = RulePresetLoader()
-
-        rules1 = loader.load_preset("ftmo")
-        loader.clear_cache()
-        rules2 = loader.load_preset("ftmo")
-
-        # Different objects after cache clear
-        assert rules1 is not rules2
+# Story 10.13 — RulePresetLoader was deleted. The class-level tests
+# previously here exercised the removed loader and are gone with it.
 
 
 # =============================================================================
@@ -504,12 +412,8 @@ rules:
 """)
 
         # Create service with custom config dir
-        preset_loader = RulePresetLoader()
         custom_loader = CustomRuleLoader(config_dir=tmp_path)
-        service = RuleAssignmentService(
-            preset_loader=preset_loader,
-            custom_loader=custom_loader,
-        )
+        service = RuleAssignmentService(custom_loader=custom_loader)
 
         account = _create_personal_account("personal-001", "personal_rules.yaml")
         rules = service.get_rules_for_account(account)
@@ -536,14 +440,9 @@ rules:
         assert assignment.assignment_type == "firm"
         assert assignment.firm_id == "ftmo"
 
-    def test_get_available_presets(self):
-        """Test listing available presets through service."""
-        service = RuleAssignmentService()
-        presets = service.get_available_presets()
-
-        assert "ftmo" in presets
-        assert "the5ers" in presets
-        assert "wmt" in presets
+    # Story 10.13 — ``test_get_available_presets`` removed alongside
+    # ``RuleAssignmentService.get_available_presets`` and the preset
+    # loader.
 
     # Story 10.12 — ``test_preset_not_found_error_propagates`` was
     # removed when the preset path was deleted; the unreachable

@@ -2,7 +2,7 @@
 
 This module handles:
 - Rule assignment to accounts (Story 3.7)
-- Prop firm preset loading (FTMO, The5ers, WMT)
+- Firm-bound profile loading (Epic 9; legacy preset loader removed in 10.13)
 - Custom rule file parsing
 - Rule engine framework (Story 4.1)
 - FTMO compliance rules (daily loss limit, max drawdown, etc.) - Epic 4
@@ -14,10 +14,9 @@ Story 3.7 Exports:
 - RuleAction, RuleResult: Rule validation results
 - RuleAssignment: Assignment configuration for accounts
 - RuleAssignmentService: Main service for assigning rules to accounts
-- RulePresetLoader: Load rules from prop firm presets
 - CustomRuleLoader: Load rules from custom YAML files
 - RuleParser: Parse YAML rule definitions
-- Exceptions: PresetNotFoundError, RulesFileNotFoundError, RuleParseError
+- Exceptions: RulesFileNotFoundError, RuleParseError
 
 Story 4.1 Exports:
 - RuleEngine: Core engine that evaluates multiple rules
@@ -63,7 +62,6 @@ from .engine import RuleEngine, RuleValidationError
 from .engine_factory import RuleEngineFactory
 from .engine_result import RuleEngineResult
 from .parser import RuleParseError, RuleParser
-from .preset_loader import PresetNotFoundError, RulePresetLoader
 from .types.consistency import ConsistencyRule
 from .types.drawdown import DailyLossLimitRule, MaxDrawdownRule
 from .types.position import MaxPositionSizeRule
@@ -91,7 +89,6 @@ __all__ = [
     "RuleAssignment",
     "RuleAssignmentService",
     # Loaders
-    "RulePresetLoader",
     "CustomRuleLoader",
     "RuleParser",
     # Engine (Story 4.1)
@@ -115,7 +112,6 @@ __all__ = [
     "ViolationDBWriter",
     "ViolationService",
     # Exceptions
-    "PresetNotFoundError",
     "RulesFileNotFoundError",
     "RulesFileInvalidError",
     "RuleParseError",

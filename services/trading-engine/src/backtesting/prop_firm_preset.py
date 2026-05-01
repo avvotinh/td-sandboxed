@@ -1,23 +1,15 @@
-"""Prop-firm preset loader — single source of truth for backtest thresholds.
+"""Prop-firm preset loader — backtest-only threshold reader.
 
-Rule-engine rules (Epic 4) and backtest metrics (Epic 8) both need the
-same prop-firm thresholds (e.g. FTMO: daily loss 5%, max DD 10%, profit
-target 10%, min trading days 4). Having the two code paths carry their
-own hard-coded defaults silently diverges from the live rule engine —
-per ``.claude/rules/common/sandboxed-domain.md`` these thresholds MUST
-come from the preset YAML. This module loads the preset once and exposes
-a frozen :class:`PropFirmPreset` that both layers can read.
+The backtest's metrics layer needs prop-firm thresholds (FTMO: daily
+loss 5%, max DD 10%, profit target 10%, min trading days 4) for
+informational scoring during simulation. Story 10.13 dropped the rule
+engine's preset loader and the live ``AccountConfig.prop_firm`` field;
+the YAMLs were relocated to :mod:`src.backtesting.presets` for backtest
+use only.
 
-Design:
-- Input YAML: ``src/rules/presets/<firm>.yaml`` (default: ``ftmo.yaml``).
-- Only the numeric thresholds are extracted here. Full rule construction
-  stays in the rule engine's :mod:`src.rules.preset_loader` to avoid
-  duplicating validation logic.
-
-Epic 9 note: this preset-oriented loader coexists with the new
-:class:`FirmRegistry` (Epic 9 P0.2) during migration. Once P0.11 finishes
-moving presets into ``configs/firms/*.yaml``, this module becomes a thin
-adapter over the firm profile's product thresholds.
+Future migration (tracked separately): port these thresholds into
+``configs/firms/<firm>.yaml`` so backtest reads from the same source as
+live, and delete this module.
 """
 
 from __future__ import annotations
@@ -29,9 +21,10 @@ from typing import Any
 import yaml
 
 
-# Default location of the prop-firm rules YAML relative to the repo root.
+# Default location of the prop-firm rules YAML — backtest-local presets
+# directory introduced in story 10.13.
 DEFAULT_PROP_FIRM_PRESET_PATH = (
-    Path(__file__).resolve().parent.parent / "rules" / "presets" / "ftmo.yaml"
+    Path(__file__).resolve().parent / "presets" / "ftmo.yaml"
 )
 
 
@@ -61,7 +54,7 @@ def load_prop_firm_preset(path: Path | None = None) -> PropFirmPreset:
 
     Args:
         path: Override preset file. Defaults to
-            ``src/rules/presets/ftmo.yaml``.
+            ``src/backtesting/presets/ftmo.yaml``.
 
     Raises:
         FileNotFoundError: Preset file missing.
