@@ -8,30 +8,16 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- ==================== REFERENCE TABLES ====================
 
--- Prop Firms (presets reference)
-CREATE TABLE prop_firms (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    rules_preset VARCHAR(50) NOT NULL,
-    website VARCHAR(255),
-    description TEXT,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Insert default prop firms
-INSERT INTO prop_firms (id, name, rules_preset, website) VALUES
-    ('ftmo', 'FTMO', 'ftmo', 'https://ftmo.com'),
-    ('the5ers', 'The5ers', 'the5ers', 'https://the5ers.com'),
-    ('wmt', 'WeMasterTrade', 'wmt', 'https://wemastertrade.com');
+-- Story 10.14: the legacy ``prop_firms`` table + ``accounts.prop_firm_id``
+-- FK were dropped. Prop-firm accounts are bound via ``firm_id +
+-- product_id + phase`` (Epic 9), resolved against
+-- ``configs/firms/*.yaml`` rather than a relational reference table.
 
 -- Trading Accounts
 CREATE TABLE accounts (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('prop_firm', 'personal', 'demo')),
-    prop_firm_id VARCHAR(50) REFERENCES prop_firms(id) ON DELETE SET NULL,
     custom_rules_file VARCHAR(255),
     mt5_server VARCHAR(100) NOT NULL,
     mt5_login BIGINT NOT NULL,
@@ -52,7 +38,6 @@ CREATE TABLE accounts (
 
 CREATE INDEX idx_accounts_status ON accounts (status);
 CREATE INDEX idx_accounts_type ON accounts (account_type);
-CREATE INDEX idx_accounts_prop_firm ON accounts (prop_firm_id);
 
 -- ==================== ACCOUNT STATE TABLES ====================
 
@@ -276,7 +261,7 @@ SELECT add_retention_policy('state_snapshots', INTERVAL '7 days');
 DO $$
 BEGIN
     RAISE NOTICE 'TimescaleDB schema initialization complete';
-    RAISE NOTICE 'Tables created: prop_firms, accounts, account_snapshots, performance_metrics, candles, trades, rule_violations, audit_logs, state_snapshots';
+    RAISE NOTICE 'Tables created: accounts, account_snapshots, performance_metrics, candles, trades, rule_violations, audit_logs, state_snapshots';
     RAISE NOTICE 'Hypertables: candles, rule_violations, audit_logs, state_snapshots';
     RAISE NOTICE 'Indexes: 22 explicit + 5 PK indexes + 1 unique constraint = 28 total';
     RAISE NOTICE 'FK constraints: 10 with ON DELETE behavior (CASCADE/SET NULL)';

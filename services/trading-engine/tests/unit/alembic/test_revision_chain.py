@@ -26,6 +26,7 @@ EXPECTED_CHAIN = [
     "008_violations_retention_and_aggregate",
     "009_multi_firm_account_binding",
     "010_rename_ftmo_audit_events",
+    "011_drop_prop_firm_legacy",
 ]
 
 
@@ -42,9 +43,9 @@ def script_directory() -> ScriptDirectory:
 
 
 class TestChain:
-    def test_head_is_010(self, script_directory: ScriptDirectory) -> None:
+    def test_head_is_011(self, script_directory: ScriptDirectory) -> None:
         heads = list(script_directory.get_heads())
-        assert heads == ["010_rename_ftmo_audit_events"], heads
+        assert heads == ["011_drop_prop_firm_legacy"], heads
 
     def test_chain_in_expected_order(
         self, script_directory: ScriptDirectory
@@ -134,6 +135,22 @@ class TestRevisionContent:
                 "010_rename_ftmo_audit_events",
                 ["audit_logs", "ftmo_", "prop_firm_", "REPLACE"],
             ),
+            (
+                "011_drop_prop_firm_legacy",
+                [
+                    "DROP TABLE IF EXISTS prop_firms",
+                    "DROP COLUMN IF EXISTS prop_firm_id",
+                    "idx_accounts_prop_firm",
+                    "Refusing to drop accounts.prop_firm_id",
+                    # Audit-trail discipline: schema-migration row gets
+                    # inserted before the destructive DDL.
+                    "INSERT INTO audit_logs",
+                    "schema_migration",
+                    # Lock guards against concurrent writers between
+                    # the count check and the DROP COLUMN.
+                    "LOCK TABLE accounts",
+                ],
+            ),
         ],
     )
     def test_revision_text_contains(
@@ -168,6 +185,38 @@ class TestRevisionContent:
         )
         text = path.read_text(encoding="utf-8")
         assert "raise NotImplementedError" in text
+
+    def test_011_downgrade_raises_not_implemented(
+        self, script_directory: ScriptDirectory
+    ) -> None:
+        path = Path(
+            script_directory.get_revision("011_drop_prop_firm_legacy").path
+        )
+        text = path.read_text(encoding="utf-8")
+        # ``DROP TABLE prop_firms`` cannot be safely auto-downgraded;
+        # the only rollback is restoring from pre-migration pg_dump.
+        assert "raise NotImplementedError" in text
+        # Message must point operators at the runbook.
+        assert "pg_dump" in text
+
+
+class TestInitSqlConsistency:
+    """``init.sql`` must agree with the Alembic head — story 10.14
+    removed ``prop_firms`` + ``accounts.prop_firm_id`` from both."""
+
+    def test_init_sql_has_no_prop_firms_artefacts(self) -> None:
+        init_sql = REPO_ROOT.parents[1] / "infra" / "timescaledb" / "init.sql"
+        text = init_sql.read_text(encoding="utf-8")
+        assert "CREATE TABLE prop_firms" not in text, (
+            "init.sql still creates the legacy prop_firms table — "
+            "story 10.14 removed it"
+        )
+        # The column line we care about is the FK definition, not the
+        # comment block describing the migration. Match on the literal
+        # ``prop_firm_id VARCHAR`` token to skip prose mentions.
+        assert "prop_firm_id VARCHAR" not in text, (
+            "init.sql still declares the legacy prop_firm_id column"
+        )
 
 
 # -------------------------------------------------------------------------
@@ -218,6 +267,17 @@ class TestRawSqlParity:
                 "010_rename_ftmo_audit_events",
                 "010_rename_ftmo_audit_events.sql",
                 ["timescaledb_information.chunks"],
+            ),
+            (
+                "011_drop_prop_firm_legacy",
+                "011_drop_prop_firm_legacy.sql",
+                [
+                    "DROP TABLE IF EXISTS prop_firms",
+                    "DROP COLUMN IF EXISTS prop_firm_id",
+                    "Refusing to drop accounts.prop_firm_id",
+                    "INSERT INTO audit_logs",
+                    "LOCK TABLE accounts",
+                ],
             ),
         ],
     )
