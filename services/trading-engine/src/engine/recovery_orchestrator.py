@@ -1,50 +1,44 @@
 """RecoveryOrchestrator — owns the cold-start recovery flow.
 
-Story 10.1 extracts the recovery sequence (crash detection, position
-reconciliation, daily P&L recompute, trading resume) out of the
-`TradingEngine` god-object into a single class that orchestrates the four
-existing state modules without altering their public API.
+Story 10.1 extracted the recovery sequence (crash detection, position
+reconciliation, daily P&L recompute, trading resume) into this class.
+Story 10.2 swaps the raw-deps constructor for pre-built collaborators
+supplied by the DI container, matching the spec sketch in
+``docs/sprint-artifacts/10-1-engine-split.md``.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-from ..accounts.account_manager import AccountManager
-from ..accounts.pnl_registry import PnLTrackerRegistry
 from ..accounts.risk_registry import RiskStateRegistry
-from ..adapters.zmq_adapter import ZmqAdapter
 from ..audit.audit_service import AuditService
-from ..config.firm_registry import FirmRegistry
 from ..rules.audit_logger import audit_task_done_callback
 from ..state.cold_storage_writer import ColdStorageWriter
 from ..state.crash_recovery import CrashRecoveryManager
 from ..state.crash_recovery import RecoveryResult as CrashRecoveryResult
-from ..state.daily_pnl_recalculator import DailyPnLRecalculator, RecalculationResult
+from ..state.daily_pnl_recalculator import RecalculationResult
 from ..state.position_reconciler import (
-    PositionReconciler,
     ReconciliationResult,
     run_position_reconciliation,
 )
-from ..state.redis_state import RedisStateManager
-from ..state.trading_resumer import ResumeResult, TradingResumer
+from ..state.trading_resumer import ResumeResult
+from .collaborators import RecoveryCollaborators
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class RecoveryOutcome:
-    """Aggregated artifacts produced by `RecoveryOrchestrator.run`.
+    """Aggregated artifacts produced by :meth:`RecoveryOrchestrator.run`.
 
-    The CrashRecoveryManager and ColdStorageWriter references are
-    forwarded to downstream lifecycle stages (graceful shutdown, cold
-    storage service) which need to share the same long-lived instances.
+    The :class:`CrashRecoveryManager` and :class:`ColdStorageWriter`
+    references are forwarded to downstream lifecycle stages (graceful
+    shutdown, cold storage service) which need to share the same
+    long-lived instances.
     """
 
     crash_result: CrashRecoveryResult | None
@@ -56,62 +50,36 @@ class RecoveryOutcome:
 
 
 class RecoveryOrchestrator:
-    """Orchestrates crash recovery, reconciliation, P&L recompute, and resume.
+    """Orchestrates crash recovery, reconciliation, P&L recompute, and resume."""
 
-    .. note:: Story 10.1 takes raw deps and constructs the four recovery
-       managers internally because :class:`CrashRecoveryManager` requires the
-       ``on_lock_lost`` callback bound to the lifecycle, which itself depends
-       on this orchestrator. Story 10.2's DI container resolves the cycle so
-       this constructor can accept pre-built managers per the spec example.
-    """
-
-    # TODO(10.2): switch to ``__init__(crash_recovery, position_reconciler,
-    # pnl_recalculator, trading_resumer)`` once the DI container can supply
-    # pre-built managers wired with a callback shim for ``on_lock_lost``.
     def __init__(
         self,
-        redis_manager: RedisStateManager | None,
-        zmq_adapter: ZmqAdapter | None,
-        db_session_factory: async_sessionmaker[AsyncSession] | None,
-        risk_registry: RiskStateRegistry | None,
-        pnl_registry: PnLTrackerRegistry | None,
-        account_manager: AccountManager | None,
-        firm_registry: FirmRegistry | None,
-        audit_service: AuditService | None,
-        database_url: str | None,
+        collaborators: RecoveryCollaborators,
+        risk_registry: RiskStateRegistry | None = None,
+        audit_service: AuditService | None = None,
     ) -> None:
-        self._redis_manager = redis_manager
-        self._zmq_adapter = zmq_adapter
-        self._db_session_factory = db_session_factory
+        """Build with pre-built recovery collaborators.
+
+        ``risk_registry`` is needed only by the P&L recompute step to
+        snapshot the per-account daily P&L base; ``audit_service`` is
+        used to log the ``crash_recovery`` system event when recovery
+        mode kicks in.
+        """
+        self._collaborators = collaborators
         self._risk_registry = risk_registry
-        self._pnl_registry = pnl_registry
-        self._account_manager = account_manager
-        self._firm_registry = firm_registry
         self._audit_service = audit_service
-        self._database_url = database_url
 
-    @property
-    def zmq_adapter(self) -> ZmqAdapter | None:
-        """Exposed so EngineLifecycle can pass it to GracefulShutdown."""
-        return self._zmq_adapter
+    async def run(self) -> RecoveryOutcome:
+        """Execute the recovery flow. Behavior matches the engine.py baseline.
 
-    async def run(self, on_lock_lost: Callable[[], None]) -> RecoveryOutcome:
-        """Execute the recovery flow. Behavior matches `engine.py` baseline."""
-        if self._redis_manager is None:
-            logger.info("No Redis manager configured, skipping crash recovery")
+        The lock-loss callback is bound onto :class:`CrashRecoveryManager`
+        at construction time via :class:`LockLostMediator` — this method
+        does not take it as a parameter.
+        """
+        crash_recovery = self._collaborators.crash_recovery
+        if crash_recovery is None:
+            logger.info("No crash recovery configured, skipping recovery flow")
             return RecoveryOutcome(None, None, None, None, None, None)
-
-        cold_storage_writer = (
-            ColdStorageWriter(self._database_url)
-            if self._database_url is not None
-            else None
-        )
-
-        crash_recovery = CrashRecoveryManager(
-            redis_manager=self._redis_manager,
-            on_lock_lost=on_lock_lost,
-            cold_storage_writer=cold_storage_writer,
-        )
 
         try:
             crash_result = await crash_recovery.startup_sequence()
@@ -129,14 +97,15 @@ class RecoveryOrchestrator:
                 "Entering recovery mode for %d accounts",
                 len(crash_result.accounts_needing_recovery),
             )
-
             self._audit_crash_recovery(crash_result.accounts_needing_recovery)
 
-            if self._zmq_adapter is not None:
-                reconciliation_results = await self._run_reconciliation(
-                    crash_recovery, crash_result.accounts_needing_recovery
+            reconciler = self._collaborators.position_reconciler
+            if reconciler is not None:
+                reconciliation_results = await run_position_reconciliation(
+                    reconciler=reconciler,
+                    crash_recovery=crash_recovery,
+                    accounts=crash_result.accounts_needing_recovery,
                 )
-
                 blocked_accounts = [
                     acc
                     for acc, r in reconciliation_results.items()
@@ -163,11 +132,12 @@ class RecoveryOrchestrator:
                     )
                 else:
                     logger.warning(
-                        "Crash indicators NOT cleared - some accounts require manual intervention"
+                        "Crash indicators NOT cleared - some accounts require "
+                        "manual intervention"
                     )
             else:
                 logger.warning(
-                    "ZMQ adapter not available - skipping position reconciliation"
+                    "Position reconciler not configured - skipping reconciliation"
                 )
                 await crash_recovery.clear_crash_indicators()
 
@@ -177,7 +147,7 @@ class RecoveryOrchestrator:
             pnl_recalculation_results=pnl_results,
             resume_result=resume_result,
             crash_recovery=crash_recovery,
-            cold_storage_writer=cold_storage_writer,
+            cold_storage_writer=self._collaborators.cold_storage_writer,
         )
 
     def _audit_crash_recovery(self, accounts: list[str]) -> None:
@@ -194,47 +164,18 @@ class RecoveryOrchestrator:
         )
         task.add_done_callback(audit_task_done_callback)
 
-    async def _run_reconciliation(
-        self,
-        crash_recovery: CrashRecoveryManager,
-        accounts: list[str],
-    ) -> dict[str, ReconciliationResult]:
-        reconciler = PositionReconciler(
-            zmq_adapter=self._zmq_adapter,
-            redis_manager=self._redis_manager,
-        )
-        return await run_position_reconciliation(
-            reconciler=reconciler,
-            crash_recovery=crash_recovery,
-            accounts=accounts,
-        )
-
     async def _run_pnl_recalculation(
         self,
         crash_recovery: CrashRecoveryManager,
         reconciliation_results: dict[str, ReconciliationResult],
     ) -> dict[str, RecalculationResult]:
+        recalculator = self._collaborators.pnl_recalculator
         results: dict[str, RecalculationResult] = {}
-        if (
-            self._db_session_factory is None
-            or self._redis_manager is None
-            or self._risk_registry is None
-            or self._pnl_registry is None
-        ):
+        if recalculator is None or self._risk_registry is None:
             logger.warning(
-                "Skipping P&L recalculation - missing required dependencies "
-                "(db_session_factory, redis_manager, risk_registry, or pnl_registry)"
+                "Skipping P&L recalculation - recalculator or risk_registry missing"
             )
             return results
-
-        recalculator = DailyPnLRecalculator(
-            db_session_factory=self._db_session_factory,
-            redis_manager=self._redis_manager,
-            risk_registry=self._risk_registry,
-            pnl_registry=self._pnl_registry,
-            firm_registry=self._firm_registry,
-            account_manager=self._account_manager,
-        )
 
         for account_id, recon_result in reconciliation_results.items():
             if recon_result.requires_manual_intervention:
@@ -276,10 +217,9 @@ class RecoveryOrchestrator:
         pnl_results: dict[str, RecalculationResult] | None,
         recovery_start_time: datetime,
     ) -> ResumeResult:
-        if self._redis_manager is None or self._account_manager is None:
-            logger.warning(
-                "Skipping trading resume - missing redis_manager or account_manager"
-            )
+        resumer = self._collaborators.trading_resumer
+        if resumer is None:
+            logger.warning("Skipping trading resume - resumer not configured")
             return ResumeResult(
                 success=False,
                 accounts_resumed=0,
@@ -289,11 +229,6 @@ class RecoveryOrchestrator:
                 account_results=[],
                 notification_sent=False,
             )
-
-        resumer = TradingResumer(
-            redis_manager=self._redis_manager,
-            account_manager=self._account_manager,
-        )
         return await resumer.resume_trading_after_recovery(
             reconciliation_results=reconciliation_results,
             pnl_results=pnl_results or {},

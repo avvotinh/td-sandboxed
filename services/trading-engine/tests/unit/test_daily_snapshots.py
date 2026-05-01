@@ -629,46 +629,31 @@ class TestAccountManagerGetActiveAccountIds:
 # ======================
 
 class TestEngineSnapshotIntegration:
-    """Test LiveOrchestrator daily snapshot initialization (story 10.1).
-
-    Daily-snapshot init was hoisted out of the `TradingEngine` god-object
-    into :class:`LiveOrchestrator`; behavior unchanged from the engine.py
-    baseline.
+    """Test that the DI builder skips daily snapshots when deps are missing
+    (story 10.2 — feature flags drive construction).
     """
 
-    @pytest.mark.asyncio
-    async def test_initialize_daily_snapshots_without_database_url(self):
-        """Should skip when no database URL configured."""
-        from src.engine import LiveOrchestrator
+    def test_no_database_url_disables_daily_snapshot_feature(self):
+        """`feature_flags().daily_snapshots` is False without a database_url."""
+        from src.engine import EngineConfig, build_lifecycle
 
-        live = LiveOrchestrator(
-            snapshot_service=None,
-            redis_manager=None,
-            account_manager=None,
-            db_session_factory=None,
-            audit_service=None,
-            firm_registry=None,
-            database_url=None,
-        )
-        await live._start_daily_snapshots()
-        assert live._daily_snapshot_service is None
+        config = EngineConfig.empty()
+        assert config.feature_flags().daily_snapshots is False
+        # Build the engine — daily_snapshot service must not exist on the bundle.
+        lifecycle = build_lifecycle(config)
+        assert lifecycle._live._services.daily_snapshot_service is None
+        assert lifecycle._live._services.daily_snapshot_writer is None
 
-    @pytest.mark.asyncio
-    async def test_initialize_daily_snapshots_without_dependencies(self):
-        """Should skip when required dependencies missing."""
-        from src.engine import LiveOrchestrator
+    def test_missing_redis_disables_daily_snapshot_feature(self):
+        """`feature_flags().daily_snapshots` requires redis + account_manager."""
+        from src.engine import EngineConfig
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
-        live = LiveOrchestrator(
-            snapshot_service=None,
-            redis_manager=None,
-            account_manager=None,
-            db_session_factory=None,
-            audit_service=None,
-            firm_registry=None,
+        config = EngineConfig(
             database_url="postgresql+asyncpg://test@localhost/test",
+            db_session_factory=MagicMock(spec=async_sessionmaker),
         )
-        await live._start_daily_snapshots()
-        assert live._daily_snapshot_service is None
+        assert config.feature_flags().daily_snapshots is False
 
 
 # ======================

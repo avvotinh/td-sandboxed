@@ -1,26 +1,26 @@
 """EngineLifecycle — top-level coordinator: recovery → live → shutdown.
 
-Story 10.1 lifts the run/shutdown sequence out of the god-object. Behavior
-matches the `engine.py` baseline 100%: same audit events, same shutdown
-ordering, same idempotent shutdown semantics.
+Story 10.1 lifted the run/shutdown sequence out of the god-object. Story
+10.2 finishes the spec sketch by accepting a pre-built
+:class:`GracefulShutdown` (built eagerly by the DI container; recovery
+artifacts late-bound during ``run()``). Behavior matches the engine.py
+baseline 100%: same audit events, same shutdown ordering, same
+idempotent shutdown semantics.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 
-from ..accounts.account_manager import AccountManager
 from ..audit.audit_service import AuditService
 from ..rules.audit_logger import audit_task_done_callback
-from ..state.crash_recovery import CrashRecoveryManager
 from ..state.crash_recovery import RecoveryResult as CrashRecoveryResult
 from ..state.daily_pnl_recalculator import RecalculationResult
 from ..state.graceful_shutdown import GracefulShutdown, ShutdownResult
 from ..state.position_reconciler import ReconciliationResult
-from ..state.redis_state import RedisStateManager
-from ..state.snapshot_service import SnapshotService
 from ..state.trading_resumer import ResumeResult
 from .live_orchestrator import LiveOrchestrator
+from .lock_lost import LockLostMediator
 from .recovery_orchestrator import RecoveryOrchestrator, RecoveryOutcome
 
 logger = logging.getLogger(__name__)
@@ -29,33 +29,25 @@ logger = logging.getLogger(__name__)
 class EngineLifecycle:
     """Coordinates recovery, live-trading auxiliary services, and shutdown."""
 
-    # TODO(10.2): the spec sketch envisions
-    # ``__init__(recovery, live, graceful_shutdown, audit_service)`` with a
-    # pre-built GracefulShutdown injected. This implementation takes the raw
-    # graceful-shutdown deps and constructs it post-recovery because
-    # GracefulShutdown needs the live CrashRecoveryManager produced by the
-    # recovery flow. The DI container in 10.2 will close that gap.
     def __init__(
         self,
         recovery: RecoveryOrchestrator,
         live: LiveOrchestrator,
+        graceful_shutdown: GracefulShutdown | None,
         audit_service: AuditService | None,
-        redis_manager: RedisStateManager | None,
-        account_manager: AccountManager | None,
-        snapshot_service: SnapshotService | None,
+        lock_lost_mediator: LockLostMediator,
     ) -> None:
         self._recovery = recovery
         self._live = live
+        self._graceful_shutdown = graceful_shutdown
         self._audit_service = audit_service
-        self._redis_manager = redis_manager
-        self._account_manager = account_manager
-        self._snapshot_service = snapshot_service
 
         self._running = False
         self._shutdown_event = asyncio.Event()
-        self._graceful_shutdown: GracefulShutdown | None = None
         self._recovery_outcome: RecoveryOutcome | None = None
         self._shutdown_result: ShutdownResult | None = None
+
+        lock_lost_mediator.bind(self._on_lock_lost)
 
     @property
     def is_running(self) -> bool:
@@ -118,9 +110,19 @@ class EngineLifecycle:
 
     async def run(self) -> None:
         """Execute the full lifecycle: recovery → live start → wait → cleanup."""
-        self._recovery_outcome = await self._recovery.run(self._on_lock_lost)
-        await self._live.start(self._recovery_outcome.cold_storage_writer)
-        self._init_graceful_shutdown(self._recovery_outcome.crash_recovery)
+        self._recovery_outcome = await self._recovery.run()
+
+        # Bind recovery artifacts onto GracefulShutdown BEFORE live.start() so a
+        # SIGTERM during a slow live-start does not run a partial shutdown
+        # without crash_recovery / cold_storage_service.
+        if self._graceful_shutdown is not None:
+            self._graceful_shutdown.bind_recovery_artifacts(
+                crash_recovery=self._recovery_outcome.crash_recovery,
+                cold_storage_service=self._live.cold_storage_service,
+            )
+            self._graceful_shutdown.register_signal_handlers()
+
+        await self._live.start()
 
         logger.info("Trading Engine v0.1.0 running")
         self._running = True
@@ -179,25 +181,6 @@ class EngineLifecycle:
             )
             if crash_recovery is not None:
                 await crash_recovery.shutdown_sequence()
-
-    def _init_graceful_shutdown(
-        self, crash_recovery: CrashRecoveryManager | None
-    ) -> None:
-        if self._redis_manager is None or self._account_manager is None:
-            logger.warning(
-                "Graceful shutdown requires redis_manager and account_manager"
-            )
-            return
-        self._graceful_shutdown = GracefulShutdown(
-            redis_manager=self._redis_manager,
-            account_manager=self._account_manager,
-            snapshot_service=self._snapshot_service,
-            zmq_adapter=self._recovery.zmq_adapter,
-            crash_recovery=crash_recovery,
-            cold_storage_service=self._live.cold_storage_service,
-        )
-        self._graceful_shutdown.register_signal_handlers()
-        logger.info("Graceful shutdown handler initialized")
 
     def _audit_engine_start(self) -> None:
         if self._audit_service is None:

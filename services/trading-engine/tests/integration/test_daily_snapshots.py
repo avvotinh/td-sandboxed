@@ -180,25 +180,23 @@ class TestUpsertIdempotency:
 # ======================
 
 class TestEngineLifecycle:
-    """Integration test: LiveOrchestrator manages snapshot service lifecycle (10.1)."""
+    """Integration test: build_lifecycle wires the daily snapshot service
+    into LiveOrchestrator and start/stop drive it (story 10.2 DI flow)."""
 
     @pytest.mark.asyncio
-    async def test_live_orchestrator_starts_and_stops_snapshot_service(self):
-        """DailySnapshotService should start when LiveOrchestrator.start runs and stop on stop()."""
-        from src.engine import LiveOrchestrator
+    async def test_di_builder_wires_snapshot_service_into_live(self):
+        """`build_lifecycle` constructs DailySnapshotService and LiveOrchestrator drives it."""
+        from src.engine import EngineConfig, build_lifecycle
 
         redis_manager = AsyncMock()
         account_manager = MagicMock()
         account_manager.get_all_accounts.return_value = []
         session_factory = MagicMock()
 
-        live = LiveOrchestrator(
-            snapshot_service=None,
+        config = EngineConfig(
             redis_manager=redis_manager,
             account_manager=account_manager,
             db_session_factory=session_factory,
-            audit_service=None,
-            firm_registry=None,
             database_url="postgresql+asyncpg://test@localhost/test",
         )
 
@@ -216,14 +214,19 @@ class TestEngineLifecycle:
             mock_service_instance = AsyncMock()
             mock_service_instance.is_running = True
             with patch(
-                "src.engine.live_orchestrator.DailySnapshotService",
+                "src.engine.DailySnapshotService",
                 return_value=mock_service_instance,
             ):
-                await live.start(cold_storage_writer=None)
-                assert live._daily_snapshot_writer is not None
-                assert live._daily_snapshot_service is mock_service_instance
+                lifecycle = build_lifecycle(config)
+                assert (
+                    lifecycle._live._services.daily_snapshot_service
+                    is mock_service_instance
+                )
 
-                await live.stop()
+                await lifecycle._live.start()
+                mock_service_instance.start.assert_awaited()
+
+                await lifecycle._live.stop()
                 mock_service_instance.stop.assert_awaited()
 
 

@@ -1,11 +1,13 @@
-"""Unit tests for :class:`EngineLifecycle` (story 10.1)."""
+"""Unit tests for :class:`EngineLifecycle` (story 10.2 — pre-built deps)."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.engine.lifecycle import EngineLifecycle
+from src.engine.lock_lost import LockLostMediator
 from src.engine.recovery_orchestrator import RecoveryOutcome
 
 
@@ -26,14 +28,12 @@ def _make_lifecycle(
     recovery_outcome: RecoveryOutcome | None = None,
     *,
     audit_service=None,
-    redis_manager=None,
-    account_manager=None,
+    graceful_shutdown=None,
 ):
     recovery = MagicMock()
     recovery.run = AsyncMock(
         return_value=recovery_outcome if recovery_outcome else _make_outcome()
     )
-    recovery.zmq_adapter = None
 
     live = MagicMock()
     live.start = AsyncMock()
@@ -42,38 +42,31 @@ def _make_lifecycle(
     live.trade_db_writer = None
     live.violation_service = None
 
+    mediator = LockLostMediator()
     lifecycle = EngineLifecycle(
         recovery=recovery,
         live=live,
+        graceful_shutdown=graceful_shutdown,
         audit_service=audit_service,
-        redis_manager=redis_manager,
-        account_manager=account_manager,
-        snapshot_service=None,
+        lock_lost_mediator=mediator,
     )
-    return lifecycle, recovery, live
+    return lifecycle, recovery, live, mediator
 
 
 @pytest.mark.asyncio
 async def test_run_orchestrates_recovery_then_live_then_shutdown_signal():
     """run() invokes recovery → live.start → wait → live.stop in order."""
     outcome = _make_outcome()
-    lifecycle, recovery, live = _make_lifecycle(outcome)
-
-    # No graceful_shutdown is built when redis/account_manager are None,
-    # so run() falls back to waiting on the internal shutdown event.
-    import asyncio
+    lifecycle, recovery, live, _ = _make_lifecycle(outcome)
 
     run_task = asyncio.create_task(lifecycle.run())
-    await asyncio.sleep(0)  # let recovery + live.start complete
-    # At this point recovery and live.start have been awaited; lifecycle is_running.
     while not lifecycle.is_running and not run_task.done():
         await asyncio.sleep(0)
 
     assert lifecycle.is_running is True
     recovery.run.assert_awaited_once()
-    live.start.assert_awaited_once_with(outcome.cold_storage_writer)
+    live.start.assert_awaited_once_with()
 
-    # Trigger fallback shutdown path
     await lifecycle.shutdown()
     await run_task
 
@@ -83,8 +76,7 @@ async def test_run_orchestrates_recovery_then_live_then_shutdown_signal():
 
 @pytest.mark.asyncio
 async def test_shutdown_idempotent_when_not_running():
-    """shutdown() before run() is a no-op."""
-    lifecycle, _, _ = _make_lifecycle()
+    lifecycle, _, _, _ = _make_lifecycle()
     await lifecycle.shutdown()
     await lifecycle.shutdown()
     assert lifecycle.is_running is False
@@ -92,8 +84,7 @@ async def test_shutdown_idempotent_when_not_running():
 
 @pytest.mark.asyncio
 async def test_recovery_outcome_properties_forward_to_lifecycle():
-    """is_running false initially; outcome properties return None pre-run."""
-    lifecycle, _, _ = _make_lifecycle()
+    lifecycle, _, _, _ = _make_lifecycle()
     assert lifecycle.recovery_result is None
     assert lifecycle.reconciliation_results is None
     assert lifecycle.pnl_recalculation_results is None
@@ -104,8 +95,7 @@ async def test_recovery_outcome_properties_forward_to_lifecycle():
 
 @pytest.mark.asyncio
 async def test_on_lock_lost_triggers_shutdown_event():
-    """Callback wired to RecoveryOrchestrator sets _shutdown_event and clears _running."""
-    lifecycle, _, _ = _make_lifecycle()
+    lifecycle, _, _, _ = _make_lifecycle()
     lifecycle._running = True
     lifecycle._on_lock_lost()
     assert lifecycle._running is False
@@ -113,41 +103,41 @@ async def test_on_lock_lost_triggers_shutdown_event():
 
 
 @pytest.mark.asyncio
-async def test_run_passes_on_lock_lost_callback_to_recovery():
-    """recovery.run is invoked with the lifecycle's on_lock_lost callback."""
-    lifecycle, recovery, _ = _make_lifecycle()
-
-    import asyncio
-
-    run_task = asyncio.create_task(lifecycle.run())
-    while not lifecycle.is_running and not run_task.done():
-        await asyncio.sleep(0)
-
-    callback = recovery.run.await_args.args[0]
-    assert callable(callback)
-    assert callback == lifecycle._on_lock_lost
-
-    await lifecycle.shutdown()
-    await run_task
+async def test_lock_lost_mediator_routes_to_lifecycle_handler():
+    """Constructor binds the mediator → lifecycle._on_lock_lost."""
+    lifecycle, _, _, mediator = _make_lifecycle()
+    lifecycle._running = True
+    mediator()  # invoke mediator as if from CrashRecoveryManager
+    assert lifecycle._running is False
+    assert lifecycle._shutdown_event.is_set()
 
 
 @pytest.mark.asyncio
-async def test_run_passes_cold_storage_writer_from_recovery_to_live():
-    """LiveOrchestrator.start receives the cold_storage_writer from recovery outcome."""
-    cold_writer = MagicMock()
-    outcome = _make_outcome(cold_storage_writer=cold_writer)
-    lifecycle, _, live = _make_lifecycle(outcome)
+async def test_run_with_graceful_shutdown_late_binds_recovery_artifacts():
+    """When graceful_shutdown is wired, run() late-binds recovery artifacts."""
+    crash_recovery = MagicMock()
+    cold_storage = MagicMock()
+    outcome = _make_outcome(crash_recovery=crash_recovery)
 
-    import asyncio
+    fake_shutdown_result = MagicMock()
+    fake_shutdown_result.success = True
 
-    run_task = asyncio.create_task(lifecycle.run())
-    while not lifecycle.is_running and not run_task.done():
-        await asyncio.sleep(0)
+    fake_graceful = MagicMock()
+    fake_graceful.bind_recovery_artifacts = MagicMock()
+    fake_graceful.register_signal_handlers = MagicMock()
+    fake_graceful.wait_for_shutdown_signal = AsyncMock(return_value=fake_shutdown_result)
 
-    live.start.assert_awaited_once_with(cold_writer)
+    lifecycle, _, live, _ = _make_lifecycle(outcome, graceful_shutdown=fake_graceful)
+    live.cold_storage_service = cold_storage
 
-    await lifecycle.shutdown()
-    await run_task
+    await lifecycle.run()
+
+    fake_graceful.bind_recovery_artifacts.assert_called_once_with(
+        crash_recovery=crash_recovery,
+        cold_storage_service=cold_storage,
+    )
+    fake_graceful.register_signal_handlers.assert_called_once()
+    assert lifecycle.shutdown_result is fake_shutdown_result
 
 
 @pytest.mark.asyncio
@@ -162,9 +152,7 @@ async def test_audit_engine_start_stop_emitted_when_audit_service_present():
     crash_result.accounts_needing_recovery = ["acct-1"]
     outcome = _make_outcome(crash_result=crash_result)
 
-    lifecycle, _, _ = _make_lifecycle(outcome, audit_service=audit_service)
-
-    import asyncio
+    lifecycle, _, _, _ = _make_lifecycle(outcome, audit_service=audit_service)
 
     run_task = asyncio.create_task(lifecycle.run())
     while not lifecycle.is_running and not run_task.done():
@@ -184,39 +172,11 @@ async def test_audit_engine_start_stop_emitted_when_audit_service_present():
 
 
 @pytest.mark.asyncio
-async def test_init_graceful_shutdown_skipped_without_required_deps():
-    """Without redis+account_manager, graceful_shutdown is not constructed."""
-    lifecycle, _, _ = _make_lifecycle(redis_manager=None, account_manager=None)
-    lifecycle._init_graceful_shutdown(crash_recovery=None)
-    assert lifecycle._graceful_shutdown is None
-
-
-@pytest.mark.asyncio
-async def test_init_graceful_shutdown_built_when_deps_present():
-    """With redis+account_manager, graceful_shutdown is constructed and registered."""
-    redis_manager = MagicMock()
-    account_manager = MagicMock()
-    lifecycle, _, _ = _make_lifecycle(
-        redis_manager=redis_manager, account_manager=account_manager
-    )
-
-    fake_graceful = MagicMock()
-    with patch("src.engine.lifecycle.GracefulShutdown", return_value=fake_graceful):
-        lifecycle._init_graceful_shutdown(crash_recovery=MagicMock())
-
-    assert lifecycle._graceful_shutdown is fake_graceful
-    fake_graceful.register_signal_handlers.assert_called_once()
-
-
-@pytest.mark.asyncio
 async def test_on_lock_lost_emits_audit_event():
-    """_on_lock_lost should fire an ERROR audit event when audit_service set."""
     audit_service = MagicMock()
     audit_service.log_system_event = AsyncMock()
-    lifecycle, _, _ = _make_lifecycle(audit_service=audit_service)
+    lifecycle, _, _, _ = _make_lifecycle(audit_service=audit_service)
     lifecycle._on_lock_lost()
-    import asyncio
-
     await asyncio.sleep(0)
     audit_service.log_system_event.assert_awaited()
     assert lifecycle._shutdown_event.is_set()
@@ -224,60 +184,27 @@ async def test_on_lock_lost_emits_audit_event():
 
 @pytest.mark.asyncio
 async def test_shutdown_via_graceful_shutdown_when_present():
-    """If graceful_shutdown is wired, shutdown() delegates to its trigger_shutdown."""
-    lifecycle, _, _ = _make_lifecycle()
-    lifecycle._running = True
     fake_graceful = MagicMock()
-    lifecycle._graceful_shutdown = fake_graceful
+    lifecycle, _, _, _ = _make_lifecycle(graceful_shutdown=fake_graceful)
+    lifecycle._running = True
     await lifecycle.shutdown()
     fake_graceful.trigger_shutdown.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_shutdown_invokes_crash_recovery_when_no_graceful():
-    """No graceful_shutdown wired → fall back to crash_recovery.shutdown_sequence."""
     crash_recovery = MagicMock()
     crash_recovery.shutdown_sequence = AsyncMock()
     outcome = _make_outcome(crash_recovery=crash_recovery)
-    lifecycle, _, _ = _make_lifecycle(outcome)
+    lifecycle, _, _, _ = _make_lifecycle(outcome)
     lifecycle._running = True
     lifecycle._recovery_outcome = outcome
     await lifecycle.shutdown()
     crash_recovery.shutdown_sequence.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_run_via_graceful_shutdown_path():
-    """When graceful_shutdown wired, run() awaits its wait_for_shutdown_signal."""
-    redis_manager = MagicMock()
-    account_manager = MagicMock()
-
-    crash_recovery = MagicMock()
-    outcome = _make_outcome(crash_recovery=crash_recovery)
-
-    fake_shutdown_result = MagicMock()
-    fake_shutdown_result.success = True
-
-    fake_graceful = MagicMock()
-    fake_graceful.wait_for_shutdown_signal = AsyncMock(
-        return_value=fake_shutdown_result
-    )
-    fake_graceful.register_signal_handlers = MagicMock()
-
-    lifecycle, _, _ = _make_lifecycle(
-        outcome, redis_manager=redis_manager, account_manager=account_manager
-    )
-
-    with patch("src.engine.lifecycle.GracefulShutdown", return_value=fake_graceful):
-        await lifecycle.run()
-
-    assert lifecycle.shutdown_result is fake_shutdown_result
-    fake_graceful.wait_for_shutdown_signal.assert_awaited_once()
-
-
 def test_trade_db_writer_and_violation_service_forwarded_to_live():
-    """Property forwarders return whatever LiveOrchestrator exposes."""
-    lifecycle, _, live = _make_lifecycle()
+    lifecycle, _, live, _ = _make_lifecycle()
     sentinel_writer = object()
     sentinel_violation = object()
     live.trade_db_writer = sentinel_writer

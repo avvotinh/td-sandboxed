@@ -124,6 +124,21 @@ class GracefulShutdown:
         self._current_phase = ShutdownPhase.NOT_STARTED
         self._start_time: datetime | None = None
 
+    def bind_recovery_artifacts(
+        self,
+        crash_recovery: CrashRecoveryManager | None,
+        cold_storage_service: ColdStorageService | None,
+    ) -> None:
+        """Late-bind the recovery-flow artifacts that only exist post-recovery.
+
+        Story 10.2 introduces this so the DI container can construct
+        :class:`GracefulShutdown` eagerly (with redis + account_manager)
+        and wire in the artifacts produced by the recovery and live-start
+        phases later. Idempotent — last call wins.
+        """
+        self._crash_recovery = crash_recovery
+        self._cold_storage_service = cold_storage_service
+
     def register_signal_handlers(self) -> None:
         """Register handlers for SIGTERM and SIGINT.
 
