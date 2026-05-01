@@ -154,3 +154,30 @@ development_status:
   9-15-consistency-rule-latency-test: done   # P0.15 — integration test consistency rule latency < 10ms (4 tests, worst p99 0.19ms @ 365 days)
   9-16-rule-overrides-merge-guard: done      # P0.16 — per-account rule_overrides merge + safety guard (39 tests; product → phase → account; no loosening)
   epic-9-retrospective: optional
+
+  # Epic 10: Operational Hardening (15 stories — 5 phases)
+  # Source: docs/architecture-review-2026-04-30.md (10 findings D1-D10)
+  # Context: docs/epic-10-context.md
+  # Goal: live trading readiness (audit double-entry, live orchestrator, kill-switch, news blackout)
+  epic-10: contexted
+  # Phase 1 — Architectural foundation (precondition)
+  10-1-engine-split: done                     # XL — split TradingEngine god-object → RecoveryOrchestrator + LiveOrchestrator + EngineLifecycle (D1+D5); 31 unit tests, 96% coverage; AC2/AC3/AC4 interface tightening deferred to 10.2 DI container
+  10-2-di-container: backlog                  # M  — EngineConfig DI container, replace 9 optional deps (D1)
+  # Phase 2 — Audit double-entry & race fix
+  10-3-audit-writer-bounded-queue: backlog    # L  — AuditWriter bounded queue + worker; sync DB before mutation; drain on graceful_shutdown (D3)
+  10-4-atomic-validate-send: backlog          # M  — atomic validate+send via Redis Lua (atomic_reserve.lua + atomic_release.lua) (D6)
+  # Phase 3 — Live trading P0 blockers
+  10-5-live-orchestrator: backlog             # XL — LiveOrchestrator full: LiveNode + PropFirmComplianceActor per account + RedisDataClient + ZmqExecutionClient (D5+D7#1)
+  10-6-strategy-validation-gate-audit: backlog  # S  — audit all strategies route through ValidatedZmqAdapter, no order_factory.bracket() bypass (D7#2)
+  10-7-kill-switch-flat-positions: backlog    # M  — emergency:stop closes open positions via OrderGateway.flatten_position (D7#4)
+  10-8-news-blackout-rule: backlog            # M  — NewsBlackoutRule + EconomicCalendarService (ForexFactory feed) (D7#5)
+  # Phase 4 — Backtest parity + infra debt
+  10-9-backtest-spread-swap-parity: backlog   # M  — wire spread_pips + swap_long/swap_short per-firm into backtest venue (D8)
+  10-10-alembic-bootstrap: backlog            # M  — bootstrap Alembic + port 6 raw migrations (005-010) (Epic 9 carry-over)
+  # Phase 5 — Legacy cleanup (gated by 10.11 ops cutover sign-off)
+  10-11-migration-audit-cli: backlog          # S  — `accounts audit-rules-source --strict` CLI + production cutover sign-off (gates 10.12-10.14)
+  10-12-drop-prop-firm-field: backlog         # S  — drop AccountConfig.prop_firm + VALID_PROP_FIRMS + validate_prop_firm_preset (D2)
+  10-13-drop-preset-yaml: backlog             # S  — drop src/rules/presets/*.yaml + PresetLoader (D2)
+  10-14-drop-prop-firm-id-schema: backlog     # S  — migration drop accounts.prop_firm_id + prop_firms table (D2+D10)
+  10-15-gitignore-compliance-reports: backlog # XS — .gitignore services/trading-engine/compliance-report-*.json (D9)
+  epic-10-retrospective: optional

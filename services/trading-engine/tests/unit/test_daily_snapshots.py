@@ -629,28 +629,46 @@ class TestAccountManagerGetActiveAccountIds:
 # ======================
 
 class TestEngineSnapshotIntegration:
-    """Test TradingEngine daily snapshot initialization."""
+    """Test LiveOrchestrator daily snapshot initialization (story 10.1).
+
+    Daily-snapshot init was hoisted out of the `TradingEngine` god-object
+    into :class:`LiveOrchestrator`; behavior unchanged from the engine.py
+    baseline.
+    """
 
     @pytest.mark.asyncio
     async def test_initialize_daily_snapshots_without_database_url(self):
         """Should skip when no database URL configured."""
-        from src.engine import TradingEngine
+        from src.engine import LiveOrchestrator
 
-        engine = TradingEngine(database_url=None)
-        await engine._initialize_daily_snapshots()
-        assert engine._daily_snapshot_service is None
+        live = LiveOrchestrator(
+            snapshot_service=None,
+            redis_manager=None,
+            account_manager=None,
+            db_session_factory=None,
+            audit_service=None,
+            firm_registry=None,
+            database_url=None,
+        )
+        await live._start_daily_snapshots()
+        assert live._daily_snapshot_service is None
 
     @pytest.mark.asyncio
     async def test_initialize_daily_snapshots_without_dependencies(self):
         """Should skip when required dependencies missing."""
-        from src.engine import TradingEngine
+        from src.engine import LiveOrchestrator
 
-        engine = TradingEngine(
-            database_url="postgresql+asyncpg://test@localhost/test",
+        live = LiveOrchestrator(
+            snapshot_service=None,
             redis_manager=None,
+            account_manager=None,
+            db_session_factory=None,
+            audit_service=None,
+            firm_registry=None,
+            database_url="postgresql+asyncpg://test@localhost/test",
         )
-        await engine._initialize_daily_snapshots()
-        assert engine._daily_snapshot_service is None
+        await live._start_daily_snapshots()
+        assert live._daily_snapshot_service is None
 
 
 # ======================

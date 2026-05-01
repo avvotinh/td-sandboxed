@@ -180,32 +180,28 @@ class TestUpsertIdempotency:
 # ======================
 
 class TestEngineLifecycle:
-    """Integration test: engine start/stop manages snapshot service lifecycle."""
+    """Integration test: LiveOrchestrator manages snapshot service lifecycle (10.1)."""
 
     @pytest.mark.asyncio
-    async def test_engine_starts_and_stops_snapshot_service(self):
-        """DailySnapshotService should start during engine.run() and stop on shutdown."""
-        from src.engine import TradingEngine
+    async def test_live_orchestrator_starts_and_stops_snapshot_service(self):
+        """DailySnapshotService should start when LiveOrchestrator.start runs and stop on stop()."""
+        from src.engine import LiveOrchestrator
 
         redis_manager = AsyncMock()
-        redis_manager.connect = AsyncMock()
         account_manager = MagicMock()
         account_manager.get_all_accounts.return_value = []
         session_factory = MagicMock()
 
-        engine = TradingEngine(
+        live = LiveOrchestrator(
+            snapshot_service=None,
             redis_manager=redis_manager,
             account_manager=account_manager,
             db_session_factory=session_factory,
+            audit_service=None,
+            firm_registry=None,
             database_url="postgresql+asyncpg://test@localhost/test",
         )
 
-        # Mock the methods that would require actual Redis/DB
-        engine._initialize_crash_recovery = AsyncMock(return_value=None)
-        engine._initialize_cold_storage = AsyncMock()
-        engine._initialize_graceful_shutdown = MagicMock()
-
-        # Mock snapshot service creation (lazy imports inside _initialize_daily_snapshots)
         with patch("src.snapshots.snapshot_db_writer.create_async_engine") as mock_eng, \
              patch("src.snapshots.snapshot_db_writer.async_sessionmaker"):
             mock_sa_engine = MagicMock()
@@ -217,35 +213,18 @@ class TestEngineLifecycle:
             mock_sa_engine.connect = MagicMock(return_value=mock_conn)
             mock_eng.return_value = mock_sa_engine
 
-            # Mock DailySnapshotService at its module (lazy import target)
             mock_service_instance = AsyncMock()
             mock_service_instance.is_running = True
             with patch(
-                "src.snapshots.daily_snapshot_service.DailySnapshotService",
+                "src.engine.live_orchestrator.DailySnapshotService",
                 return_value=mock_service_instance,
             ):
-                # Start engine in background
-                run_task = asyncio.create_task(engine.run())
+                await live.start(cold_storage_writer=None)
+                assert live._daily_snapshot_writer is not None
+                assert live._daily_snapshot_service is mock_service_instance
 
-                # Give it time to initialize
-                await asyncio.sleep(0.1)
-
-                # Verify snapshot writer was started (via _initialize_daily_snapshots)
-                assert engine._daily_snapshot_writer is not None
-
-                # Trigger shutdown
-                engine._running = False
-                engine._shutdown_event.set()
-                await asyncio.sleep(0.1)
-
-                try:
-                    await asyncio.wait_for(run_task, timeout=2.0)
-                except (asyncio.TimeoutError, Exception):
-                    run_task.cancel()
-                    try:
-                        await run_task
-                    except asyncio.CancelledError:
-                        pass
+                await live.stop()
+                mock_service_instance.stop.assert_awaited()
 
 
 # ======================
