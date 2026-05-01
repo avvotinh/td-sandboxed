@@ -493,3 +493,94 @@ def promote_account(
             fg=STATUS_COLORS["paused"],
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Story 10.11 — migration audit CLI (Phase 5 cleanup gating)
+# ---------------------------------------------------------------------------
+
+
+@accounts_app.command("audit-rules-source")
+def audit_rules_source(
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help=(
+            "Exit 1 when any prop_firm-type account still resolves to "
+            "preset_legacy. Phase 5 (10.12-10.14) cleanup is gated by "
+            "this command running clean on production config."
+        ),
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit machine-readable JSON instead of the table.",
+    ),
+) -> None:
+    """Audit how each account's rules are sourced (firm / preset / personal).
+
+    Reads ``configs/accounts.yaml`` (override via ``ACCOUNTS_CONFIG``),
+    classifies every account through ``RuleAssignment.from_account_config``,
+    and prints a roster + aggregate. With ``--strict`` the exit code is
+    1 if any prop_firm-type account is still on the legacy
+    ``preset_legacy`` path — that gates Phase 5 cleanup stories
+    (10.12 drop ``prop_firm`` field, 10.13 drop preset YAML loader,
+    10.14 drop ``prop_firm_id`` schema). The output of a clean run is
+    the sign-off artifact ops attach to a
+    ``docs/sprint-artifacts/migration-audit-YYYY-MM-DD.md`` PR before
+    Phase 5 may merge.
+    """
+    import json
+
+    from ..accounts.audit_rules_source import classify_accounts
+
+    accounts_config, config_path = _load_accounts_config_or_exit()
+    report = classify_accounts(accounts_config.accounts)
+
+    if json_output:
+        typer.echo(json.dumps(report.to_dict(), indent=2, sort_keys=False))
+    else:
+        _print_audit_table(report, config_path=config_path)
+
+    if strict and not report.all_prop_firm_accounts_migrated:
+        typer.echo(
+            typer.style(
+                f"\n✗ {report.prop_firm_legacy_count} prop_firm account(s) "
+                "still on preset_legacy — Phase 5 cleanup blocked until "
+                "every prop_firm account migrates to firm_bound.",
+                fg=STATUS_COLORS["error"],
+            )
+        )
+        raise typer.Exit(1)
+
+
+def _print_audit_table(report, *, config_path: str) -> None:
+    """Pretty-print the audit report as a tabulate table + summary."""
+    headers = ["Account ID", "Type", "Rules Source", "Detail"]
+    rows = [r.to_table_row() for r in report.rows]
+    typer.echo(tabulate(rows, headers=headers, tablefmt="simple"))
+
+    typer.echo(f"\nSource: {config_path}")
+    typer.echo("\nAggregate:")
+    for source in ("firm_bound", "preset_legacy", "personal_rules_file", "none"):
+        typer.echo(f"  {source:<24} {report.counts.get(source, 0)}")
+
+    typer.echo(
+        f"\nProp-firm accounts: {report.prop_firm_account_total} "
+        f"(legacy preset path: {report.prop_firm_legacy_count})"
+    )
+    if report.all_prop_firm_accounts_migrated:
+        typer.echo(
+            typer.style(
+                "✓ All prop_firm accounts are firm_bound — Phase 5 cleanup unblocked.",
+                fg=STATUS_COLORS["active"],
+            )
+        )
+    else:
+        typer.echo(
+            typer.style(
+                "⚠ Some prop_firm accounts are still on preset_legacy. "
+                "Migrate via firm_id+product_id+phase before Phase 5.",
+                fg=STATUS_COLORS["paused"],
+            )
+        )
