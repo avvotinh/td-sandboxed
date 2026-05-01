@@ -28,8 +28,14 @@ Resolution rules:
   premium accounts with tighter spreads).
 * When neither side declares a profile, returns ``None`` and the
   backtest falls back to Nautilus defaults (= zero commission).
-* Only the ``per_lot_usd`` field is wired today. ``spread_pips`` and
-  swap fields are read by future work (P0.14 E2E parity).
+* Story 10.9 (D8): when ``spread_pips`` is non-empty the converter
+  returns a :class:`SpreadAwareFeeModel` that adds
+  ``spread_pips × pip_value × fill_qty`` to ``per_lot_usd`` on every
+  fill. Profiles with empty ``spread_pips`` keep the legacy
+  :class:`PerContractFeeModel`. ``swap_long_pips`` / ``swap_short_pips``
+  are still future work — proper modelling needs a Nautilus
+  ``SimulationModule`` that hooks the rollover boundary; see
+  :mod:`spread_fee_model` for the deferral note.
 """
 
 from __future__ import annotations
@@ -85,26 +91,54 @@ def resolve_commission_profile(
 def commission_profile_to_fee_model(
     profile: CommissionProfile | None,
     currency: Currency,
+    *,
+    pip_value_per_lot_usd: float | None = None,
 ) -> FeeModel | None:
     """Convert a :class:`CommissionProfile` into a Nautilus :class:`FeeModel`.
 
-    Maps ``per_lot_usd`` to :class:`PerContractFeeModel` — Nautilus
-    charges the configured ``Money`` amount per contract (per lot in
-    forex). Returns ``None`` when the profile is missing or its per-lot
-    fee is zero, so callers can pass the result straight to
-    ``add_venue(fee_model=...)`` (a ``None`` ``fee_model`` is accepted
-    by Nautilus and means "use the default = no fee").
+    Story 10.9 splits the dispatch:
 
-    The negative-value path is unreachable for a validly constructed
-    :class:`CommissionProfile` — the dataclass's ``__post_init__``
-    rejects it. Validation duplication is left to the dataclass.
+    * Empty ``spread_pips`` → :class:`PerContractFeeModel` with the
+      bare ``per_lot_usd`` (legacy P0.13 behaviour).
+    * Non-empty ``spread_pips`` → :class:`SpreadAwareFeeModel` that
+      additionally charges spread × pip_value × fill_qty per fill.
+
+    Returns ``None`` only when the profile is missing AND has no
+    spread to apply. A profile with zero ``per_lot_usd`` but non-empty
+    ``spread_pips`` still returns a working fee model — the spread
+    cost on its own warrants a fee model.
 
     Raises:
         ValueError: If ``currency`` is not USD (see :func:`_require_usd`).
     """
-    if profile is None or profile.per_lot_usd == 0:
+    if profile is None:
         return None
+    has_per_lot = profile.per_lot_usd > 0
+    has_spread = bool(profile.spread_pips)
+    if not has_per_lot and not has_spread:
+        return None
+
     _require_usd(currency)
+
+    if has_spread:
+        # Local import — keeps the legacy single-fee path free of the
+        # Nautilus FeeModel subclass at module-import time, which makes
+        # mocking easier in tests that don't care about spread.
+        from .spread_fee_model import (
+            DEFAULT_PIP_VALUE_PER_LOT_USD,
+            SpreadAwareFeeModel,
+        )
+
+        return SpreadAwareFeeModel(
+            per_lot_usd=profile.per_lot_usd,
+            spread_pips=profile.spread_pips,
+            pip_value_per_lot_usd=(
+                pip_value_per_lot_usd
+                if pip_value_per_lot_usd is not None
+                else DEFAULT_PIP_VALUE_PER_LOT_USD
+            ),
+        )
+
     return PerContractFeeModel(commission=Money(profile.per_lot_usd, currency))
 
 
