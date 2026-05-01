@@ -10,9 +10,11 @@ actor + bar subscriptions) onto each session, and adds the periodic
 health-surface push to Redis. Story 10.5d threads a per-account
 equity provider — a closure over :class:`PnLTrackerRegistry` — into
 each compliance actor so live ``on_bar`` rule checks use the engine's
-authoritative equity instead of the Nautilus ``Portfolio``. The
-Nautilus ``TradingNode`` factory glue that turns these components
-into a running live event loop is deferred to 10.5e2.
+authoritative equity instead of the Nautilus ``Portfolio``. Story
+10.5e2 mounts a real Nautilus :class:`TradingNode` per account via
+:func:`engine.node_factory.build_account_trading_node`, runs it as a
+tracked task, and propagates a runtime crash into the existing 10.5a
+crash-isolation path so other accounts keep trading.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -28,17 +31,27 @@ from typing import TYPE_CHECKING
 from ..orders.trade_db_writer import TradeDBWriter
 from ..rules.violation_service import ViolationService
 from ..state.cold_storage_service import ColdStorageService
+from nautilus_trader.model.identifiers import Venue
+
 from .account_session import LiveAccountSession, SessionState
 from .actors import build_compliance_actor
 from .collaborators import LiveServiceBundle
+from .node_factory import (
+    DEFAULT_VENUE_NAME,
+    AccountNodeSpec,
+    build_account_trading_node,
+)
 
 if TYPE_CHECKING:
+    from nautilus_trader.live.node import TradingNode
+
     from ..accounts.account_manager import AccountManager
     from ..accounts.models import AccountConfig
     from ..accounts.pnl_registry import PnLTrackerRegistry
     from ..accounts.risk_registry import RiskStateRegistry
     from ..audit.audit_service import AuditService
     from ..backtesting.prop_firm_actor import LiveEquityProvider
+    from ..execution.validated_adapter import ValidatedZmqAdapter
     from ..rules.assignment_service import RuleAssignmentService
     from ..state.redis_state import RedisStateManager
 
@@ -53,6 +66,11 @@ DEFAULT_BAR_TIMEFRAMES: tuple[str, ...] = ("1m",)
 HEALTH_REDIS_KEY = "health:trading-engine"
 HEALTH_PUSH_INTERVAL_SECONDS = 5.0
 HEALTH_REDIS_TTL_SECONDS = 30
+
+# Story 10.5e2 — bound on ``TradingNode.stop_async`` so an unresponsive
+# MT5 bridge cannot hang graceful shutdown indefinitely (project rule:
+# every MT5 call wraps in ``asyncio.wait_for`` with a 5s ceiling).
+NODE_STOP_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -90,9 +108,11 @@ class LiveOrchestrator:
         risk_registry: "RiskStateRegistry | None" = None,
         pnl_registry: "PnLTrackerRegistry | None" = None,
         redis_manager: "RedisStateManager | None" = None,
+        validated_adapter: "ValidatedZmqAdapter | None" = None,
         bar_timeframes: tuple[str, ...] = DEFAULT_BAR_TIMEFRAMES,
         health_push_interval: float = HEALTH_PUSH_INTERVAL_SECONDS,
         health_ttl_seconds: int = HEALTH_REDIS_TTL_SECONDS,
+        node_factory: Callable[..., "TradingNode"] = build_account_trading_node,
     ) -> None:
         self._services = services
         self._account_manager = account_manager
@@ -101,11 +121,23 @@ class LiveOrchestrator:
         self._risk_registry = risk_registry
         self._pnl_registry = pnl_registry
         self._redis_manager = redis_manager
+        self._validated_adapter = validated_adapter
         self._bar_timeframes = tuple(bar_timeframes)
         self._health_push_interval = health_push_interval
         self._health_ttl_seconds = health_ttl_seconds
+        self._node_factory = node_factory
         self._sessions: dict[str, LiveAccountSession] = {}
         self._health_task: asyncio.Task[None] | None = None
+        # Story 10.5e2 — per-account ``TradingNode.run_async()`` task.
+        # Tracked here (not on the session) so :meth:`stop` can cancel
+        # them all in one gather without re-traversing components.
+        self._node_run_tasks: dict[str, asyncio.Task[None]] = {}
+        # Crash-isolation tasks scheduled by :meth:`_on_node_run_done`
+        # (a synchronous callback that must hand work to the loop). The
+        # set keeps strong refs alive until completion — without it the
+        # task can be garbage-collected before it runs and its
+        # exception silently lost.
+        self._pending_isolation_tasks: set[asyncio.Task[None]] = set()
 
     @property
     def cold_storage_service(self) -> ColdStorageService | None:
@@ -172,6 +204,15 @@ class LiveOrchestrator:
         # Tear down per-account sessions first so they cannot post
         # writes to services that are about to stop.
         await self._stop_all_sessions()
+
+        # Drain any in-flight crash-isolation tasks scheduled by
+        # :meth:`_on_node_run_done` so a crash that fires during
+        # ``stop()`` is awaited rather than silently abandoned.
+        if self._pending_isolation_tasks:
+            await asyncio.gather(
+                *list(self._pending_isolation_tasks),
+                return_exceptions=True,
+            )
 
         if self._services.daily_snapshot_service is not None:
             await self._services.daily_snapshot_service.stop()
@@ -263,19 +304,89 @@ class LiveOrchestrator:
     async def _start_session(self, session: LiveAccountSession) -> None:
         """Bring a single session online with crash isolation.
 
-        Story 10.5a only flips the state machine — 10.5b/c will
-        construct the Nautilus ``LiveNode`` and clients here, then call
-        :meth:`LiveAccountSession.attach_components`. A start failure
-        pauses the affected account so other accounts keep trading
+        Story 10.5e2 — when the per-account ``TradingNode`` is mounted on
+        the session (``components["trading_node"]``), spawn its long-
+        running ``run_async()`` as a tracked task. A runtime failure of
+        that task propagates into :meth:`_handle_node_run_completion`
+        which pauses the account + audits + keeps other accounts running
         (AC8 crash isolation).
+
+        Backwards compat: when no node is present (``EngineConfig.empty()``
+        path or 10.5e1-shaped wiring), the session still flips to
+        RUNNING after component build — same behaviour as 10.5a.
         """
         try:
             await self._build_session_components(session)
+            await self._launch_node_if_present(session)
             session.mark_running()
             logger.info("LiveAccountSession started: %s", session.account_id)
         except Exception as exc:
             session.mark_failed(repr(exc))
             await self._isolate_failed_session(session, exc)
+
+    async def _launch_node_if_present(
+        self, session: LiveAccountSession
+    ) -> None:
+        """Spawn ``node.run_async()`` as a tracked task when wired."""
+        node = session.components.get("trading_node")
+        if node is None:
+            return
+        task = asyncio.create_task(
+            node.run_async(),
+            name=f"trading_node:{session.account_id}",
+        )
+        self._node_run_tasks[session.account_id] = task
+        # Done callback fires whether the task completes (clean stop),
+        # is cancelled (intentional teardown), or raises (crash).
+        task.add_done_callback(
+            lambda t, sid=session.account_id: self._on_node_run_done(sid, t)
+        )
+
+    def _on_node_run_done(
+        self, account_id: str, task: asyncio.Task[None]
+    ) -> None:
+        """Handle ``run_async`` task completion — schedule isolation on crash.
+
+        Synchronous callback (Nautilus + asyncio expect this) — defer
+        the actual work into a coroutine so we can ``await`` audit and
+        pause calls. Cancellation / clean exit is a no-op; an exception
+        spawns :meth:`_isolate_failed_session_async` for the affected
+        account so the rest of the engine continues.
+        """
+        # Drop the tracked task ref; the task is done either way.
+        self._node_run_tasks.pop(account_id, None)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        session = self._sessions.get(account_id)
+        if session is None:
+            logger.warning(
+                "TradingNode crashed for unknown session %s: %r",
+                account_id,
+                exc,
+            )
+            return
+        # Schedule the async crash-isolation work on the running loop.
+        # Pin the task in :attr:`_pending_isolation_tasks` so it cannot
+        # be garbage-collected before completion; ``stop()`` drains the
+        # set so a crash-during-shutdown is observable.
+        task_iso = asyncio.create_task(
+            self._handle_node_run_crash(session, exc),
+            name=f"node_crash_isolation:{account_id}",
+        )
+        self._pending_isolation_tasks.add(task_iso)
+        task_iso.add_done_callback(
+            self._pending_isolation_tasks.discard
+        )
+
+    async def _handle_node_run_crash(
+        self, session: LiveAccountSession, exc: BaseException
+    ) -> None:
+        """Mark the session FAILED + drive standard isolation flow."""
+        session.mark_failed(repr(exc))
+        await self._isolate_failed_session(session, exc)
 
     async def _build_session_components(
         self, session: LiveAccountSession
@@ -343,13 +454,62 @@ class LiveOrchestrator:
         # 5. Compute the bar subscriptions for the account's data feed.
         bar_subscriptions = self._compute_bar_subscriptions(account)
 
+        # 6. Build the per-account Nautilus ``TradingNode`` (10.5e2).
+        # Only when the full live-trading deps are wired —
+        # ``EngineConfig.empty()`` and 10.5e1-shaped wiring leave it
+        # ``None`` so unit tests of the lifecycle skeleton still work.
+        trading_node = self._build_trading_node_if_ready(
+            account=account,
+            bar_subscriptions=bar_subscriptions,
+            compliance_actor=compliance_actor,
+        )
+
         session.attach_components(
             rule_engine=rule_engine,
             compliance_actor=compliance_actor,
             equity_provider=equity_provider,
             bar_subscriptions=bar_subscriptions,
             initial_balance=initial_balance,
+            trading_node=trading_node,
         )
+
+    def _build_trading_node_if_ready(
+        self,
+        *,
+        account: "AccountConfig",
+        bar_subscriptions: list[tuple[str, str]],
+        compliance_actor: object | None,
+    ) -> "TradingNode | None":
+        """Construct the per-account Nautilus TradingNode when wired.
+
+        Story 10.5e2 — returns the built (but not yet started) node when
+        every full-live-trading dep is present (``redis_manager`` +
+        ``validated_adapter``) and ``bar_subscriptions`` is non-empty.
+        Otherwise returns ``None`` so the lifecycle falls back to the
+        10.5a skeleton path.
+
+        The factory is injected via ``self._node_factory`` so unit tests
+        can substitute a stub recording calls without standing up the
+        Cython :class:`TradingNode` base.
+        """
+        if (
+            self._redis_manager is None
+            or self._validated_adapter is None
+            or not bar_subscriptions
+        ):
+            return None
+
+        spec = AccountNodeSpec(
+            account_id=account.id,
+            venue=Venue(DEFAULT_VENUE_NAME),
+            bar_subscriptions=tuple(bar_subscriptions),
+            redis_client=self._redis_manager.client,
+            validated_adapter=self._validated_adapter,
+            strategy_name=account.strategy,
+            strategy_params=dict(account.strategy_params or {}),
+            compliance_actor=compliance_actor,
+        )
+        return self._node_factory(account=account, spec=spec)
 
     def _build_equity_provider(
         self, account_id: str
@@ -447,9 +607,63 @@ class LiveOrchestrator:
     async def _teardown_session_components(
         self, session: LiveAccountSession
     ) -> None:
-        """Hook for 10.5b/c to tear down Nautilus components."""
-        # Intentionally empty in 10.5a — symmetrical with _build_session_components.
-        return
+        """Tear down per-account Nautilus components.
+
+        Story 10.5e2 — when a ``TradingNode`` is attached, call
+        ``stop_async()`` then await/cancel the tracked ``run_async``
+        task and dispose the node. Best-effort: any single step's
+        failure is logged but does not block the others — graceful
+        shutdown must always make forward progress.
+        """
+        node = session.components.get("trading_node")
+        run_task = self._node_run_tasks.pop(session.account_id, None)
+        if node is None:
+            return
+
+        # Bound the wait — Sandboxed rule: any MT5-bridge-touching call
+        # must time out so an unresponsive bridge cannot hang shutdown.
+        try:
+            await asyncio.wait_for(
+                node.stop_async(),
+                timeout=NODE_STOP_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "TradingNode stop_async timed out (%.1fs) for %s — forcing teardown",
+                NODE_STOP_TIMEOUT_SECONDS,
+                session.account_id,
+            )
+        except Exception:
+            logger.exception(
+                "TradingNode stop_async raised for %s",
+                session.account_id,
+            )
+
+        if run_task is not None and not run_task.done():
+            run_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                try:
+                    await run_task
+                except Exception:
+                    logger.exception(
+                        "TradingNode run task raised on shutdown for %s",
+                        session.account_id,
+                    )
+
+        # Skip dispose when Nautilus already disposed the node
+        # internally (e.g. a reload race where ``stop_async`` cleaned up
+        # before the orchestrator's teardown reached this line). The
+        # ``is_disposed`` attr is the public seam; absent on stubs we
+        # fall through to the dispose call.
+        if getattr(node, "is_disposed", False):
+            return
+        try:
+            node.dispose()
+        except Exception:
+            logger.exception(
+                "TradingNode dispose raised for %s",
+                session.account_id,
+            )
 
     async def _isolate_failed_session(
         self,

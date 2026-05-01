@@ -194,6 +194,7 @@ def build_lifecycle(config: EngineConfig) -> EngineLifecycle:
         risk_registry=config.risk_registry,
         pnl_registry=config.pnl_registry,
         redis_manager=config.redis_manager,
+        validated_adapter=config.validated_adapter,
     )
 
     emergency_stop_handler: EmergencyStopHandler | None = None

@@ -30,6 +30,7 @@ from ..adapters.zmq_adapter import ZmqAdapter
 from ..audit.audit_service import AuditService
 from ..config.firm_registry import FirmRegistry
 from ..execution.exposure_reservation import ExposureReservation
+from ..execution.validated_adapter import ValidatedZmqAdapter
 from ..rules.assignment_service import RuleAssignmentService
 from ..state.redis_state import RedisStateManager
 from ..state.snapshot_service import SnapshotService
@@ -83,6 +84,10 @@ class EngineConfig:
     firm_registry: FirmRegistry | None = None
     exposure_reservation: ExposureReservation | None = None
     rule_assignment_service: RuleAssignmentService | None = None
+    # Story 10.5e2 — pre-built rule-checked ZMQ adapter passed to each
+    # per-account ``TradingNode``'s execution client. The orchestrator
+    # only mounts a node when this is wired (full live-trading deps).
+    validated_adapter: ValidatedZmqAdapter | None = None
 
     def __post_init__(self) -> None:
         if self.database_url is not None and self.db_session_factory is None:
@@ -125,6 +130,13 @@ class EngineConfig:
             self.redis_manager is not None and self.account_manager is not None
         )
         atomic_exposure_gate = self.exposure_reservation is not None
+        # ``live_sessions`` covers the 10.5a/d/e1 tier — per-account
+        # session lifecycle + compliance actor + equity provider.
+        # Mounting a real Nautilus :class:`TradingNode` (10.5e2)
+        # additionally requires ``validated_adapter``; that gate lives
+        # inside :meth:`LiveOrchestrator._build_trading_node_if_ready`,
+        # not here, so callers wanting "node mounted" should also
+        # check ``self.validated_adapter is not None``.
         live_sessions = (
             self.account_manager is not None
             and self.rule_assignment_service is not None
