@@ -14,6 +14,7 @@ from ..accounts.metrics_service import AccountMetricsService
 from ..accounts.phase_promotion import (
     PhasePromotionError,
     build_phase_transition_audit_entry,
+    publish_phase_change_event,
     validate_phase_transition,
 )
 from ..accounts.risk_registry import RiskStateRegistry
@@ -386,6 +387,38 @@ async def _persist_audit_entry(session_factory, entry) -> None:
             session.add(AuditLogModel.from_audit_entry(entry))
 
 
+async def _publish_phase_change_async(
+    redis: RedisStateManager,
+    *,
+    account_id: str,
+    from_phase: Any,
+    to_phase: Any,
+    correlation_id: str,
+) -> int:
+    """Connect, publish, close — wrapper that owns the Redis lifecycle.
+
+    ``connect()`` is inside the ``try`` so a connection failure still
+    runs the ``finally`` cleanup (rather than leaking a partially
+    initialised manager). ``close()`` swallows any teardown error so
+    the caller sees the original publish failure, not a secondary one.
+    """
+    try:
+        await redis.connect()
+        return await publish_phase_change_event(
+            redis,
+            account_id=account_id,
+            from_phase=from_phase,
+            to_phase=to_phase,
+            correlation_id=correlation_id,
+        )
+    finally:
+        try:
+            await redis.close()
+        except Exception:
+            # Don't mask the primary error with a teardown failure.
+            pass
+
+
 @accounts_app.command("promote")
 def promote_account(
     account_id: str = typer.Option(..., "--account", help="Account ID to promote"),
@@ -485,11 +518,53 @@ def promote_account(
     typer.echo(f"  Reason:         {reason}")
     typer.echo(f"  Actor:          {actor}")
     typer.echo(f"  Correlation ID: {correlation_id}")
+
+    # Story 10.5e3 — best-effort publish to Redis so a running engine
+    # picks up the change without a manual restart. Any failure here
+    # falls back to the legacy "edit YAML + restart" flow; the audit
+    # row above is the durable record either way.
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    try:
+        redis = RedisStateManager(redis_url)
+        receivers = _run_async(
+            _publish_phase_change_async(
+                redis,
+                account_id=account_id,
+                from_phase=from_phase,
+                to_phase=to_phase,
+                correlation_id=correlation_id,
+            )
+        )
+        if receivers > 0:
+            typer.echo(
+                typer.style(
+                    f"  Engine notified: {receivers} subscriber(s) — "
+                    "session will reload automatically",
+                    fg=STATUS_COLORS["active"],
+                )
+            )
+        else:
+            typer.echo(
+                typer.style(
+                    "  Engine offline (no subscribers) — restart manually "
+                    "after updating accounts.yaml",
+                    fg=STATUS_COLORS["paused"],
+                )
+            )
+    except Exception as exc:
+        typer.echo(
+            typer.style(
+                f"  ⚠ Failed to publish phase-changed event: {exc!s} "
+                "— audit recorded, but operator must restart the engine",
+                fg=STATUS_COLORS["paused"],
+            )
+        )
+
     typer.echo(
         typer.style(
             f"\n  NOTE: edit {config_path} and set `phase: {to_phase.phase_id}` "
-            f"for account {account_id}, then restart the engine to make "
-            "the change effective.",
+            f"for account {account_id}; if the engine is running it will "
+            "pick up the change via Redis pub/sub, otherwise restart it.",
             fg=STATUS_COLORS["paused"],
         )
     )

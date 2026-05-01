@@ -79,6 +79,18 @@ def _risk_registry(starting: Decimal = Decimal("100000")) -> MagicMock:
 def _redis_manager() -> MagicMock:
     client = MagicMock()
     client.setex = AsyncMock()
+    # Story 10.5e3 — phase-changed listener subscribes via ``pubsub()``.
+    pubsub_stub = MagicMock()
+    pubsub_stub.psubscribe = AsyncMock()
+    pubsub_stub.punsubscribe = AsyncMock()
+    pubsub_stub.aclose = AsyncMock()
+
+    async def _empty_listen():
+        if False:
+            yield  # pragma: no cover
+
+    pubsub_stub.listen = _empty_listen
+    client.pubsub = MagicMock(return_value=pubsub_stub)
     manager = MagicMock()
     manager.client = client
     return manager

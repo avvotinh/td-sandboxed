@@ -14,8 +14,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.accounts.phase_promotion import (
+    PHASE_CHANGED_CHANNEL_PREFIX,
     PhasePromotionError,
     build_phase_transition_audit_entry,
+    publish_phase_change_event,
     validate_phase_transition,
 )
 from src.config.firm_profile import (
@@ -286,3 +288,99 @@ class TestBuildAuditEntry:
         # Should parse as a valid UUID
         _uuid.UUID(cid)
         assert cid in entry.message
+
+
+# ---------------------------------------------------------------------------
+# Story 10.5e3 — Redis publish helper
+# ---------------------------------------------------------------------------
+
+
+class TestPublishPhaseChangeEvent:
+    """``publish_phase_change_event`` writes to the right channel + payload."""
+
+    @pytest.mark.asyncio
+    async def test_publish_uses_channel_prefix_with_account_id(self) -> None:
+        from unittest.mock import AsyncMock
+
+        account = _make_account(account_id="ftmo-007", phase="evaluation")
+        registry = _make_registry()
+        from_phase, to_phase = validate_phase_transition(
+            account, registry, target_phase_id="verification",
+        )
+
+        client = MagicMock()
+        client.publish = AsyncMock(return_value=2)
+        manager = MagicMock()
+        manager.client = client
+
+        receivers = await publish_phase_change_event(
+            manager,
+            account_id="ftmo-007",
+            from_phase=from_phase,
+            to_phase=to_phase,
+            correlation_id="cid-123",
+        )
+
+        assert receivers == 2
+        client.publish.assert_awaited_once()
+        channel, payload = client.publish.call_args.args
+        assert channel == f"{PHASE_CHANGED_CHANNEL_PREFIX}ftmo-007"
+        # Payload is a JSON string with the expected fields
+        import json
+
+        decoded = json.loads(payload)
+        assert decoded["account_id"] == "ftmo-007"
+        assert decoded["from_phase"] == "evaluation"
+        assert decoded["to_phase"] == "verification"
+        assert decoded["correlation_id"] == "cid-123"
+        assert "T" in decoded["ts"]  # ISO 8601 timestamp
+
+    @pytest.mark.asyncio
+    async def test_publish_returns_zero_when_no_subscribers(self) -> None:
+        from unittest.mock import AsyncMock
+
+        account = _make_account()
+        registry = _make_registry()
+        from_phase, to_phase = validate_phase_transition(
+            account, registry, target_phase_id="verification",
+        )
+
+        client = MagicMock()
+        client.publish = AsyncMock(return_value=0)  # engine offline
+        manager = MagicMock()
+        manager.client = client
+
+        receivers = await publish_phase_change_event(
+            manager,
+            account_id=account.id,
+            from_phase=from_phase,
+            to_phase=to_phase,
+            correlation_id="cid-empty",
+        )
+        assert receivers == 0
+
+    @pytest.mark.asyncio
+    async def test_publish_propagates_redis_failure(self) -> None:
+        """Caller (CLI) is expected to log + continue — the helper itself
+        does not swallow errors so failures are observable in unit tests."""
+        from unittest.mock import AsyncMock
+
+        account = _make_account()
+        registry = _make_registry()
+        from_phase, to_phase = validate_phase_transition(
+            account, registry, target_phase_id="verification",
+        )
+
+        client = MagicMock()
+        client.publish = AsyncMock(side_effect=ConnectionError("redis down"))
+        manager = MagicMock()
+        manager.client = client
+
+        with pytest.raises(ConnectionError, match="redis down"):
+            await publish_phase_change_event(
+                manager,
+                account_id=account.id,
+                from_phase=from_phase,
+                to_phase=to_phase,
+                correlation_id="cid-fail",
+            )

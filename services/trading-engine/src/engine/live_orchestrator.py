@@ -72,6 +72,13 @@ HEALTH_REDIS_TTL_SECONDS = 30
 # every MT5 call wraps in ``asyncio.wait_for`` with a 5s ceiling).
 NODE_STOP_TIMEOUT_SECONDS = 5.0
 
+# Story 10.5e3 — Redis pub/sub channel for hot account reload (AC6).
+# Pattern keyed on account_id so the orchestrator can dispatch reload
+# work to the correct session. Pattern matches ``account:phase-changed:foo``
+# but not ``account:phase-changed:`` (empty trailer).
+PHASE_CHANGED_CHANNEL_PREFIX = "account:phase-changed:"
+PHASE_CHANGED_CHANNEL_PATTERN = f"{PHASE_CHANGED_CHANNEL_PREFIX}*"
+
 
 @dataclass(frozen=True)
 class LiveOrchestratorHealth:
@@ -138,6 +145,10 @@ class LiveOrchestrator:
         # task can be garbage-collected before it runs and its
         # exception silently lost.
         self._pending_isolation_tasks: set[asyncio.Task[None]] = set()
+        # Story 10.5e3 — Redis pattern-subscription drives hot reload
+        # after ``accounts promote --phase`` flips an account.
+        self._phase_pubsub: object | None = None
+        self._phase_listener_task: asyncio.Task[None] | None = None
 
     @property
     def cold_storage_service(self) -> ColdStorageService | None:
@@ -184,6 +195,12 @@ class LiveOrchestrator:
                 name="live_orchestrator_health_push",
             )
 
+        # Phase-changed subscriber — drives :meth:`reload_account` after
+        # ``accounts promote`` flips an account (story 10.5e3, AC6).
+        # Same Redis-only gate as the health task.
+        if self._redis_manager is not None and self._account_manager is not None:
+            await self._start_phase_change_listener()
+
     async def stop(self) -> None:
         """Stop services in reverse start order — best-effort.
 
@@ -200,6 +217,10 @@ class LiveOrchestrator:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._health_task
             self._health_task = None
+
+        # Stop the phase-changed listener — its ``reload_account`` work
+        # would race with the session teardown below.
+        await self._stop_phase_change_listener()
 
         # Tear down per-account sessions first so they cannot post
         # writes to services that are about to stop.
@@ -746,3 +767,131 @@ class LiveOrchestrator:
             self._health_ttl_seconds,
             snapshot.to_redis_payload(),
         )
+
+    # ----- Phase-changed subscriber (story 10.5e3, AC6) -----------------
+
+    async def _start_phase_change_listener(self) -> None:
+        """Subscribe to ``account:phase-changed:*`` and spawn the dispatch task.
+
+        Uses ``psubscribe`` (pattern subscription) so a single listener
+        catches every account_id without re-binding when accounts come
+        and go.
+        """
+        if self._redis_manager is None:
+            # Caller (start()) gates on this; guard explicit so an
+            # ``-O`` build doesn't silently dereference ``None``.
+            raise RuntimeError(
+                "_start_phase_change_listener called without redis_manager"
+            )
+        pubsub = self._redis_manager.client.pubsub()
+        await pubsub.psubscribe(PHASE_CHANGED_CHANNEL_PATTERN)
+        self._phase_pubsub = pubsub
+        self._phase_listener_task = asyncio.create_task(
+            self._phase_listen_loop(),
+            name="live_orchestrator_phase_listener",
+        )
+        logger.info(
+            "Phase-changed listener subscribed to %s",
+            PHASE_CHANGED_CHANNEL_PATTERN,
+        )
+
+    async def _stop_phase_change_listener(self) -> None:
+        """Cancel the listener task and tear the pubsub down. Idempotent."""
+        if self._phase_listener_task is not None:
+            self._phase_listener_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._phase_listener_task
+            self._phase_listener_task = None
+
+        if self._phase_pubsub is not None:
+            try:
+                await self._phase_pubsub.punsubscribe()
+                close = getattr(
+                    self._phase_pubsub, "aclose", None
+                ) or getattr(self._phase_pubsub, "close", None)
+                if close is not None:
+                    result = close()
+                    if asyncio.iscoroutine(result):
+                        await result
+            except Exception:
+                logger.exception(
+                    "Phase-changed listener failed to close pubsub cleanly"
+                )
+            self._phase_pubsub = None
+
+    async def _phase_listen_loop(self) -> None:
+        """Drain pmessage events forever — one ``reload_account`` per match.
+
+        Failure-isolated: malformed payloads, unknown channels, and
+        reload errors are logged but never break the loop. ``CancelledError``
+        propagates cleanly through the ``async for`` (it is a
+        :class:`BaseException`, not :class:`Exception`, so the inner
+        catch-all does not eat it).
+
+        The only clean exit is task cancellation from :meth:`stop`.
+
+        TODO(10.5e3+): durable replay — an event published while the
+        engine was starting (between session bootstrap and listener
+        spawn) is lost. Operators currently fall back to a full restart;
+        a Redis stream + cursor would close that ~ms-wide gap.
+        """
+        if self._phase_pubsub is None:
+            raise RuntimeError(
+                "_phase_listen_loop entered with no pubsub — programmer error"
+            )
+        async for message in self._phase_pubsub.listen():
+            try:
+                account_id = self._parse_phase_message(message)
+            except ValueError as exc:
+                logger.warning(
+                    "Phase-changed listener: skipping message — %s", exc
+                )
+                continue
+            if account_id is None:
+                continue  # subscribe-ack frame or unrelated message
+            try:
+                await self._handle_phase_changed(account_id)
+            except Exception:
+                logger.exception(
+                    "Phase-changed listener: reload_account(%s) raised — "
+                    "listener stays alive",
+                    account_id,
+                )
+
+    @staticmethod
+    def _parse_phase_message(message: object) -> str | None:
+        """Return ``account_id`` for ``pmessage`` frames, ``None`` otherwise.
+
+        Tolerant of bytes/str channel encodings (redis-py defaults to
+        bytes; tests with fakes commonly emit str).
+        """
+        if not isinstance(message, dict):
+            return None
+        if message.get("type") != "pmessage":
+            return None
+        channel = message.get("channel")
+        if isinstance(channel, bytes):
+            channel = channel.decode("utf-8")
+        if not isinstance(channel, str):
+            raise ValueError(
+                f"Expected str/bytes channel, got {type(channel)!r}"
+            )
+        if not channel.startswith(PHASE_CHANGED_CHANNEL_PREFIX):
+            raise ValueError(f"Unexpected channel: {channel!r}")
+        account_id = channel[len(PHASE_CHANGED_CHANNEL_PREFIX):]
+        if not account_id:
+            raise ValueError(f"Empty account_id in channel {channel!r}")
+        return account_id
+
+    async def _handle_phase_changed(self, account_id: str) -> None:
+        """Reload one account's session. No-op when account is not active."""
+        if account_id not in self._sessions:
+            logger.info(
+                "Phase-changed event for inactive account %s — ignoring",
+                account_id,
+            )
+            return
+        logger.info(
+            "Phase-changed event received: reloading account %s", account_id
+        )
+        await self.reload_account(account_id)

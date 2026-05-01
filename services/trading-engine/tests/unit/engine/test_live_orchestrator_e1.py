@@ -78,6 +78,21 @@ def _redis_manager() -> tuple[MagicMock, MagicMock]:
     """Return ``(manager, client)`` so tests can assert on .setex()."""
     client = MagicMock()
     client.setex = AsyncMock()
+    # Story 10.5e3 — :meth:`LiveOrchestrator.start` calls
+    # ``client.pubsub().psubscribe(...)`` for the phase-changed listener.
+    # Stub the pubsub object so the listener task starts cleanly without
+    # asserting on its calls in the health-push tests.
+    pubsub_stub = MagicMock()
+    pubsub_stub.psubscribe = AsyncMock()
+    pubsub_stub.punsubscribe = AsyncMock()
+    pubsub_stub.aclose = AsyncMock()
+
+    async def _empty_listen():
+        if False:
+            yield  # pragma: no cover — make this an async generator
+
+    pubsub_stub.listen = _empty_listen
+    client.pubsub = MagicMock(return_value=pubsub_stub)
     manager = MagicMock()
     # ``client`` is a property in the real class — use a normal attribute so
     # MagicMock returns the same object every access.

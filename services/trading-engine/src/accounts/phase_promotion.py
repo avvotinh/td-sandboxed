@@ -11,10 +11,19 @@ Why no YAML write-back: rewriting YAML loses comments/formatting and
 introduces drift between repo state and runtime state. Operators edit
 the YAML and restart the engine after the audit entry confirms the
 intent; the audit row is the durable record either way.
+
+Story 10.5e3 — :func:`publish_phase_change_event` posts a hot-reload
+hint to Redis (``account:phase-changed:{account_id}``) so a running
+engine can call :meth:`LiveOrchestrator.reload_account` without
+waiting for a manual restart. The publish is best-effort: if Redis is
+down or unset, the CLI still completes — the audit row is the
+durable record either way.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -25,6 +34,17 @@ from ..rules.audit_logger import AuditEntry, AuditEventType
 if TYPE_CHECKING:
     from ..config.firm_profile import AccountPhase
     from ..config.firm_registry import FirmRegistry
+    from ..state.redis_state import RedisStateManager
+
+logger = logging.getLogger(__name__)
+
+
+# Redis pub/sub channel prefix shared with
+# :data:`engine.live_orchestrator.PHASE_CHANGED_CHANNEL_PREFIX`.
+# Duplicated here (not imported) so the CLI doesn't pull in the engine
+# module — keeps the CLI startup path light and the dependency tree
+# one-directional (CLI → accounts → engine, not the reverse).
+PHASE_CHANGED_CHANNEL_PREFIX = "account:phase-changed:"
 
 
 class PhasePromotionError(ValueError):
@@ -132,3 +152,35 @@ def build_phase_transition_audit_entry(
             "correlation_id": correlation_id,
         },
     )
+
+
+async def publish_phase_change_event(
+    redis_manager: "RedisStateManager",
+    *,
+    account_id: str,
+    from_phase: "AccountPhase",
+    to_phase: "AccountPhase",
+    correlation_id: str,
+    timestamp: datetime | None = None,
+) -> int:
+    """Publish a hot-reload hint to ``account:phase-changed:{account_id}``.
+
+    Returns the number of Redis subscribers that received the message
+    (Redis ``PUBLISH`` return value). When the engine is offline this
+    is ``0`` and the CLI proceeds with the manual-restart flow.
+
+    Raises any exception from Redis — the caller is expected to log +
+    continue (publish is best-effort vs the durable audit record).
+    """
+    payload = json.dumps(
+        {
+            "account_id": account_id,
+            "from_phase": from_phase.phase_id,
+            "to_phase": to_phase.phase_id,
+            "correlation_id": correlation_id,
+            "ts": (timestamp or datetime.now(timezone.utc)).isoformat(),
+        },
+        separators=(",", ":"),
+    )
+    channel = f"{PHASE_CHANGED_CHANNEL_PREFIX}{account_id}"
+    return int(await redis_manager.client.publish(channel, payload))
