@@ -59,6 +59,7 @@ class EngineFeatureFlags:
     graceful_shutdown: bool
     atomic_exposure_gate: bool
     live_sessions: bool
+    emergency_stop: bool
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,12 @@ class EngineConfig:
             and self.rule_assignment_service is not None
             and self.risk_registry is not None
         )
+        emergency_stop = (
+            self.redis_manager is not None
+            and self.account_manager is not None
+            and self.zmq_adapter is not None
+            and self.audit_service is not None
+        )
         return EngineFeatureFlags(
             crash_recovery=crash_recovery,
             cold_storage=cold_storage,
@@ -141,4 +148,5 @@ class EngineConfig:
             graceful_shutdown=graceful_shutdown,
             atomic_exposure_gate=atomic_exposure_gate,
             live_sessions=live_sessions,
+            emergency_stop=emergency_stop,
         )

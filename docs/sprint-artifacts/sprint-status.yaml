@@ -175,7 +175,7 @@ development_status:
   10-5e2-trading-node-integration: backlog     # part of XL 10.5 — TradingNode per account + LiveDataClient/LiveExecClient factories + strategy registration + reload subscriber (AC1 full + AC6 + AC8 full)
   10-5f-backtest-parity-and-e2e: backlog       # part of XL 10.5 — multi_firm_e2e baseline diff verification + E2E live test (AC9 + AC10)
   10-6-strategy-validation-gate-audit: done     # S  — audit confirms 0 bypasses across 5 bracket strategies + ma_crossover; single seam at base_strategy._submit_bracket_via_factory; 8 AST-based regression-guard tests; full audit doc at docs/sprint-artifacts/10-6-validation-gate-audit.md (D7#2)
-  10-7-kill-switch-flat-positions: backlog    # M  — emergency:stop closes open positions via OrderGateway.flatten_position (D7#4)
+  10-7-kill-switch-flat-positions: done       # M  — EmergencyStopHandler subscribes to emergency:stop Redis channel; for each active account: query_positions → opposite-side market close per position → pause_account → publish emergency:stop_confirmation; sync audit rows (triggered+complete); wired into EngineConfig.feature_flags.emergency_stop + lifecycle.start/stop; 30 new tests (15 builder + 15 handler); full unit suite 2647 passing (D7#4)
   10-8-news-blackout-rule: backlog            # M  — NewsBlackoutRule + EconomicCalendarService (ForexFactory feed) (D7#5)
   # Phase 4 — Backtest parity + infra debt
   10-9-backtest-spread-swap-parity: backlog   # M  — wire spread_pips + swap_long/swap_short per-firm into backtest venue (D8)

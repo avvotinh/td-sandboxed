@@ -16,6 +16,7 @@ from ..audit.audit_service import AuditService
 from ..execution.exposure_reservation import ExposureReservation
 from ..state.crash_recovery import RecoveryResult as CrashRecoveryResult
 from ..state.daily_pnl_recalculator import RecalculationResult
+from ..state.emergency_stop_handler import EmergencyStopHandler
 from ..state.graceful_shutdown import GracefulShutdown, ShutdownResult
 from ..state.position_reconciler import ReconciliationResult
 from ..state.trading_resumer import ResumeResult
@@ -46,12 +47,14 @@ class EngineLifecycle:
         audit_service: AuditService | None,
         lock_lost_mediator: LockLostMediator,
         exposure_reservation: ExposureReservation | None = None,
+        emergency_stop_handler: EmergencyStopHandler | None = None,
     ) -> None:
         self._recovery = recovery
         self._live = live
         self._graceful_shutdown = graceful_shutdown
         self._audit_service = audit_service
         self._exposure_reservation = exposure_reservation
+        self._emergency_stop_handler = emergency_stop_handler
 
         self._running = False
         self._shutdown_event = asyncio.Event()
@@ -144,6 +147,11 @@ class EngineLifecycle:
             # Loads the atomic_reserve / atomic_release Lua scripts into
             # Redis once; subsequent calls use EVALSHA.
             await self._exposure_reservation.start()
+        if self._emergency_stop_handler is not None:
+            # Subscribes to emergency:stop on Redis (story 10.7). Audit
+            # service must already be started so the trigger event can
+            # log_sync into the audit pipeline.
+            await self._emergency_stop_handler.start()
 
         logger.info("Trading Engine v0.1.0 running")
         self._running = True
@@ -165,6 +173,11 @@ class EngineLifecycle:
                 logger.info("Engine run loop cancelled")
 
         await self._audit_engine_stopped()
+        # Stop emergency-stop subscriber before live so a late stop
+        # command cannot kick off a flat-positions sequence on a
+        # half-shut-down engine.
+        if self._emergency_stop_handler is not None:
+            await self._emergency_stop_handler.stop()
         await self._live.stop()
         if self._audit_service is not None:
             await self._audit_service.stop()

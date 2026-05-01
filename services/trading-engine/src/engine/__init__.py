@@ -26,6 +26,7 @@ from ..state.cold_storage_service import ColdStorageService
 from ..state.cold_storage_writer import ColdStorageWriter
 from ..state.crash_recovery import CrashRecoveryManager, RecoveryResult
 from ..state.daily_pnl_recalculator import DailyPnLRecalculator, RecalculationResult
+from ..state.emergency_stop_handler import EmergencyStopHandler
 from ..state.graceful_shutdown import GracefulShutdown, ShutdownResult
 from ..state.position_reconciler import PositionReconciler, ReconciliationResult
 from ..state.trading_resumer import ResumeResult, TradingResumer
@@ -195,6 +196,15 @@ def build_lifecycle(config: EngineConfig) -> EngineLifecycle:
         redis_manager=config.redis_manager,
     )
 
+    emergency_stop_handler: EmergencyStopHandler | None = None
+    if flags.emergency_stop:
+        emergency_stop_handler = EmergencyStopHandler(
+            redis_manager=config.redis_manager,
+            account_manager=config.account_manager,
+            zmq_adapter=config.zmq_adapter,
+            audit_service=config.audit_service,
+        )
+
     return EngineLifecycle(
         recovery=recovery,
         live=live,
@@ -202,6 +212,7 @@ def build_lifecycle(config: EngineConfig) -> EngineLifecycle:
         audit_service=config.audit_service,
         lock_lost_mediator=lock_lost_mediator,
         exposure_reservation=config.exposure_reservation,
+        emergency_stop_handler=emergency_stop_handler,
     )
 
 
