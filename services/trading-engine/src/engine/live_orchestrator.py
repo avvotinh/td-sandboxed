@@ -2,29 +2,53 @@
 
 Story 10.1 carved this out as a skeleton; story 10.2 swapped the raw-deps
 constructor for a pre-built :class:`LiveServiceBundle` so all
-construction lives in :func:`engine.build_lifecycle`. Story 10.5a adds
+construction lives in :func:`engine.build_lifecycle`. Story 10.5a added
 the per-account session lifecycle (``add_account`` / ``remove_account``
-/ ``reload_account``) plus crash isolation; 10.5b/c will plug Nautilus
-``LiveNode`` + ``RedisDataClient`` + ``ZmqExecutionClient`` into each
-session via :meth:`LiveAccountSession.attach_components`.
+/ ``reload_account``) plus crash isolation. Story 10.5e1 wires the
+per-account components built by 10.5a/b/c (RuleEngine + compliance
+actor + bar subscriptions) onto each session, and adds the periodic
+health-surface push to Redis. The Nautilus ``TradingNode`` factory
+glue that turns these components into a running live event loop is
+deferred to 10.5e2 + 10.5d.
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from ..orders.trade_db_writer import TradeDBWriter
 from ..rules.violation_service import ViolationService
 from ..state.cold_storage_service import ColdStorageService
 from .account_session import LiveAccountSession, SessionState
+from .actors import build_compliance_actor
 from .collaborators import LiveServiceBundle
 
 if TYPE_CHECKING:
     from ..accounts.account_manager import AccountManager
+    from ..accounts.models import AccountConfig
+    from ..accounts.pnl_registry import PnLTrackerRegistry
+    from ..accounts.risk_registry import RiskStateRegistry
     from ..audit.audit_service import AuditService
+    from ..rules.assignment_service import RuleAssignmentService
+    from ..state.redis_state import RedisStateManager
 
 logger = logging.getLogger(__name__)
+
+
+# Default timeframes a per-account live session subscribes to.
+# Story 10.5e2 may make this firm-configurable.
+DEFAULT_BAR_TIMEFRAMES: tuple[str, ...] = ("1m",)
+
+# Health surface — Redis key + cadence (AC7).
+HEALTH_REDIS_KEY = "health:trading-engine"
+HEALTH_PUSH_INTERVAL_SECONDS = 5.0
+HEALTH_REDIS_TTL_SECONDS = 30
 
 
 @dataclass(frozen=True)
@@ -32,12 +56,21 @@ class LiveOrchestratorHealth:
     """Snapshot of the orchestrator's per-account health.
 
     Story 10.5a populates ``accounts_running`` / ``accounts_failed``;
-    10.5e adds ``last_bar_received_at`` / ``last_order_sent_at`` and
-    publishes the snapshot to ``health:trading-engine`` Redis key.
+    10.5e1 adds ``ts`` (snapshot timestamp) and the JSON-serialisable
+    fields needed for the ``health:trading-engine`` Redis push. 10.5e2
+    will fill ``last_bar_received_at`` / ``last_order_sent_at`` once
+    the per-account ``LiveNode`` actually runs.
     """
 
     accounts_running: int
     accounts_failed: tuple[tuple[str, str], ...]
+    ts: str = ""
+
+    def to_redis_payload(self) -> str:
+        """Serialise to a JSON string suitable for ``SETEX``."""
+        payload = asdict(self)
+        payload["accounts_failed"] = list(self.accounts_failed)
+        return json.dumps(payload, separators=(",", ":"))
 
 
 class LiveOrchestrator:
@@ -49,11 +82,26 @@ class LiveOrchestrator:
         *,
         account_manager: "AccountManager | None" = None,
         audit_service: "AuditService | None" = None,
+        rule_assignment_service: "RuleAssignmentService | None" = None,
+        risk_registry: "RiskStateRegistry | None" = None,
+        pnl_registry: "PnLTrackerRegistry | None" = None,
+        redis_manager: "RedisStateManager | None" = None,
+        bar_timeframes: tuple[str, ...] = DEFAULT_BAR_TIMEFRAMES,
+        health_push_interval: float = HEALTH_PUSH_INTERVAL_SECONDS,
+        health_ttl_seconds: int = HEALTH_REDIS_TTL_SECONDS,
     ) -> None:
         self._services = services
         self._account_manager = account_manager
         self._audit_service = audit_service
+        self._rule_assignment_service = rule_assignment_service
+        self._risk_registry = risk_registry
+        self._pnl_registry = pnl_registry
+        self._redis_manager = redis_manager
+        self._bar_timeframes = tuple(bar_timeframes)
+        self._health_push_interval = health_push_interval
+        self._health_ttl_seconds = health_ttl_seconds
         self._sessions: dict[str, LiveAccountSession] = {}
+        self._health_task: asyncio.Task[None] | None = None
 
     @property
     def cold_storage_service(self) -> ColdStorageService | None:
@@ -93,6 +141,13 @@ class LiveOrchestrator:
         if self._account_manager is not None:
             await self._start_all_sessions()
 
+        # Health surface push — only when Redis is wired (AC7).
+        if self._redis_manager is not None:
+            self._health_task = asyncio.create_task(
+                self._health_push_loop(),
+                name="live_orchestrator_health_push",
+            )
+
     async def stop(self) -> None:
         """Stop services in reverse start order — best-effort.
 
@@ -102,6 +157,14 @@ class LiveOrchestrator:
         teardown. Callers without a graceful-shutdown handler keep the
         legacy gap.
         """
+        # Stop the health-push task before tearing anything else down so
+        # we can't publish a snapshot mid-teardown that would be wrong.
+        if self._health_task is not None:
+            self._health_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._health_task
+            self._health_task = None
+
         # Tear down per-account sessions first so they cannot post
         # writes to services that are about to stop.
         await self._stop_all_sessions()
@@ -160,8 +223,8 @@ class LiveOrchestrator:
     def health(self) -> LiveOrchestratorHealth:
         """Return a synchronous health snapshot.
 
-        Story 10.5e extends this with bar/order timestamps and
-        publishes the result to Redis.
+        Story 10.5e2 extends this with bar/order timestamps once the
+        per-account ``LiveNode`` is mounted onto the session.
         """
         running = sum(
             1 for s in self._sessions.values() if s.state is SessionState.RUNNING
@@ -174,6 +237,7 @@ class LiveOrchestrator:
         return LiveOrchestratorHealth(
             accounts_running=running,
             accounts_failed=failed,
+            ts=datetime.now(timezone.utc).isoformat(),
         )
 
     # ----- Internals -----------------------------------------------------
@@ -212,16 +276,99 @@ class LiveOrchestrator:
     async def _build_session_components(
         self, session: LiveAccountSession
     ) -> None:
-        """Hook for 10.5b/c to attach Nautilus components.
+        """Resolve and attach the per-account components for a session.
 
-        Today this is intentionally empty — 10.5a only introduces the
-        lifecycle skeleton. The hook exists so subclassing or
-        monkey-patching is unnecessary when the rest of 10.5 lands.
+        Story 10.5e1 — given the deps wired through :class:`EngineConfig`
+        (``account_manager`` + ``rule_assignment_service`` + ``risk_registry``),
+        resolve the per-account :class:`RuleEngine`, build the
+        :class:`PropFirmComplianceActor`, and compute the
+        ``bar_subscriptions`` list. Components are stashed on
+        ``session.components`` so 10.5e2 can pick them up when it
+        instantiates the per-account Nautilus ``TradingNode``.
+
+        When the live-session deps are not wired (``EngineConfig.empty()``,
+        unit tests), this method is a no-op — callers can still rely on
+        the lifecycle skeleton from 10.5a.
         """
-        # Intentionally empty in 10.5a. 10.5b: attach RedisDataClient.
-        # 10.5c: attach ZmqExecutionClient. 10.5d: attach
-        # PropFirmComplianceActor + LiveNode and call node.start_async.
-        return
+        if (
+            self._account_manager is None
+            or self._rule_assignment_service is None
+        ):
+            # Live-session feature disabled — skeleton only.
+            return
+
+        account_id = session.account_id
+        account = self._account_manager.get_account(account_id)
+        if account is None:
+            raise RuntimeError(
+                f"Account '{account_id}' is active but missing from "
+                "AccountManager — cannot build live session"
+            )
+
+        # 1. Resolve rule engine for this account.
+        rules = self._rule_assignment_service.get_rules_for_account(account)
+        # Local import — RuleEngine pulls in heavy collaborators we
+        # don't want at module import time for unit tests that use
+        # ``EngineConfig.empty()``.
+        from ..rules.engine import RuleEngine
+
+        rule_engine = RuleEngine(account_id=account_id, rules=rules)
+
+        # 2. Resolve initial balance for the compliance actor's
+        # drawdown / peak baseline.
+        initial_balance = self._resolve_initial_balance(account_id)
+
+        # 3. Build the per-account compliance actor through the shared
+        # factory (story 10.5a AC2). Venue/bar_type plumbing comes in
+        # 10.5e2 once the per-account TradingNode is instantiated.
+        compliance_actor = build_compliance_actor(
+            account_id=account_id,
+            initial_balance=initial_balance,
+            rule_engine=rule_engine,
+        )
+
+        # 4. Compute the bar subscriptions for the account's data feed.
+        bar_subscriptions = self._compute_bar_subscriptions(account)
+
+        session.attach_components(
+            rule_engine=rule_engine,
+            compliance_actor=compliance_actor,
+            bar_subscriptions=bar_subscriptions,
+            initial_balance=initial_balance,
+        )
+
+    def _resolve_initial_balance(self, account_id: str) -> Decimal:
+        """Best-effort initial-balance resolution.
+
+        Reads from :class:`RiskStateRegistry` if available — the
+        ``daily_starting_balance`` field is the canonical anchor used by
+        the recovery flow. Falls back to ``Decimal("0")`` so the actor
+        constructor (which requires a Decimal) does not raise; the
+        compliance metrics built off a zero baseline will be obviously
+        wrong rather than subtly wrong.
+        """
+        if self._risk_registry is None:
+            return Decimal("0")
+        risk_state = self._risk_registry.get_risk_state(account_id)
+        if risk_state is None:
+            return Decimal("0")
+        return Decimal(str(risk_state.daily_starting_balance))
+
+    def _compute_bar_subscriptions(
+        self, account: "AccountConfig"
+    ) -> list[tuple[str, str]]:
+        """Build the (symbol, timeframe) list this account should subscribe to.
+
+        Driven by ``account.signal_filter.symbols`` × ``self._bar_timeframes``.
+        Empty symbols ⇒ empty subscriptions; 10.5e2 will resolve a
+        wildcard from the firm's instrument set when
+        ``signal_filter.symbols`` is empty.
+        """
+        signal_filter = getattr(account, "signal_filter", None)
+        symbols = list(getattr(signal_filter, "symbols", []) or [])
+        if not symbols:
+            return []
+        return [(symbol, tf) for symbol in symbols for tf in self._bar_timeframes]
 
     async def _stop_all_sessions(self) -> None:
         for session in list(self._sessions.values()):
@@ -291,3 +438,39 @@ class LiveOrchestrator:
                     session.account_id,
                     exc_info=True,
                 )
+
+    # ----- Health surface (story 10.5e1, AC7) ----------------------------
+
+    async def _health_push_loop(self) -> None:
+        """Publish a JSON health snapshot to Redis every ``health_push_interval``.
+
+        Key: ``health:trading-engine`` (TTL ``health_ttl_seconds``).
+        Cancellation is the canonical exit — :meth:`stop` cancels the
+        task during shutdown.
+        """
+        if self._redis_manager is None:
+            return
+        while True:
+            try:
+                await self._publish_health_snapshot()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Health push failed; continuing — will retry next tick"
+                )
+            try:
+                await asyncio.sleep(self._health_push_interval)
+            except asyncio.CancelledError:
+                raise
+
+    async def _publish_health_snapshot(self) -> None:
+        """One-shot publish — separated for direct testability."""
+        if self._redis_manager is None:
+            return
+        snapshot = self.health()
+        await self._redis_manager.client.setex(
+            HEALTH_REDIS_KEY,
+            self._health_ttl_seconds,
+            snapshot.to_redis_payload(),
+        )

@@ -30,6 +30,7 @@ from ..adapters.zmq_adapter import ZmqAdapter
 from ..audit.audit_service import AuditService
 from ..config.firm_registry import FirmRegistry
 from ..execution.exposure_reservation import ExposureReservation
+from ..rules.assignment_service import RuleAssignmentService
 from ..state.redis_state import RedisStateManager
 from ..state.snapshot_service import SnapshotService
 
@@ -57,6 +58,7 @@ class EngineFeatureFlags:
     daily_snapshots: bool
     graceful_shutdown: bool
     atomic_exposure_gate: bool
+    live_sessions: bool
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,7 @@ class EngineConfig:
     audit_service: AuditService | None = None
     firm_registry: FirmRegistry | None = None
     exposure_reservation: ExposureReservation | None = None
+    rule_assignment_service: RuleAssignmentService | None = None
 
     def __post_init__(self) -> None:
         if self.database_url is not None and self.db_session_factory is None:
@@ -121,6 +124,11 @@ class EngineConfig:
             self.redis_manager is not None and self.account_manager is not None
         )
         atomic_exposure_gate = self.exposure_reservation is not None
+        live_sessions = (
+            self.account_manager is not None
+            and self.rule_assignment_service is not None
+            and self.risk_registry is not None
+        )
         return EngineFeatureFlags(
             crash_recovery=crash_recovery,
             cold_storage=cold_storage,
@@ -132,4 +140,5 @@ class EngineConfig:
             daily_snapshots=daily_snapshots,
             graceful_shutdown=graceful_shutdown,
             atomic_exposure_gate=atomic_exposure_gate,
+            live_sessions=live_sessions,
         )

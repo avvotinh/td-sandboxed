@@ -189,6 +189,10 @@ def build_lifecycle(config: EngineConfig) -> EngineLifecycle:
         services=live_services,
         account_manager=config.account_manager,
         audit_service=config.audit_service,
+        rule_assignment_service=config.rule_assignment_service,
+        risk_registry=config.risk_registry,
+        pnl_registry=config.pnl_registry,
+        redis_manager=config.redis_manager,
     )
 
     return EngineLifecycle(
