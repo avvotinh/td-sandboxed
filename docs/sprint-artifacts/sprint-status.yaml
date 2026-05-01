@@ -174,7 +174,7 @@ development_status:
   10-5e1-orchestrator-wiring-and-health: done  # part of XL 10.5 — _build_session_components resolves RuleEngine + PropFirmComplianceActor + bar_subscriptions per account; health surface push to Redis (5s SETEX TTL 30s); rule_assignment_service wired through EngineConfig + builder; 11 new tests; full unit suite 2585 passing (AC1 partial + AC7)
   10-5e2-trading-node-integration: backlog     # part of XL 10.5 — TradingNode per account + LiveDataClient/LiveExecClient factories + strategy registration + reload subscriber (AC1 full + AC6 + AC8 full)
   10-5f-backtest-parity-and-e2e: backlog       # part of XL 10.5 — multi_firm_e2e baseline diff verification + E2E live test (AC9 + AC10)
-  10-6-strategy-validation-gate-audit: backlog  # S  — audit all strategies route through ValidatedZmqAdapter, no order_factory.bracket() bypass (D7#2)
+  10-6-strategy-validation-gate-audit: done     # S  — audit confirms 0 bypasses across 5 bracket strategies + ma_crossover; single seam at base_strategy._submit_bracket_via_factory; 8 AST-based regression-guard tests; full audit doc at docs/sprint-artifacts/10-6-validation-gate-audit.md (D7#2)
   10-7-kill-switch-flat-positions: backlog    # M  — emergency:stop closes open positions via OrderGateway.flatten_position (D7#4)
   10-8-news-blackout-rule: backlog            # M  — NewsBlackoutRule + EconomicCalendarService (ForexFactory feed) (D7#5)
   # Phase 4 — Backtest parity + infra debt
