@@ -179,7 +179,7 @@ development_status:
   10-8-news-blackout-rule: backlog            # M  — NewsBlackoutRule + EconomicCalendarService (ForexFactory feed) (D7#5)
   # Phase 4 — Backtest parity + infra debt
   10-9-backtest-spread-swap-parity: backlog   # M  — wire spread_pips + swap_long/swap_short per-firm into backtest venue (D8)
-  10-10-alembic-bootstrap: backlog            # M  — bootstrap Alembic + port 6 raw migrations (005-010) (Epic 9 carry-over)
+  10-10-alembic-bootstrap: done                # M  — alembic.ini + env.py (DATABASE_URL resolution, postgres+asyncpg→postgres coercion) + script template + 6 ported revisions (005-010) with op.execute SQL + sane downgrade story (NotImplementedError for hypertable destructive paths); 24 tests verify chain integrity + per-revision content + raw-SQL parity; full unit suite 2609 passing
   # Phase 5 — Legacy cleanup (gated by 10.11 ops cutover sign-off)
   10-11-migration-audit-cli: backlog          # S  — `accounts audit-rules-source --strict` CLI + production cutover sign-off (gates 10.12-10.14)
   10-12-drop-prop-firm-field: backlog         # S  — drop AccountConfig.prop_firm + VALID_PROP_FIRMS + validate_prop_firm_preset (D2)
