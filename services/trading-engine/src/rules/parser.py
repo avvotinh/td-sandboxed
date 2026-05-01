@@ -164,6 +164,14 @@ class RuleParser:
         except ImportError:
             pass
 
+        try:
+            from .types.news_blackout import NewsBlackoutRule
+
+            self._rule_types["news_blackout"] = NewsBlackoutRule
+            logger.debug("Loaded NewsBlackoutRule")
+        except ImportError:
+            pass
+
         # Log which rules are using placeholders
         placeholder_types = [
             k
