@@ -3,10 +3,13 @@
 Story 10.5a — extract :func:`build_compliance_actor` so the backtest
 runner and the live orchestrator construct the actor with the same
 defaults. Spec ref: ``docs/sprint-artifacts/10-5-live-orchestrator.md``
-AC2 — "shared between LiveOrchestrator and BacktestRunner". Live
-trading paths plug in here in 10.5d once :class:`LiveOrchestrator`
-mounts a Nautilus ``LiveNode`` per account; today the function exists
-so both call-sites converge on the same construction signature.
+AC2 — "shared between LiveOrchestrator and BacktestRunner". Story 10.5d
+adds the ``equity_provider`` plumbing — a callable the live orchestrator
+wires from :class:`PnLTrackerRegistry` so the actor's ``on_bar`` rule
+check sees the engine's authoritative per-account equity instead of the
+Nautilus ``Portfolio`` (which is populated by the bridge later in the
+pipeline). Backtest callers leave the provider ``None`` and the actor
+falls back to ``Portfolio.balance_total`` — preserving AC10 parity.
 """
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ from typing import TYPE_CHECKING
 from nautilus_trader.model.currencies import USD
 
 from ..backtesting.prop_firm_actor import (
+    LiveEquityProvider,
     PropFirmComplianceActor,
     PropFirmComplianceActorConfig,
 )
@@ -37,6 +41,7 @@ def build_compliance_actor(
     bar_type: BarType | None = None,
     venue: Venue | None = None,
     currency: Currency = USD,
+    equity_provider: LiveEquityProvider | None = None,
 ) -> PropFirmComplianceActor:
     """Construct a :class:`PropFirmComplianceActor` with shared defaults.
 
@@ -57,8 +62,14 @@ def build_compliance_actor(
         bar_type: Optional ``BarType`` for the actor to subscribe to on
             start. Tests / unit paths leave this ``None``.
         venue: Optional venue handle so the actor can read live equity
-            from the Nautilus portfolio.
+            from the Nautilus portfolio. Live callers usually pass
+            ``equity_provider`` instead and leave ``venue`` ``None``.
         currency: Account base currency.
+        equity_provider: Live mode — callable returning the engine's
+            authoritative per-account equity. When provided, the actor
+            sources ``on_bar`` equity from this closure (typically wired
+            from :class:`~src.accounts.pnl_registry.PnLTrackerRegistry`).
+            ``None`` (default) preserves the backtest portfolio path.
     """
     config = PropFirmComplianceActorConfig(
         account_id=account_id,
@@ -68,4 +79,8 @@ def build_compliance_actor(
         venue=venue,
         currency=currency,
     )
-    return PropFirmComplianceActor(config=config, rule_engine=rule_engine)
+    return PropFirmComplianceActor(
+        config=config,
+        rule_engine=rule_engine,
+        equity_provider=equity_provider,
+    )

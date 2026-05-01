@@ -7,9 +7,12 @@ the per-account session lifecycle (``add_account`` / ``remove_account``
 / ``reload_account``) plus crash isolation. Story 10.5e1 wires the
 per-account components built by 10.5a/b/c (RuleEngine + compliance
 actor + bar subscriptions) onto each session, and adds the periodic
-health-surface push to Redis. The Nautilus ``TradingNode`` factory
-glue that turns these components into a running live event loop is
-deferred to 10.5e2 + 10.5d.
+health-surface push to Redis. Story 10.5d threads a per-account
+equity provider — a closure over :class:`PnLTrackerRegistry` — into
+each compliance actor so live ``on_bar`` rule checks use the engine's
+authoritative equity instead of the Nautilus ``Portfolio``. The
+Nautilus ``TradingNode`` factory glue that turns these components
+into a running live event loop is deferred to 10.5e2.
 """
 from __future__ import annotations
 
@@ -35,6 +38,7 @@ if TYPE_CHECKING:
     from ..accounts.pnl_registry import PnLTrackerRegistry
     from ..accounts.risk_registry import RiskStateRegistry
     from ..audit.audit_service import AuditService
+    from ..backtesting.prop_firm_actor import LiveEquityProvider
     from ..rules.assignment_service import RuleAssignmentService
     from ..state.redis_state import RedisStateManager
 
@@ -318,24 +322,78 @@ class LiveOrchestrator:
         # drawdown / peak baseline.
         initial_balance = self._resolve_initial_balance(account_id)
 
-        # 3. Build the per-account compliance actor through the shared
+        # 3. Build the per-account live equity provider (story 10.5d).
+        # The closure resolves the tracker each tick — late-binding
+        # through ``pnl_registry.get`` keeps reload semantics correct
+        # when ``reload_account`` swaps the tracker mid-life.
+        equity_provider = self._build_equity_provider(account_id)
+
+        # 4. Build the per-account compliance actor through the shared
         # factory (story 10.5a AC2). Venue/bar_type plumbing comes in
-        # 10.5e2 once the per-account TradingNode is instantiated.
+        # 10.5e2 once the per-account TradingNode is instantiated; the
+        # equity_provider here drives ``on_bar`` rule checks from the
+        # engine's per-account state.
         compliance_actor = build_compliance_actor(
             account_id=account_id,
             initial_balance=initial_balance,
             rule_engine=rule_engine,
+            equity_provider=equity_provider,
         )
 
-        # 4. Compute the bar subscriptions for the account's data feed.
+        # 5. Compute the bar subscriptions for the account's data feed.
         bar_subscriptions = self._compute_bar_subscriptions(account)
 
         session.attach_components(
             rule_engine=rule_engine,
             compliance_actor=compliance_actor,
+            equity_provider=equity_provider,
             bar_subscriptions=bar_subscriptions,
             initial_balance=initial_balance,
         )
+
+    def _build_equity_provider(
+        self, account_id: str
+    ) -> "LiveEquityProvider | None":
+        """Return a per-account equity closure for the compliance actor.
+
+        Story 10.5d — wraps :meth:`PnLTrackerRegistry.get` so the actor
+        sees ``tracker.equity`` whenever the registry has a tracker for
+        the account, ``None`` otherwise (warm-up before the first fill).
+        The tracker is resolved on every call (rather than captured
+        once) so :meth:`reload_account` can swap the tracker without
+        leaving the closure pointed at a stale instance.
+
+        Returns ``None`` when ``pnl_registry`` is not wired so the actor
+        falls back to the Nautilus portfolio path used by backtest.
+        """
+        if self._pnl_registry is None:
+            return None
+        registry = self._pnl_registry
+
+        def _provider(scope_account_id: str) -> Decimal | None:
+            if scope_account_id != account_id:
+                # Hard guard — mis-routed equity reads silently feeding
+                # the wrong rule engine would be a P0 compliance bug.
+                # Log first so the cause is visible even if Nautilus's
+                # actor event loop swallows the exception above us.
+                logger.error(
+                    "equity_provider cross-account misuse: bound=%s called=%s",
+                    account_id,
+                    scope_account_id,
+                )
+                raise ValueError(
+                    f"equity_provider bound to '{account_id}' "
+                    f"but called with '{scope_account_id}'"
+                )
+            tracker = registry.get(account_id)
+            if tracker is None:
+                return None
+            # ``Decimal(str(...))`` shields the rule engine from any
+            # future internal-type drift in :class:`PnLTracker.equity`
+            # (matches :meth:`_resolve_initial_balance` below).
+            return Decimal(str(tracker.equity))
+
+        return _provider
 
     def _resolve_initial_balance(self, account_id: str) -> Decimal:
         """Best-effort initial-balance resolution.

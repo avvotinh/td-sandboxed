@@ -21,7 +21,7 @@ the rule engine it was constructed with.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
@@ -39,6 +39,13 @@ from src.rules.base_rule import RuleAction
 from src.rules.engine import RuleEngine
 from src.snapshots.daily_profit_history import DailyProfitHistory
 from src.strategies.mixins.session_filter_mixin import SessionFilterMixin
+
+# Story 10.5d — live mode pulls equity from the engine's per-account
+# state (``PnLTrackerRegistry`` / ``RiskStateRegistry``), not from the
+# Nautilus ``Portfolio``. The orchestrator wires a closure of this
+# shape; ``None`` return means "no equity yet" and the actor skips the
+# tick (same as the warm-up branch in backtest).
+LiveEquityProvider = Callable[[str], Decimal | None]
 
 
 class PropFirmComplianceActorConfig(ActorConfig, frozen=True):
@@ -70,10 +77,15 @@ class PropFirmComplianceActor(Actor):
         self,
         config: PropFirmComplianceActorConfig,
         rule_engine: RuleEngine,
+        equity_provider: LiveEquityProvider | None = None,
     ) -> None:
         super().__init__(config=config)
         self._config = config
         self._rule_engine = rule_engine
+        # Story 10.5d — when wired by :class:`LiveOrchestrator` the
+        # provider is a closure over :class:`PnLTrackerRegistry`. Backtest
+        # leaves it ``None`` and falls back to the Nautilus portfolio.
+        self._equity_provider = equity_provider
         self._breaches: list[BreachEvent] = []
         # Dedup keyed by the trading-day *session id* (local date in
         # ``daily_session_tz``) — so broker rollover at 22:00 UTC with a
@@ -257,15 +269,28 @@ class PropFirmComplianceActor(Actor):
         self.record_compliance_check(account_state, ts)
 
     def _read_equity(self) -> Decimal | None:
-        """Read current equity from the attached Nautilus ``Portfolio``.
+        """Read current equity for the rule-engine context.
 
-        Returns the live ``balance_total`` from the account attached to the
-        configured venue. During the first bars of a backtest — before any
-        fill has registered the account — the portfolio returns ``None``,
-        in which case we fall back to the configured ``initial_balance`` so
-        the equity curve remains populated. Returns ``None`` only when
-        the actor was configured without a ``venue`` (unit-test path).
+        Resolution order:
+
+        1. ``equity_provider`` — live mode (story 10.5d). The orchestrator
+           passes a closure over :class:`PnLTrackerRegistry` so the actor
+           sees the same equity the rest of the engine acts on. The
+           provider may return ``None`` during warm-up (no tracker yet);
+           we skip the tick rather than substituting a stale fallback.
+           **Note:** the provider, once set, fully shadows the venue
+           branch even when it returns ``None``. This is intentional —
+           live mode must never silently read the Nautilus portfolio
+           (which can drift from MT5 mid-reconciliation).
+        2. Nautilus ``Portfolio`` keyed by ``config.venue`` — backtest
+           path. Pre-fill bars or missing ``balance_total`` fall back to
+           ``config.initial_balance`` so the equity curve still populates.
+        3. ``None`` — no live provider and no venue (unit-test path); the
+           caller (``on_bar``) skips the rule check.
         """
+        if self._equity_provider is not None:
+            return self._equity_provider(self._config.account_id)
+
         if self._config.venue is None:
             # Unit-test path — no portfolio wiring available.
             return None
