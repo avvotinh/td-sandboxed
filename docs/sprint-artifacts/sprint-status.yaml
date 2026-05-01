@@ -169,7 +169,7 @@ development_status:
   # Phase 3 — Live trading P0 blockers
   10-5a-live-orchestrator-foundation: done    # part of XL 10.5 — LiveAccountSession state machine + per-account lifecycle (start/stop/add/remove/reload) + shared build_compliance_actor factory + crash isolation (pause + node_crashed audit) + sync health() snapshot; 25 new tests; full unit suite 2519 passing
   10-5b-redis-data-client: backlog             # part of XL 10.5 — RedisDataClient Nautilus subclass subscribing bars:* per account (AC3)
-  10-5c-zmq-execution-client: backlog          # part of XL 10.5 — ZmqExecutionClient wrapping ValidatedZmqAdapter + 10.4 atomic gate (AC4)
+  10-5c-zmq-execution-client: done             # part of XL 10.5 — ZmqExecutionClient Nautilus subclass; order_translator (Nautilus → internal Order, MARKET only) + submit_dispatcher (validate/send/translate→Nautilus events: filled/rejected/denied/timeout); 22 tests; full unit suite 2541 passing (AC4)
   10-5d-live-compliance-actor: backlog         # part of XL 10.5 — per-account PropFirmComplianceActor in live mode (AC5)
   10-5e-health-and-e2e: backlog                # part of XL 10.5 — health surface push to Redis 5s + crash isolation full + E2E test (AC6+AC7+AC8 full+AC9)
   10-5f-backtest-parity: backlog               # part of XL 10.5 — multi_firm_e2e baseline diff verification (AC10)
