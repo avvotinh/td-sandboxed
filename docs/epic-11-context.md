@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-02
 **Last updated:** 2026-05-02
-**Status:** **Backlog** — 7 stories drafted, none in progress
+**Status:** **Done** — all 7 stories shipped 2026-05-02 (head `f019861`)
 **Epic:** 11 of 11+
 **Stories:** 7 (11.1 – 11.7)
 **Predecessor:** Epic 10 (Operational Hardening) — closed 2026-05-02 (head `8f42b5c`)
@@ -156,13 +156,13 @@ Bar arrives → FeatureExtractor (rolling 200 bars)
 
 | # | Story | Effort | Phase | Status |
 |---|---|---|---|---|
-| 11.1 | Indicators (BB width %, realized vol, EMA slope) + RegimeFeatures + FeatureExtractor | L | 11.A Foundation | Backlog |
-| 11.2 | Config schema (RegimeConfig pydantic + ftmo.yaml block) | M | 11.A Foundation | Backlog |
-| 11.3 | RuleBasedRegimeClassifier (pure decide) + RegimeDecision dataclass | M | 11.B Classifier core | Backlog |
-| 11.4 | HysteresisFilter (2-bar confirmation, per-BarType state) | M | 11.B Classifier core | Backlog |
-| 11.5 | RegimeAuditAdapter (security-gate story) | M | 11.C Audit + routing | Backlog |
-| 11.6 | register_strategy(regimes=) decorator extension | S | 11.C Audit + routing | Backlog |
-| 11.7 | RegimeAwareRouter + integration + 6 strategy decorator updates | XL | 11.D Integration | Backlog |
+| 11.1 | Indicators (BB width %, realized vol, EMA slope) + RegimeFeatures + FeatureExtractor | L | 11.A Foundation | Done |
+| 11.2 | Config schema (RegimeConfig pydantic + ftmo.yaml block) | M | 11.A Foundation | Done |
+| 11.3 | RuleBasedRegimeClassifier (pure decide) + RegimeDecision dataclass | M | 11.B Classifier core | Done |
+| 11.4 | HysteresisFilter (2-bar confirmation, per-BarType state) | M | 11.B Classifier core | Done |
+| 11.5 | RegimeAuditAdapter (security-gate story) | M | 11.C Audit + routing | Done |
+| 11.6 | register_strategy(regimes=) decorator extension | S | 11.C Audit + routing | Done |
+| 11.7 | RegimeAwareRouter + integration + 6 strategy decorator updates | XL | 11.D Integration | Done |
 
 **Total effort:** ~17 effort units (1 S, 4 M, 1 L, 1 XL); estimated 5–7 working days sequential, 3–4 days với 11.1∥11.2 và 11.5∥11.6.
 
@@ -191,3 +191,23 @@ Sau khi Phase 1 ổn (~1 tháng production validation):
 6. Redis hysteresis state persistence (`regime:{bar_type}:state`).
 
 Reference: `docs/research/regime-classifier.md` §Phase 2 + §Phase 3.
+
+---
+
+## Closure
+
+**Shipped:** 2026-05-02
+**Head commit:** `f019861`
+**Test baseline:** 3020 unit + 3 integration tests passing.
+
+| Story | Commit | Effort |
+|---|---|---|
+| 11.1 | `6bc6e0d` | L |
+| 11.2 | `11b9160` | M |
+| 11.3 | `d847f66` | M |
+| 11.4 | `dd6a1d1` | M |
+| 11.5 | `8787a3e` | M |
+| 11.6 | `1e65742` | S |
+| 11.7 | `f019861` | XL |
+
+**Rollout plan:** ships with `regime_classifier.enabled: false` in `configs/firms/ftmo.yaml` — no production behavior change on deploy. Operator enables via YAML flip + restart; shadow-mode (enabled + no `regimes=` on strategies) produces audit logs without routing changes. Hysteresis state is process-local in Phase 1; rollback is `enabled: false` + restart with no state migration.

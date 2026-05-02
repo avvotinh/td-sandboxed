@@ -194,7 +194,7 @@ development_status:
   # Source: docs/research/regime-classifier.md + docs/research/regime-classifier-architecture.md
   # Context: docs/epic-11-context.md
   # Goal: route bars to strategies matching market regime (TRENDING_UP/DOWN, RANGING, HIGH_VOL kill-switch)
-  epic-11: contexted
+  epic-11: done
   # Phase 11.A — Foundation (indicators + config)
   11-1-regime-indicators-and-features: done     # L  — BB width %, realized vol, EMA slope indicators + RegimeState enum + RegimeFeatures + FeatureExtractor (rolling 200 bars)
   11-2-regime-config-schema: done               # M  — RegimeConfig/RegimeThresholds/InstrumentRegimeConfig pydantic + extend FirmProfile + ftmo.yaml regime_classifier block (enabled:false)

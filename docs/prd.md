@@ -129,7 +129,11 @@ This is a high-complexity fintech project requiring:
 - Rule violation history and compliance reporting
 - Warning thresholds (70%, 80%, 90% of limits)
 
-### Operational Hardening (Epic 10 — in progress, 2026-05-01)
+### Market Regime Classifier (Epic 11 — shipped 2026-05-02)
+
+Rule-based regime classifier (Phase 1) inserted between the bar feed and strategy routing. Ships with `enabled: false`; operator opt-in via YAML flip. 4 regime states (TRENDING_UP/DOWN, RANGING, HIGH_VOLATILITY); HIGH_VOLATILITY acts as a global kill-switch. All 7 stories done (head `f019861`); Phase 2 (HMM) deferred.
+
+### Operational Hardening (Epic 10 — shipped 2026-05-02)
 
 Closes 10 architecture-review findings (D1–D10) gating live trading with capital.
 Phase 1–4 shipped 2026-05-01; Phase 5 (legacy cleanup) gated by ops sign-off.

@@ -4,8 +4,8 @@
 
 Event-driven automated trading system for **multi-account, multi-prop-firm trading**, architected as a **monorepo with independent microservices**. The system leverages a polyglot tech stack optimized for each service's requirements: Go for I/O-bound services, Rust for latency-critical messaging, and Python for trading logic with Nautilus Trader.
 
-**Version:** 3.0 - Multi-Account Architecture
-**Last Updated:** 2025-12-07
+**Version:** 3.2 — Post Epic 11 (Market Regime Classifier)
+**Last Updated:** 2026-05-02
 
 ## Project Context
 
@@ -37,6 +37,90 @@ Event-driven automated trading system for **multi-account, multi-prop-firm tradi
 - **Risk Isolation**: Account-level risk management, failures don't cascade
 - **Backtest-Reality Alignment**: Same codebase for backtest and live trading
 - **Docker-Managed Infrastructure**: Reproducible, portable deployment
+
+---
+
+## Architecture at a Glance — Snapshot 2026-05-02
+
+> Top-down view của trạng thái hệ thống sau Epic 11 (HEAD `f019861`, 2026-05-02). Mục này tóm tắt để onboarding nhanh; chi tiết kỹ thuật đầy đủ vẫn ở các section bên dưới và phần [Epic 10 Additions](#epic-10-additions--operational-hardening-2026-05-01) + [Epic 11 Additions](#epic-11-additions--market-regime-classifier-2026-05-02) ở cuối doc.
+
+### Service status
+
+| Service | Lang | Vai trò | Trạng thái |
+|---|---|---|---|
+| `services/tv-api/` | Go 1.21+ | TradingView WS → Redis/TimescaleDB; binaries `tv-chart`, `tv-quote`, `tv-cli` | operational |
+| `services/mt5-bridge/` | Rust 1.75+ | ZMQ bridge MT5 ↔ engine; tokio + tracing JSON | operational (single-port; D4 multi-port deferred) |
+| `services/trading-engine/` | Python 3.11+ / Nautilus 1.x | Core trading + multi-firm + rule engine | refactored ở Epic 10 |
+| `services/notification/` | Go 1.21+ | Telegram bot, Redis SUB | operational |
+
+Bound bởi `.claude/rules/common/sandboxed-domain.md`: trading-engine ↔ tv-api **không import lẫn nhau**; chỉ qua ZMQ + Redis. Không shared library cross-language.
+
+### Multi-firm coverage
+
+- **`configs/firms/ftmo.yaml`** — 1 product (`challenge`) × 3 phase (evaluation 10% → verification 5% → funded). Session CET, commission $7/lot.
+- **`configs/firms/the5ers.yaml`** — 3 product:
+  - `bootstrap` (balance_based DD 4%, weekly_target 1.25%)
+  - `high_stakes` (equity_peak DD 4%, consistency rule 50%)
+  - `hyper_growth` (balance_based DD 5%, scaling_policy YAML-only)
+
+`AccountConfig` post-10.12 chỉ chấp nhận **firm-bound** (`firm_id + product_id + phase`) hoặc **personal_rules_file**; legacy `prop_firm` field + `VALID_PROP_FIRMS` frozenset + `validate_prop_firm_preset` validator **đã drop**. Mở rộng firm thứ 3 chỉ cần thêm YAML — không code change ở engine core.
+
+Phase transition manual-only qua CLI `accounts promote --phase <p>`; CLI publish Redis `account:phase-changed:{id}` (Epic 10.5e3) → `LiveOrchestrator` psubscribe reload state.
+
+### Epic 10 phase closure (15/15 DONE)
+
+| Phase | Stories | Highlights |
+|---|---|---|
+| 1 — Foundation | 10.1, 10.2 | TradingEngine god-object split → 3 component (Recovery / Live / Lifecycle); EngineConfig DI replace 9 optional deps |
+| 2 — Audit + race | 10.3, 10.4 | `AuditWriter` sync DB before mutation + bounded async queue; atomic Lua reserve / release |
+| 3 — Live P0 blockers | 10.5a-f, 10.6, 10.7, 10.8 | LiveOrchestrator full với TradingNode per account; kill-switch flat positions + sync audit; news blackout rule; strategy validation gate (0 bypass) |
+| 4 — Backtest + infra | 10.9, 10.10 | SpreadAwareFeeModel; Alembic bootstrap + 6 ported revisions |
+| 5 — Legacy cleanup | 10.11-15 | Migration audit CLI gate; drop `prop_firm` field / preset YAML / `prop_firm_id` schema; .gitignore compliance reports |
+
+**Follow-up duy nhất**: 10.9b swap accrual via Nautilus `SimulationModule` + epic-10-retrospective (optional).
+
+### Production-readiness delta
+
+| Dimension | Trước Epic 10 | Sau Epic 10 |
+|---|---|---|
+| Live orchestrator | scaffold (D5 CRITICAL) | **full** — TradingNode per account, attach actor, wire clients |
+| Audit double-entry | fire-and-forget (D3 HIGH) | **sync DB before mutation** + bounded async queue |
+| Race validate↔send | in-memory snapshot (D6 MEDIUM) | **atomic Lua compare-and-set** |
+| Kill-switch | pause only (D7#4 CRITICAL) | **flat positions + sync audit** |
+| News blackout | absent (D7#5 CRITICAL) | **NewsBlackoutRule + ForexFactory feed** |
+| Strategy validation | partial (D7#2 HIGH) | **0 bypass — single seam audited** |
+| Backtest spread parity | absent (D8 MEDIUM) | **SpreadAwareFeeModel ship** (swap 10.9b deferred) |
+| Schema versioning | raw SQL | **Alembic 7 revisions** |
+| Coexistence rule source | 2 paths (D2 MEDIUM) | **firm-bound only** — preset YAML + PresetLoader dropped |
+| Schema double-source | `prop_firm_id` ↔ `firm_id` (D10) | **`prop_firm_id` dropped** ở revision 011 |
+
+**Estimate**: ~55-65% trước Epic 10 → **~80-85% production-ready** sau Epic 10. Engine có thể khởi chạy live capital thật mà không vi phạm 5 success criterion (audit, race, emergency, news, live orchestrator).
+
+### Còn lại trước "100% ready"
+
+- Observability surface (Prometheus + OpenTelemetry) — Epic 11+
+- Partial fill / order modify-cancel / FX conversion / swap-commission realized PnL — Epic 11+
+- Multi-port mt5-bridge (D4) — YAGNI cho tới khi cần broker thứ 2
+- Indicator warmup persist qua restart
+- Operational runbooks (deploy / restore / incident response)
+- 10.9b swap accrual rollover
+
+### Navigation map — entry points
+
+| Mục đích | Path |
+|---|---|
+| Epic 10 plan + ADR | `docs/epic-10-context.md` |
+| Sprint status | `docs/sprint-artifacts/sprint-status.yaml` |
+| Engine entry | `services/trading-engine/src/engine/lifecycle.py` |
+| DI container | `services/trading-engine/src/engine/config.py` |
+| Live orchestrator | `services/trading-engine/src/engine/live_orchestrator.py` |
+| Audit writer | `services/trading-engine/src/audit/audit_writer.py` |
+| Atomic Lua | `services/trading-engine/src/execution/lua_scripts/` |
+| Firm configs | `configs/firms/{ftmo,the5ers}.yaml` |
+| Alembic | `services/trading-engine/alembic/versions/` |
+| Docker stack | `infra/docker/docker-compose.yml` |
+| DB init | `infra/timescaledb/init.sql` |
+| Backtest runbook | `docs/runbooks/backtesting.md` |
 
 ---
 
@@ -2582,8 +2666,76 @@ Run `alembic stamp 010` on an existing DB (already manually migrated) to mark he
 
 ---
 
-_This Architecture Document v3.0 reflects the complete multi-account trading system design._
-_Epic 10 additions appended 2026-05-01._
+---
 
-_Last Updated: 2025-12-07 (original); Epic 10 section added 2026-05-01_
+## Epic 11 Additions — Market Regime Classifier (2026-05-02)
+
+New package `services/trading-engine/src/regime/` ships a rule-based market regime classifier sitting between the bar feed and strategy routing. All detail is in `docs/epic-11-context.md`; see `docs/research/regime-classifier-architecture.md` for the design rationale.
+
+### New package: `src/regime/`
+
+| File | Purpose |
+|------|---------|
+| `states.py` | `RegimeState` enum: `TRENDING_UP`, `TRENDING_DOWN`, `RANGING`, `HIGH_VOLATILITY`, `UNKNOWN` |
+| `features.py` | `RegimeFeatures` (9 fields) + `FeatureExtractor` rolling 200-bar window per `BarType` |
+| `classifier.py` | `RuleBasedRegimeClassifier.decide(features)` — pure function, thresholds from YAML |
+| `decision.py` | `RegimeDecision` frozen dataclass (state, confidence, timestamp, bar_type) |
+| `hysteresis.py` | `HysteresisFilter` — 2-bar confirmation per `BarType`; flicker prevention |
+| `audit.py` | `RegimeAuditAdapter` — `RegimeDecision → AuditEntry` via `AuditWriter.log_async` |
+| `factory.py` | `build_regime_aware_router` — constructs `RegimeAwareRouter` from `EngineConfig` |
+
+### New indicators: `src/indicators/`
+
+Three new indicators registered alongside existing Nautilus-subclass indicators:
+
+- `bb_width.py` — Bollinger Band width % (normalised)
+- `ema_slope.py` — EMA slope (normalised by price)
+- `realized_vol.py` — Realised volatility (rolling window)
+
+### Bar pipeline change
+
+The bar path from `RedisAdapter` to strategies now routes through `RegimeAwareRouter` when `regime_classifier.enabled: true` in the firm YAML:
+
+```
+redis_adapter.set_bar_callback
+  → RegimeAwareRouter.on_bar
+      → FeatureExtractor (rolling 200 bars)
+      → RuleBasedRegimeClassifier.decide
+      → HysteresisFilter (2-bar confirmation)
+      → AuditWriter.log_async          ← audit-before-routing invariant
+      → if HIGH_VOLATILITY: drop bar   ← global kill-switch
+        elif regime in strategy.allowed_regimes: route
+        else: drop
+```
+
+`RegimeAwareRouter` wraps `StrategyDataRouter` as a drop-in. When the flag is `false` the factory returns the unwrapped `StrategyDataRouter`, so no warm-path code runs.
+
+### Strategy regime declarations
+
+Six strategies updated with `@register_strategy(..., regimes=[...])`:
+
+| Strategy | Allowed regimes |
+|---|---|
+| supertrend, donchian_breakout, ma_crossover | `TRENDING_UP`, `TRENDING_DOWN` |
+| rsi_mean_reversion, bollinger_mean_reversion | `RANGING` |
+| orb | `[]` (explicit Phase 1 opt-out; wires to `HIGH_VOLATILITY` in Phase 2) |
+
+Strategies without a `regimes=` kwarg continue to receive all bars (backwards compat).
+
+### Feature flag and rollout
+
+- Default: `regime_classifier.enabled: false` in `configs/firms/ftmo.yaml`. The5ers does not declare the block.
+- Rollout: YAML flip + restart — no DB migration, no state migration. Hysteresis state is process-local; first 2 bars post-restart may flicker (documented, accepted for Phase 1).
+- Rollback: `enabled: false` + restart.
+
+### What remains deferred (Phase 2+)
+
+HMM classifier, Hurst exponent feature, Redis hysteresis persistence, multi-instrument beyond XAUUSD, and XGBoost refinement. See `docs/epic-11-context.md` §Phase 2 Roadmap.
+
+---
+
+_This Architecture Document v3.2 reflects the complete multi-account / multi-firm trading system design after Epic 11 (Market Regime Classifier)._
+_Epic 10 additions appended 2026-05-01; Epic 11 additions appended 2026-05-02._
+
+_Last Updated: 2026-05-02_
 _Author: Winston (Architect Agent)_
