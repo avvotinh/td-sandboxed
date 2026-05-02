@@ -240,6 +240,178 @@ class AccountProduct:
         )
 
 
+_REGIME_TIMEFRAMES: frozenset[str] = frozenset({"M5", "M15"})
+
+
+@dataclass(frozen=True)
+class RegimeThresholds:
+    """Decision thresholds consumed by ``RuleBasedRegimeClassifier`` (Epic 11).
+
+    Pure value type: same threshold values in → same classifier output. Lives
+    on :class:`InstrumentRegimeConfig` so each instrument can be calibrated
+    independently while sharing the upstream pipeline.
+    """
+
+    adx_trend_min: float
+    adx_strong_trend: float
+    bb_width_low_pct: float
+    bb_width_high_pct: float
+    realized_vol_high: float
+    ema_slope_trend_threshold: float
+
+    def __post_init__(self) -> None:
+        if self.adx_trend_min <= 0:
+            raise ValueError(
+                f"RegimeThresholds.adx_trend_min must be > 0, got {self.adx_trend_min}"
+            )
+        if self.adx_strong_trend <= 0:
+            raise ValueError(
+                "RegimeThresholds.adx_strong_trend must be > 0, "
+                f"got {self.adx_strong_trend}"
+            )
+        if self.adx_strong_trend < self.adx_trend_min:
+            raise ValueError(
+                "RegimeThresholds.adx_strong_trend must be >= adx_trend_min "
+                f"({self.adx_strong_trend} < {self.adx_trend_min})"
+            )
+        if not 0.0 <= self.bb_width_low_pct <= 1.0:
+            raise ValueError(
+                "RegimeThresholds.bb_width_low_pct must be in [0, 1], "
+                f"got {self.bb_width_low_pct}"
+            )
+        if not 0.0 <= self.bb_width_high_pct <= 1.0:
+            raise ValueError(
+                "RegimeThresholds.bb_width_high_pct must be in [0, 1], "
+                f"got {self.bb_width_high_pct}"
+            )
+        if self.bb_width_high_pct <= self.bb_width_low_pct:
+            raise ValueError(
+                "RegimeThresholds.bb_width_high_pct must be > bb_width_low_pct "
+                f"({self.bb_width_high_pct} <= {self.bb_width_low_pct})"
+            )
+        if self.realized_vol_high <= 0:
+            raise ValueError(
+                "RegimeThresholds.realized_vol_high must be > 0, "
+                f"got {self.realized_vol_high}"
+            )
+        if self.ema_slope_trend_threshold <= 0:
+            raise ValueError(
+                "RegimeThresholds.ema_slope_trend_threshold must be > 0 "
+                f"(applied to |slope|), got {self.ema_slope_trend_threshold}"
+            )
+
+
+@dataclass(frozen=True)
+class InstrumentRegimeConfig:
+    """Per-instrument regime-classifier wiring (Epic 11).
+
+    Bundles the indicator parameters used to construct ``FeatureExtractor``
+    plus the :class:`RegimeThresholds` consumed by the classifier. One
+    instance per (firm, instrument) pair lives inside :class:`RegimeConfig`.
+    """
+
+    timeframe: str
+    thresholds: RegimeThresholds
+    adx_period: int
+    bb_period: int
+    bb_stddev: float
+    bb_baseline_window: int
+    realized_vol_window: int
+    ema_slope_period: int
+    ema_slope_lookback: int
+
+    def __post_init__(self) -> None:
+        if self.timeframe not in _REGIME_TIMEFRAMES:
+            raise ValueError(
+                "InstrumentRegimeConfig.timeframe must be one of "
+                f"{sorted(_REGIME_TIMEFRAMES)}, got {self.timeframe!r}"
+            )
+        for field_name in (
+            "adx_period",
+            "bb_period",
+            "bb_baseline_window",
+            "realized_vol_window",
+            "ema_slope_period",
+            "ema_slope_lookback",
+        ):
+            value = getattr(self, field_name)
+            if value <= 0:
+                raise ValueError(
+                    f"InstrumentRegimeConfig.{field_name} must be > 0, got {value}"
+                )
+        if self.bb_stddev <= 0:
+            raise ValueError(
+                f"InstrumentRegimeConfig.bb_stddev must be > 0, got {self.bb_stddev}"
+            )
+        if self.bb_baseline_window < self.bb_period:
+            raise ValueError(
+                "InstrumentRegimeConfig.bb_baseline_window must be >= bb_period "
+                f"({self.bb_baseline_window} < {self.bb_period})"
+            )
+
+
+@dataclass(frozen=True)
+class RegimeConfig:
+    """Top-level regime-classifier block on a firm profile (Epic 11).
+
+    Loaded from the optional ``regime_classifier:`` block in a firm YAML.
+    ``enabled=False`` (the default) means the bootstrap returns the plain
+    :class:`StrategyDataRouter` and no classifier overhead is incurred.
+    """
+
+    enabled: bool
+    confirmation_bars: int
+    warmup_bars: int
+    feature_window: int
+    instruments: Mapping[str, InstrumentRegimeConfig] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.confirmation_bars <= 0:
+            raise ValueError(
+                "RegimeConfig.confirmation_bars must be > 0, "
+                f"got {self.confirmation_bars}"
+            )
+        if self.warmup_bars <= 0:
+            raise ValueError(
+                f"RegimeConfig.warmup_bars must be > 0, got {self.warmup_bars}"
+            )
+        if self.feature_window <= 0:
+            raise ValueError(
+                f"RegimeConfig.feature_window must be > 0, got {self.feature_window}"
+            )
+        if self.warmup_bars > self.feature_window:
+            raise ValueError(
+                "RegimeConfig.warmup_bars must be <= feature_window "
+                f"({self.warmup_bars} > {self.feature_window})"
+            )
+        if self.enabled and not self.instruments:
+            raise ValueError(
+                "RegimeConfig.instruments must be non-empty when enabled=True"
+            )
+        for symbol, instr in self.instruments.items():
+            if self.feature_window < instr.bb_baseline_window:
+                raise ValueError(
+                    f"RegimeConfig.feature_window must be >= "
+                    f"instruments[{symbol!r}].bb_baseline_window "
+                    f"({self.feature_window} < {instr.bb_baseline_window})"
+                )
+        object.__setattr__(self, "instruments", _freeze_mapping(self.instruments))
+
+    def get_instrument(self, symbol: str) -> InstrumentRegimeConfig:
+        """Return the per-instrument config for ``symbol``.
+
+        Raises:
+            KeyError: if ``symbol`` is not configured.
+        """
+        cfg = self.instruments.get(symbol)
+        if cfg is None:
+            raise KeyError(
+                f"RegimeConfig has no instrument {symbol!r}. "
+                f"Available: {sorted(self.instruments)}"
+            )
+        return cfg
+
+
 @dataclass(frozen=True)
 class FirmProfile:
     """Top-level profile of a prop firm.
@@ -257,6 +429,7 @@ class FirmProfile:
     commission: CommissionProfile | None = None
     report_template: ReportTemplate | None = None
     notification_template: Mapping[str, Any] = field(default_factory=dict)
+    regime_classifier: RegimeConfig | None = None
 
     def __post_init__(self) -> None:
         if not self.firm_id:
@@ -303,6 +476,9 @@ __all__ = [
     "DrawdownMethod",
     "FirmProfile",
     "InstrumentClass",
+    "InstrumentRegimeConfig",
+    "RegimeConfig",
+    "RegimeThresholds",
     "ReportTemplate",
     "ResetAnchor",
     "ScalingPolicy",

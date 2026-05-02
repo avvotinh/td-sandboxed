@@ -163,6 +163,29 @@ class TestFtmoProfile:
         assert consistency.block_at == pytest.approx(50.0)
         assert tuple(consistency.warn_at) == (40.0, 45.0, 48.0)
 
+    def test_regime_classifier_block_present_and_disabled(
+        self, registry: FirmRegistry
+    ) -> None:
+        # Story 11.2: ship the block disabled so production behavior is
+        # unchanged until an operator flips `enabled: true`.
+        rc = registry.get("ftmo").regime_classifier
+        assert rc is not None
+        assert rc.enabled is False
+        xau = rc.get_instrument("XAUUSD")
+        assert xau.timeframe == "M5"
+        assert xau.thresholds.adx_trend_min == pytest.approx(25.0)
+        assert xau.thresholds.bb_width_high_pct == pytest.approx(0.80)
+        assert xau.bb_baseline_window >= xau.bb_period
+
+
+class TestThe5ersRegimeClassifier:
+    """The5ers does not enable the regime block in Phase 1."""
+
+    def test_regime_classifier_absent(self, registry: FirmRegistry) -> None:
+        # Phase 1 ships FTMO-only; the5ers stays on the legacy bar pipeline
+        # until volatility-targeted strategies clear validation.
+        assert registry.get("the5ers").regime_classifier is None
+
 
 class TestThe5ersProfile:
     """The5ers must declare three distinct products with the expected rules."""

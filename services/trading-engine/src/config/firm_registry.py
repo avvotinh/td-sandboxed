@@ -27,6 +27,9 @@ from .firm_profile import (
     DrawdownMethod,
     FirmProfile,
     InstrumentClass,
+    InstrumentRegimeConfig,
+    RegimeConfig,
+    RegimeThresholds,
     ReportTemplate,
     ResetAnchor,
     ScalingPolicy,
@@ -135,6 +138,35 @@ class _ProductSchema(_StrictModel):
     scaling_policy: _ScalingPolicySchema | None = None
 
 
+class _RegimeThresholdsSchema(_StrictModel):
+    adx_trend_min: float
+    adx_strong_trend: float
+    bb_width_low_pct: float
+    bb_width_high_pct: float
+    realized_vol_high: float
+    ema_slope_trend_threshold: float
+
+
+class _InstrumentRegimeConfigSchema(_StrictModel):
+    timeframe: str
+    thresholds: _RegimeThresholdsSchema
+    adx_period: int
+    bb_period: int
+    bb_stddev: float
+    bb_baseline_window: int
+    realized_vol_window: int
+    ema_slope_period: int
+    ema_slope_lookback: int
+
+
+class _RegimeConfigSchema(_StrictModel):
+    enabled: bool = False
+    confirmation_bars: int
+    warmup_bars: int
+    feature_window: int
+    instruments: dict[str, _InstrumentRegimeConfigSchema] = Field(default_factory=dict)
+
+
 class _FirmSchema(_StrictModel):
     firm_id: str
     name: str
@@ -145,6 +177,7 @@ class _FirmSchema(_StrictModel):
     commission: _CommissionSchema | None = None
     report_template: _ReportTemplateSchema | None = None
     notification_template: dict[str, Any] = Field(default_factory=dict)
+    regime_classifier: _RegimeConfigSchema | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +334,7 @@ class FirmRegistry:
             commission=_commission(schema.commission),
             report_template=_report(schema.report_template),
             notification_template=schema.notification_template,
+            regime_classifier=_regime_config(schema.regime_classifier),
         )
 
     def _schema_to_product(self, schema: _ProductSchema) -> AccountProduct:
@@ -367,6 +401,39 @@ def _report(s: _ReportTemplateSchema | None) -> ReportTemplate | None:
     if s is None:
         return None
     return ReportTemplate(template_id=s.template_id, variables=dict(s.variables))
+
+
+def _regime_config(s: _RegimeConfigSchema | None) -> RegimeConfig | None:
+    if s is None:
+        return None
+    instruments = {
+        symbol: InstrumentRegimeConfig(
+            timeframe=instr.timeframe,
+            thresholds=RegimeThresholds(
+                adx_trend_min=instr.thresholds.adx_trend_min,
+                adx_strong_trend=instr.thresholds.adx_strong_trend,
+                bb_width_low_pct=instr.thresholds.bb_width_low_pct,
+                bb_width_high_pct=instr.thresholds.bb_width_high_pct,
+                realized_vol_high=instr.thresholds.realized_vol_high,
+                ema_slope_trend_threshold=instr.thresholds.ema_slope_trend_threshold,
+            ),
+            adx_period=instr.adx_period,
+            bb_period=instr.bb_period,
+            bb_stddev=instr.bb_stddev,
+            bb_baseline_window=instr.bb_baseline_window,
+            realized_vol_window=instr.realized_vol_window,
+            ema_slope_period=instr.ema_slope_period,
+            ema_slope_lookback=instr.ema_slope_lookback,
+        )
+        for symbol, instr in s.instruments.items()
+    }
+    return RegimeConfig(
+        enabled=s.enabled,
+        confirmation_bars=s.confirmation_bars,
+        warmup_bars=s.warmup_bars,
+        feature_window=s.feature_window,
+        instruments=instruments,
+    )
 
 
 __all__ = [

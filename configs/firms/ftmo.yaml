@@ -83,3 +83,31 @@ products:
 
 report_template:
   template_id: ftmo_daily
+
+# Market regime classifier (Epic 11 Phase 1, story 11.2).
+# Disabled by default — flip `enabled: true` once the rule-based classifier
+# has been shadow-validated on a test account. Thresholds calibrated from
+# academic consensus (State Street 2025, Imperial College working paper) and
+# adjusted for XAUUSD M5 dynamics; see docs/research/regime-classifier.md.
+regime_classifier:
+  enabled: false
+  confirmation_bars: 2
+  warmup_bars: 50
+  feature_window: 200
+  instruments:
+    XAUUSD:
+      timeframe: M5
+      adx_period: 14
+      bb_period: 20
+      bb_stddev: 2.0
+      bb_baseline_window: 100
+      realized_vol_window: 20
+      ema_slope_period: 20
+      ema_slope_lookback: 5
+      thresholds:
+        adx_trend_min: 25.0
+        adx_strong_trend: 40.0
+        bb_width_low_pct: 0.30
+        bb_width_high_pct: 0.80
+        realized_vol_high: 0.025
+        ema_slope_trend_threshold: 0.0005

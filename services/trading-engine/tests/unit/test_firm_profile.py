@@ -8,6 +8,7 @@ Pure data-model tests — no loader, no YAML, no rule parser.
 """
 
 from dataclasses import FrozenInstanceError
+from types import MappingProxyType
 
 import pytest
 
@@ -18,6 +19,9 @@ from src.config.firm_profile import (
     DrawdownMethod,
     FirmProfile,
     InstrumentClass,
+    InstrumentRegimeConfig,
+    RegimeConfig,
+    RegimeThresholds,
     ReportTemplate,
     ResetAnchor,
     ScalingPolicy,
@@ -465,3 +469,272 @@ class TestReportTemplate:
     def test_rejects_empty_template_id(self):
         with pytest.raises(ValueError, match="template_id"):
             ReportTemplate(template_id="")
+
+
+# ---------------------------------------------------------------------------
+# RegimeThresholds (Epic 11 story 11.2)
+# ---------------------------------------------------------------------------
+
+
+def _thresholds(**overrides: float) -> RegimeThresholds:
+    base: dict[str, float] = dict(
+        adx_trend_min=25.0,
+        adx_strong_trend=40.0,
+        bb_width_low_pct=0.30,
+        bb_width_high_pct=0.80,
+        realized_vol_high=0.025,
+        ema_slope_trend_threshold=0.0005,
+    )
+    base.update(overrides)
+    return RegimeThresholds(**base)
+
+
+class TestRegimeThresholds:
+    def test_minimal_construction(self):
+        t = _thresholds()
+        assert t.adx_trend_min == pytest.approx(25.0)
+        assert t.bb_width_high_pct == pytest.approx(0.80)
+
+    def test_is_frozen(self):
+        t = _thresholds()
+        with pytest.raises(FrozenInstanceError):
+            t.adx_trend_min = 99.0  # type: ignore[misc]
+
+    @pytest.mark.parametrize(
+        "field, bad_value, match",
+        [
+            ("adx_trend_min", 0.0, "adx_trend_min"),
+            ("adx_trend_min", -1.0, "adx_trend_min"),
+            ("adx_strong_trend", 0.0, "adx_strong_trend"),
+            ("realized_vol_high", 0.0, "realized_vol_high"),
+            ("ema_slope_trend_threshold", 0.0, "ema_slope_trend_threshold"),
+            ("ema_slope_trend_threshold", -0.001, "ema_slope_trend_threshold"),
+        ],
+    )
+    def test_rejects_non_positive_values(
+        self, field: str, bad_value: float, match: str
+    ):
+        with pytest.raises(ValueError, match=match):
+            _thresholds(**{field: bad_value})
+
+    def test_rejects_strong_trend_below_trend_min(self):
+        # adx_strong_trend < adx_trend_min would invert the rule semantics.
+        with pytest.raises(ValueError, match="adx_strong_trend"):
+            _thresholds(adx_trend_min=30.0, adx_strong_trend=20.0)
+
+    def test_strong_trend_equal_to_trend_min_is_allowed(self):
+        # The guard is `>=`, so equality is the documented boundary.
+        t = _thresholds(adx_trend_min=25.0, adx_strong_trend=25.0)
+        assert t.adx_strong_trend == pytest.approx(25.0)
+
+    @pytest.mark.parametrize("field", ["bb_width_low_pct", "bb_width_high_pct"])
+    @pytest.mark.parametrize("bad_value", [-0.01, 1.01, 1.5])
+    def test_bb_width_pct_must_be_in_unit_interval(
+        self, field: str, bad_value: float
+    ):
+        with pytest.raises(ValueError, match=field):
+            _thresholds(**{field: bad_value})
+
+    def test_rejects_high_pct_below_low_pct(self):
+        with pytest.raises(ValueError, match="bb_width_high_pct"):
+            _thresholds(bb_width_low_pct=0.7, bb_width_high_pct=0.3)
+
+
+# ---------------------------------------------------------------------------
+# InstrumentRegimeConfig (Epic 11 story 11.2)
+# ---------------------------------------------------------------------------
+
+
+def _instrument_config(**overrides: object) -> InstrumentRegimeConfig:
+    base: dict[str, object] = dict(
+        timeframe="M5",
+        thresholds=_thresholds(),
+        adx_period=14,
+        bb_period=20,
+        bb_stddev=2.0,
+        bb_baseline_window=100,
+        realized_vol_window=20,
+        ema_slope_period=20,
+        ema_slope_lookback=5,
+    )
+    base.update(overrides)
+    return InstrumentRegimeConfig(**base)  # type: ignore[arg-type]
+
+
+class TestInstrumentRegimeConfig:
+    def test_minimal_construction(self):
+        cfg = _instrument_config()
+        assert cfg.timeframe == "M5"
+        assert cfg.adx_period == 14
+        assert isinstance(cfg.thresholds, RegimeThresholds)
+
+    def test_is_frozen(self):
+        cfg = _instrument_config()
+        with pytest.raises(FrozenInstanceError):
+            cfg.adx_period = 99  # type: ignore[misc]
+
+    @pytest.mark.parametrize("tf", ["M5", "M15"])
+    def test_accepts_supported_timeframes(self, tf: str):
+        cfg = _instrument_config(timeframe=tf)
+        assert cfg.timeframe == tf
+
+    @pytest.mark.parametrize("bad_tf", ["", "M1", "H1", "M30"])
+    def test_rejects_unsupported_timeframes(self, bad_tf: str):
+        with pytest.raises(ValueError, match="timeframe"):
+            _instrument_config(timeframe=bad_tf)
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "adx_period",
+            "bb_period",
+            "bb_baseline_window",
+            "realized_vol_window",
+            "ema_slope_period",
+            "ema_slope_lookback",
+        ],
+    )
+    def test_period_fields_must_be_positive_int(self, field: str):
+        with pytest.raises(ValueError, match=field):
+            _instrument_config(**{field: 0})
+        with pytest.raises(ValueError, match=field):
+            _instrument_config(**{field: -1})
+
+    def test_bb_stddev_must_be_positive(self):
+        with pytest.raises(ValueError, match="bb_stddev"):
+            _instrument_config(bb_stddev=0.0)
+
+    def test_baseline_window_must_be_at_least_period(self):
+        # Percentile baseline shorter than the BB period itself is degenerate.
+        with pytest.raises(ValueError, match="bb_baseline_window"):
+            _instrument_config(bb_period=20, bb_baseline_window=10)
+
+
+# ---------------------------------------------------------------------------
+# RegimeConfig (Epic 11 story 11.2)
+# ---------------------------------------------------------------------------
+
+
+def _regime_config(**overrides: object) -> RegimeConfig:
+    base: dict[str, object] = dict(
+        enabled=False,
+        confirmation_bars=2,
+        warmup_bars=50,
+        feature_window=200,
+        instruments={"XAUUSD": _instrument_config()},
+    )
+    base.update(overrides)
+    return RegimeConfig(**base)  # type: ignore[arg-type]
+
+
+class TestRegimeConfig:
+    def test_minimal_disabled_construction(self):
+        cfg = _regime_config()
+        assert cfg.enabled is False
+        assert cfg.confirmation_bars == 2
+        assert "XAUUSD" in cfg.instruments
+
+    def test_enabled_flag_round_trips(self):
+        cfg = _regime_config(enabled=True)
+        assert cfg.enabled is True
+
+    def test_is_frozen(self):
+        cfg = _regime_config()
+        with pytest.raises(FrozenInstanceError):
+            cfg.enabled = True  # type: ignore[misc]
+
+    def test_instruments_mapping_is_immutable(self):
+        cfg = _regime_config()
+        assert isinstance(cfg.instruments, MappingProxyType)
+        with pytest.raises(TypeError):
+            cfg.instruments["EURUSD"] = _instrument_config()  # type: ignore[index]
+
+    def test_instruments_mapping_detached_from_source(self):
+        # Mutating the source dict after construction must not leak in —
+        # _freeze_mapping makes a defensive copy first.
+        source: dict[str, InstrumentRegimeConfig] = {"XAUUSD": _instrument_config()}
+        cfg = _regime_config(instruments=source)
+        source["EURUSD"] = _instrument_config()
+        assert "EURUSD" not in cfg.instruments
+
+    def test_rejects_non_positive_confirmation_bars(self):
+        with pytest.raises(ValueError, match="confirmation_bars"):
+            _regime_config(confirmation_bars=0)
+
+    def test_rejects_non_positive_warmup_bars(self):
+        with pytest.raises(ValueError, match="warmup_bars"):
+            _regime_config(warmup_bars=0)
+
+    def test_warmup_must_not_exceed_feature_window(self):
+        with pytest.raises(ValueError, match="warmup_bars"):
+            _regime_config(warmup_bars=300, feature_window=200)
+
+    def test_feature_window_must_be_at_least_bb_baseline_window(self):
+        # FeatureExtractor would otherwise read percentile from a baseline
+        # bigger than its rolling buffer — silent semantic break.
+        with pytest.raises(ValueError, match="feature_window"):
+            _regime_config(
+                feature_window=50,
+                warmup_bars=20,
+                instruments={"XAUUSD": _instrument_config(bb_baseline_window=100)},
+            )
+
+    def test_rejects_empty_instruments_when_enabled(self):
+        with pytest.raises(ValueError, match="instruments"):
+            _regime_config(enabled=True, instruments={})
+
+    def test_allows_empty_instruments_when_disabled(self):
+        # Operators staging the block with `enabled: false` and no instruments
+        # populated yet is a legitimate intermediate state.
+        cfg = _regime_config(enabled=False, instruments={})
+        assert cfg.instruments == {}
+
+    def test_get_instrument_returns_config(self):
+        cfg = _regime_config()
+        assert cfg.get_instrument("XAUUSD") is cfg.instruments["XAUUSD"]
+
+    def test_get_instrument_raises_for_unknown_symbol(self):
+        cfg = _regime_config()
+        with pytest.raises(KeyError, match="EURUSD"):
+            cfg.get_instrument("EURUSD")
+
+
+# ---------------------------------------------------------------------------
+# FirmProfile.regime_classifier (Epic 11 story 11.2)
+# ---------------------------------------------------------------------------
+
+
+class TestFirmProfileRegimeClassifier:
+    def test_field_defaults_to_none(self):
+        firm = FirmProfile(
+            firm_id="ftmo",
+            name="FTMO",
+            version="2026.1",
+            session=SessionConfig(timezone="CET", reset_time="00:00"),
+            products={"p": _product("p")},
+        )
+        assert firm.regime_classifier is None
+
+    def test_accepts_regime_classifier(self):
+        rc = _regime_config(enabled=True)
+        firm = FirmProfile(
+            firm_id="ftmo",
+            name="FTMO",
+            version="2026.1",
+            session=SessionConfig(timezone="CET", reset_time="00:00"),
+            products={"p": _product("p")},
+            regime_classifier=rc,
+        )
+        assert firm.regime_classifier is rc
+
+    def test_remains_frozen_with_regime_classifier(self):
+        firm = FirmProfile(
+            firm_id="ftmo",
+            name="FTMO",
+            version="2026.1",
+            session=SessionConfig(timezone="CET", reset_time="00:00"),
+            products={"p": _product("p")},
+            regime_classifier=_regime_config(),
+        )
+        with pytest.raises(FrozenInstanceError):
+            firm.regime_classifier = None  # type: ignore[misc]

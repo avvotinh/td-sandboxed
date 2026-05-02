@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
+from types import MappingProxyType
 
 import pytest
 
 from src.config.firm_profile import (
     DrawdownMethod,
     InstrumentClass,
+    RegimeThresholds,
     ResetAnchor,
 )
 from src.config.firm_registry import (
@@ -334,3 +336,110 @@ class TestLookup:
         registry.load()
         registry.load()
         assert registry.list_firms() == ["ftmo", "the5ers"]
+
+
+# ---------------------------------------------------------------------------
+# Regime classifier block (Epic 11 story 11.2)
+# ---------------------------------------------------------------------------
+
+
+_REGIME_BLOCK = dedent(
+    """
+    regime_classifier:
+      enabled: false
+      confirmation_bars: 2
+      warmup_bars: 50
+      feature_window: 200
+      instruments:
+        XAUUSD:
+          timeframe: M5
+          adx_period: 14
+          bb_period: 20
+          bb_stddev: 2.0
+          bb_baseline_window: 100
+          realized_vol_window: 20
+          ema_slope_period: 20
+          ema_slope_lookback: 5
+          thresholds:
+            adx_trend_min: 25.0
+            adx_strong_trend: 40.0
+            bb_width_low_pct: 0.30
+            bb_width_high_pct: 0.80
+            realized_vol_high: 0.025
+            ema_slope_trend_threshold: 0.0005
+    """
+).strip()
+
+
+def _ftmo_yaml_with_regime_block(block: str = _REGIME_BLOCK) -> str:
+    return f"{FTMO_YAML}\n{block}"
+
+
+class TestRegimeClassifierLoading:
+    def test_block_absent_loads_with_none(self, firms_dir: Path):
+        registry = FirmRegistry(firms_dir)
+        registry.load()
+        assert registry.get("ftmo").regime_classifier is None
+
+    def test_block_present_round_trips(self, tmp_path: Path):
+        d = tmp_path / "firms"
+        d.mkdir()
+        (d / "ftmo.yaml").write_text(_ftmo_yaml_with_regime_block())
+        registry = FirmRegistry(d)
+        registry.load()
+        rc = registry.get("ftmo").regime_classifier
+        assert rc is not None
+        assert rc.enabled is False
+        assert rc.confirmation_bars == 2
+        assert rc.warmup_bars == 50
+        assert rc.feature_window == 200
+        assert isinstance(rc.instruments, MappingProxyType)
+        assert "XAUUSD" in rc.instruments
+        xau = rc.get_instrument("XAUUSD")
+        assert xau.timeframe == "M5"
+        assert xau.bb_period == 20
+        assert isinstance(xau.thresholds, RegimeThresholds)
+        assert xau.thresholds.adx_trend_min == pytest.approx(25.0)
+        assert xau.thresholds.bb_width_high_pct == pytest.approx(0.80)
+
+    def test_invalid_threshold_surfaces_load_error(self, tmp_path: Path):
+        d = tmp_path / "firms"
+        d.mkdir()
+        broken = _ftmo_yaml_with_regime_block(
+            _REGIME_BLOCK.replace("adx_trend_min: 25.0", "adx_trend_min: -1.0")
+        )
+        (d / "ftmo.yaml").write_text(broken)
+        registry = FirmRegistry(d)
+        with pytest.raises(FirmProfileLoadError, match="adx_trend_min"):
+            registry.load()
+
+    def test_unknown_field_in_regime_block_rejected(self, tmp_path: Path):
+        d = tmp_path / "firms"
+        d.mkdir()
+        broken = _ftmo_yaml_with_regime_block(
+            _REGIME_BLOCK.replace("enabled: false", "enabled: false\n  unknown_field: 7")
+        )
+        (d / "ftmo.yaml").write_text(broken)
+        registry = FirmRegistry(d)
+        with pytest.raises(FirmProfileLoadError, match="unknown_field"):
+            registry.load()
+
+    def test_enabled_with_empty_instruments_rejected(self, tmp_path: Path):
+        d = tmp_path / "firms"
+        d.mkdir()
+        broken = _ftmo_yaml_with_regime_block(
+            dedent(
+                """
+                regime_classifier:
+                  enabled: true
+                  confirmation_bars: 2
+                  warmup_bars: 50
+                  feature_window: 200
+                  instruments: {}
+                """
+            ).strip()
+        )
+        (d / "ftmo.yaml").write_text(broken)
+        registry = FirmRegistry(d)
+        with pytest.raises(FirmProfileLoadError, match="instruments"):
+            registry.load()
