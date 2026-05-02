@@ -10,6 +10,7 @@ specified on the same scale.
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
 from nautilus_trader.indicators.volatility import AverageTrueRange
@@ -21,6 +22,7 @@ from src.strategies.base_strategy import BaseStrategy
 from src.strategies.bracket_strategy import (
     BracketStrategyConfig,
     BracketStrategyMixin,
+    is_atr_unsafe,
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
@@ -30,6 +32,8 @@ from src.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
     RiskBasedSizerConfig,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RSIMeanReversionConfig(BracketStrategyConfig, frozen=True, kw_only=True):
@@ -74,6 +78,7 @@ class RSIMeanReversionStrategy(
         self.register_indicator_for_bars(self.config.bar_type, self._atr)
 
     def on_reset(self) -> None:
+        super().on_reset()
         self._rsi.reset()
         self._atr.reset()
         self._prev_rsi = None
@@ -110,5 +115,12 @@ class RSIMeanReversionStrategy(
         if signal == SignalType.CLOSE:
             self._close_position()
             return
-        atr_value = Decimal(str(self._atr.value))
+        atr_raw = self._atr.value
+        if is_atr_unsafe(atr_raw):
+            logger.warning(
+                "RSI MR skipping entry: ATR=%s is non-positive or non-finite",
+                atr_raw,
+            )
+            return
+        atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)

@@ -135,4 +135,54 @@ class TestSignalGeneration:
         assert strategy.generate_signal(_mock_bar()) == SignalType.NONE
 
 
+class TestAtrUnsafeGuard:
+    """Mirror of Supertrend / Bollinger MR's ATR safety guard. RSI MR
+    was missed in the original priority-2 bundle; the same flat-bar
+    failure mode applies here: ATR=0 → ATRStopMixin._validated_offset
+    raises ValueError → bar callback unwinds → engine halts."""
+
+    @pytest.mark.parametrize(
+        "bad_atr", [0.0, None, -5.0, float("nan"), float("inf")]
+    )
+    def test_unsafe_atr_skips_bracket_submission(self, bad_atr) -> None:
+        strategy = _make_strategy()
+        strategy._rsi = Mock(initialized=True, value=0.4)
+        strategy._atr = Mock(initialized=True, value=bad_atr)
+        strategy._submit_bracket_for_entry = Mock()
+        strategy._execute_signal(SignalType.BUY)
+        strategy._submit_bracket_for_entry.assert_not_called()
+
+    def test_positive_atr_still_submits(self) -> None:
+        strategy = _make_strategy()
+        strategy._rsi = Mock(initialized=True, value=0.4)
+        strategy._atr = Mock(initialized=True, value=5.0)
+        strategy._submit_bracket_for_entry = Mock()
+        strategy._execute_signal(SignalType.BUY)
+        strategy._submit_bracket_for_entry.assert_called_once()
+
+
+class TestOnReset:
+    def test_on_reset_calls_super(self) -> None:
+        # Without super().on_reset(), any state owned by BaseStrategy or
+        # an upstream mixin that needs clearing between backtest runs is
+        # silently retained — same regression Bollinger MR carried before
+        # priority-2 fixed it.
+        strategy = _make_strategy()
+        strategy._rsi = Mock()
+        strategy._atr = Mock()
+        # Spy on super().on_reset by patching at the class level.
+        from src.strategies.base_strategy import BaseStrategy
+        with pytest.MonkeyPatch.context() as mp:
+            super_called = []
+            mp.setattr(
+                BaseStrategy,
+                "on_reset",
+                lambda self: super_called.append(True),
+            )
+            strategy.on_reset()
+        assert super_called == [True]
+        strategy._rsi.reset.assert_called_once()
+        strategy._atr.reset.assert_called_once()
+
+
 # Registry verified by successful import (decorator registered at load).
