@@ -13,6 +13,7 @@ for insufficient capital; the bracket helper gracefully skips on ``<=0``.
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,7 @@ from src.strategies.base_strategy import BaseStrategy
 from src.strategies.bracket_strategy import (
     BracketStrategyConfig,
     BracketStrategyMixin,
+    is_atr_unsafe,
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
@@ -36,6 +38,8 @@ from src.strategies.risk_based_position_sizer import (
 
 if TYPE_CHECKING:
     from nautilus_trader.indicators.volatility import AverageTrueRange
+
+logger = logging.getLogger(__name__)
 
 
 class SupertrendConfig(BracketStrategyConfig, frozen=True, kw_only=True):
@@ -129,5 +133,21 @@ class SupertrendStrategy(
             self._close_position()
             return
 
-        atr_value = Decimal(str(self._atr.value))
+        # ATR-safety guard: a flat-bar (H=L=C) drives ATR to zero,
+        # which ATRStopMixin._validated_offset rejects with ValueError —
+        # propagating that exception through the bar callback halts the
+        # engine. Skip the signal instead so a single noisy bar cannot
+        # take trading offline. The shared predicate also covers None
+        # (warmup), NaN/inf (synthetic ticks), and negative (rollover
+        # gaps) — all single-bar transient states from which the
+        # indicator typically recovers.
+        atr_raw = self._atr.value
+        if is_atr_unsafe(atr_raw):
+            logger.warning(
+                "Supertrend skipping signal: ATR=%s is non-positive or non-finite",
+                atr_raw,
+            )
+            return
+
+        atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)

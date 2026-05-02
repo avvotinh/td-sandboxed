@@ -9,6 +9,7 @@ Uses the Nautilus :class:`BollingerBands` indicator re-exported as
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
 from nautilus_trader.indicators.volatility import AverageTrueRange
@@ -20,6 +21,7 @@ from src.strategies.base_strategy import BaseStrategy
 from src.strategies.bracket_strategy import (
     BracketStrategyConfig,
     BracketStrategyMixin,
+    is_atr_unsafe,
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
@@ -29,6 +31,8 @@ from src.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
     RiskBasedSizerConfig,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class BollingerMeanReversionConfig(BracketStrategyConfig, frozen=True, kw_only=True):
@@ -93,6 +97,22 @@ class BollingerMeanReversionStrategy(
         middle = self._bb.middle
         lower = self._bb.lower
 
+        # Squeeze guard: a collapsed band (upper <= lower) makes both
+        # the entry condition and the middle-cross exit semantically
+        # undefined. Skipping fail-loud (warning + NONE) prevents the
+        # strategy from idling silently while a backtest reports it as
+        # "no signal" rather than the broken state it is. Exact equality
+        # is the right boundary: when stdev==0 the C-extension indicator
+        # produces upper == middle == lower in IEEE-754 with no ULP drift,
+        # so an epsilon would only obscure the degeneracy.
+        if upper <= lower:
+            logger.warning(
+                "Bollinger band collapsed (upper=%.4f lower=%.4f); skipping bar",
+                upper,
+                lower,
+            )
+            return SignalType.NONE
+
         # Exit first — middle-band mean reversion target.
         if self.is_long and close >= middle:
             return SignalType.CLOSE
@@ -112,5 +132,12 @@ class BollingerMeanReversionStrategy(
         if signal == SignalType.CLOSE:
             self._close_position()
             return
-        atr_value = Decimal(str(self._atr.value))
+        atr_raw = self._atr.value
+        if is_atr_unsafe(atr_raw):
+            logger.warning(
+                "Bollinger skipping entry: ATR=%s is non-positive or non-finite",
+                atr_raw,
+            )
+            return
+        atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)

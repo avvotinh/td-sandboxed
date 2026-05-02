@@ -159,6 +159,64 @@ class TestBracketParams:
         assert qty_big > qty_small
 
 
+class TestAtrZeroGuard:
+    """A flat-bar (H=L=C) drives ATR to zero; the bracket helper must
+    short-circuit rather than crash the bar-processing loop."""
+
+    def test_atr_zero_skips_signal(self) -> None:
+        # Without the guard, Decimal(str(0.0)) propagates into
+        # ATRStopMixin._validated_offset which raises ValueError on
+        # non-positive ATR — that exception unwinds through on_bar and
+        # halts the engine. Verify the strategy returns silently.
+        strategy = _make_strategy()
+        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._atr = Mock(initialized=True, value=0.0)
+        strategy._submit_bracket_for_entry = Mock()
+        strategy._execute_signal(SignalType.BUY)
+        strategy._submit_bracket_for_entry.assert_not_called()
+
+    def test_atr_none_skips_signal(self) -> None:
+        # First bars after warmup may report value=None on some
+        # indicator paths — must not crash either.
+        strategy = _make_strategy()
+        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._atr = Mock(initialized=True, value=None)
+        strategy._submit_bracket_for_entry = Mock()
+        strategy._execute_signal(SignalType.BUY)
+        strategy._submit_bracket_for_entry.assert_not_called()
+
+    def test_atr_negative_skips_signal(self) -> None:
+        # Synthetic rollover/gap bars on some Nautilus indicator paths
+        # produce a transient negative ATR; guard must catch it before
+        # the bracket helper rejects the offset.
+        strategy = _make_strategy()
+        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._atr = Mock(initialized=True, value=-5.0)
+        strategy._submit_bracket_for_entry = Mock()
+        strategy._execute_signal(SignalType.BUY)
+        strategy._submit_bracket_for_entry.assert_not_called()
+
+    def test_atr_nan_skips_signal(self) -> None:
+        # NaN comparisons return False in Python (NaN <= 0 is False), so
+        # a naive `atr <= 0` check would let NaN through. Decimal(str(nan))
+        # then raises InvalidOperation deeper in the call stack.
+        strategy = _make_strategy()
+        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._atr = Mock(initialized=True, value=float("nan"))
+        strategy._submit_bracket_for_entry = Mock()
+        strategy._execute_signal(SignalType.BUY)
+        strategy._submit_bracket_for_entry.assert_not_called()
+
+    def test_positive_atr_still_submits(self) -> None:
+        # Sanity guard: the guard must not block the happy path.
+        strategy = _make_strategy()
+        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._atr = Mock(initialized=True, value=5.0)
+        strategy._submit_bracket_for_entry = Mock()
+        strategy._execute_signal(SignalType.BUY)
+        strategy._submit_bracket_for_entry.assert_called_once()
+
+
 # Registry assertion removed — test_strategy_registry.py's autouse
 # `clear_registry` fixture wipes the registry before/after its own tests,
 # which would leave our strategies unregistered by the time this test

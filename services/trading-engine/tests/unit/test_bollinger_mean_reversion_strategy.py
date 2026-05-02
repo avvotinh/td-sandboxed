@@ -126,4 +126,61 @@ class TestSignalGeneration:
         assert strategy.generate_signal(_mock_bar(2400)) == SignalType.CLOSE
 
 
+class TestSqueezeGuard:
+    """Zero-width Bollinger band must not silently produce zero trades."""
+
+    def test_zero_width_band_returns_none(self) -> None:
+        # Pure flatline → upper == lower == middle. The lower-band entry
+        # condition can never fire; without the guard the strategy would
+        # idle, looking like "no signal" rather than "broken state".
+        strategy = _make_strategy()
+        strategy._bb = Mock(
+            initialized=True, upper=2400.0, middle=2400.0, lower=2400.0
+        )
+        strategy._atr = Mock(initialized=True, value=5.0)
+        assert strategy.generate_signal(_mock_bar(2400)) == SignalType.NONE
+
+    def test_collapsed_band_does_not_trigger_close(self) -> None:
+        # Even with an open long, a collapsed band should NOT trigger
+        # the middle-cross close — the close target itself is undefined.
+        strategy = _make_strategy()
+        strategy._bb = Mock(
+            initialized=True, upper=2400.0, middle=2400.0, lower=2400.0
+        )
+        strategy._atr = Mock(initialized=True, value=5.0)
+        position = Mock()
+        position.side = PositionSide.LONG
+        strategy._position = position
+        assert strategy.generate_signal(_mock_bar(2400)) == SignalType.NONE
+
+
+class TestBollingerAtrZeroGuard:
+    """Mirror of Supertrend's ATR safety guard: _execute_signal must
+    skip on non-positive / non-finite ATR rather than crashing the
+    bar-processing loop via ATRStopMixin._validated_offset."""
+
+    @pytest.mark.parametrize(
+        "bad_atr", [0.0, None, -5.0, float("nan"), float("inf")]
+    )
+    def test_unsafe_atr_skips_bracket_submission(self, bad_atr) -> None:
+        strategy = _make_strategy()
+        strategy._bb = Mock(
+            initialized=True, upper=2420.0, middle=2400.0, lower=2380.0
+        )
+        strategy._atr = Mock(initialized=True, value=bad_atr)
+        strategy._submit_bracket_for_entry = Mock()
+        strategy._execute_signal(SignalType.BUY)
+        strategy._submit_bracket_for_entry.assert_not_called()
+
+    def test_positive_atr_still_submits(self) -> None:
+        strategy = _make_strategy()
+        strategy._bb = Mock(
+            initialized=True, upper=2420.0, middle=2400.0, lower=2380.0
+        )
+        strategy._atr = Mock(initialized=True, value=5.0)
+        strategy._submit_bracket_for_entry = Mock()
+        strategy._execute_signal(SignalType.BUY)
+        strategy._submit_bracket_for_entry.assert_called_once()
+
+
 # Registry verified by successful import (decorator registered at load).

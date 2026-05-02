@@ -16,6 +16,7 @@ the SL/TP/qty math, and the bracket submission call.
 from __future__ import annotations
 
 import logging
+import math
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,24 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def is_atr_unsafe(atr_raw: float | None) -> bool:
+    """Return True when ATR is None, non-finite, or non-positive.
+
+    Centralised so every bracket strategy shares the same definition of
+    "ATR cannot be passed to the bracket helper" — covers NaN, +/-inf,
+    None (early warmup), 0 (flat-bar H=L=C), and negative (synthetic
+    rollover gaps) in one predicate. Without this guard,
+    :meth:`ATRStopMixin._validated_offset` rejects the value with
+    ``ValueError`` and the exception unwinds through the bar callback,
+    halting the engine on a single noisy bar.
+    """
+    if atr_raw is None:
+        return True
+    if isinstance(atr_raw, float) and not math.isfinite(atr_raw):
+        return True
+    return atr_raw <= 0
 
 
 class BracketStrategyConfig(BaseStrategyConfig, frozen=True, kw_only=True):
