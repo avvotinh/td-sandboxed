@@ -34,8 +34,16 @@ class MACrossoverConfig(BaseStrategyConfig, frozen=True, kw_only=True):
         """Validate configuration after initialization.
 
         Raises:
-            ValueError: If slow_period <= fast_period
+            ValueError: If periods are non-positive or slow_period <= fast_period.
         """
+        if self.fast_period <= 0:
+            raise ValueError(
+                f"fast_period must be positive, got {self.fast_period}"
+            )
+        if self.slow_period <= 0:
+            raise ValueError(
+                f"slow_period must be positive, got {self.slow_period}"
+            )
         if self.slow_period <= self.fast_period:
             raise ValueError(
                 f"slow_period ({self.slow_period}) must be > fast_period ({self.fast_period})"

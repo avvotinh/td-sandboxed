@@ -62,6 +62,30 @@ class TestConfigValidation:
         with pytest.raises(ValueError):
             _make_config(opening_range_minutes=0)
 
+    def test_minute_bounds(self) -> None:
+        with pytest.raises(ValueError, match="session_open_minute"):
+            _make_config(session_open_minute=60)
+        with pytest.raises(ValueError, match="session_close_minute"):
+            _make_config(session_close_minute=-1)
+
+    def test_session_open_must_precede_close(self) -> None:
+        # Intraday-only invariant: open >= close (minute-of-day) silently
+        # creates an overnight window that downstream SessionFilterMixin
+        # would happily accept.
+        with pytest.raises(ValueError, match="session_open"):
+            _make_config(
+                session_open_hour=16,
+                session_open_minute=0,
+                session_close_hour=8,
+                session_close_minute=0,
+            )
+
+    def test_opening_range_must_fit_in_session(self) -> None:
+        # Default fixture session is 08:00-16:30 = 510 minutes; 600 > 510
+        # so the OR phase swallows the entire trading day.
+        with pytest.raises(ValueError, match="opening_range_minutes"):
+            _make_config(opening_range_minutes=600)
+
 
 class TestSessionBoundary:
     def test_no_signal_before_atr_init(self) -> None:

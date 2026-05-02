@@ -57,6 +57,16 @@ class TestConfigValidation:
         with pytest.raises(ValueError):
             _make_config(rsi_period=0)
 
+    def test_parent_validation_propagates(self) -> None:
+        # super().__post_init__() must run first so BracketStrategyConfig
+        # invariants (sl < tp) catch misconfigurations before the child's
+        # own RSI-specific checks.
+        with pytest.raises(ValueError, match="sl_atr_mult"):
+            _make_config(
+                sl_atr_mult=Decimal("3.0"),
+                tp_atr_mult=Decimal("1.0"),
+            )
+
 
 class TestSignalGeneration:
     def test_no_signal_before_init(self) -> None:

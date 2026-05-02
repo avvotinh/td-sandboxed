@@ -62,6 +62,26 @@ class TestMACrossoverConfig:
                 slow_period=20,
             )
 
+    @pytest.mark.parametrize("bad", [0, -1])
+    def test_fast_period_must_be_positive(self, bad):
+        with pytest.raises(ValueError, match="fast_period"):
+            MACrossoverConfig(
+                instrument_id=Mock(),
+                bar_type=Mock(),
+                fast_period=bad,
+                slow_period=50,
+            )
+
+    @pytest.mark.parametrize("bad", [0, -5])
+    def test_slow_period_must_be_positive(self, bad):
+        with pytest.raises(ValueError, match="slow_period"):
+            MACrossoverConfig(
+                instrument_id=Mock(),
+                bar_type=Mock(),
+                fast_period=10,
+                slow_period=bad,
+            )
+
     def test_inherits_base_config_fields(self):
         """Test that config has base config fields."""
         instrument_id = Mock()

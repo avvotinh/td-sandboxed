@@ -38,10 +38,22 @@ class BollingerMeanReversionConfig(BracketStrategyConfig, frozen=True, kw_only=T
     tp_atr_mult: Decimal = Decimal("2.0")
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if self.period <= 0:
             raise ValueError(f"period must be positive, got {self.period}")
         if self.num_std <= 0:
             raise ValueError(f"num_std must be positive, got {self.num_std}")
+        # Sanity cap to catch misconfigured YAML; not a tunable threshold.
+        # Typical Bollinger usage sits at 1.5–3.0σ. Anything above 5σ
+        # produces bands so wide that price never touches them, silently
+        # yielding zero-trade backtests with no error. Per
+        # `sandboxed-domain.md`, business thresholds load from YAML —
+        # this is a structural guardrail, not a tunable.
+        if self.num_std > 5.0:
+            raise ValueError(
+                "num_std must be <= 5.0 (typical range 1.5–3.0); "
+                f"got {self.num_std}"
+            )
 
 
 @register_strategy(

@@ -59,6 +59,28 @@ class TestConfigValidation:
                 period=20, num_std=-1.0,
             )
 
+    def test_num_std_upper_bound(self) -> None:
+        # num_std=20 silently produces zero-trade backtests; reject so a
+        # misconfigured YAML preset surfaces at import, not at run time.
+        with pytest.raises(ValueError, match="num_std"):
+            BollingerMeanReversionConfig(
+                instrument_id=InstrumentId.from_str("XAUUSD.BROKER"),
+                bar_type=BarType.from_str("XAUUSD.BROKER-15-MINUTE-LAST-EXTERNAL"),
+                period=20, num_std=20.0,
+            )
+
+    def test_parent_validation_propagates(self) -> None:
+        # super().__post_init__() must run first so BracketStrategyConfig
+        # invariants (sl < tp, positive risk_percent, etc.) catch
+        # misconfigurations before the child's own checks.
+        with pytest.raises(ValueError, match="sl_atr_mult"):
+            BollingerMeanReversionConfig(
+                instrument_id=InstrumentId.from_str("XAUUSD.BROKER"),
+                bar_type=BarType.from_str("XAUUSD.BROKER-15-MINUTE-LAST-EXTERNAL"),
+                sl_atr_mult=Decimal("3.0"),
+                tp_atr_mult=Decimal("1.0"),
+            )
+
 
 class TestSignalGeneration:
     def test_no_signal_before_init(self) -> None:

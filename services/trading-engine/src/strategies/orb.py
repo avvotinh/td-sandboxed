@@ -50,12 +50,38 @@ class ORBConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     tp_atr_mult: Decimal = Decimal("2.0")
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not 0 <= self.session_open_hour <= 23:
             raise ValueError("session_open_hour must be in 0..23")
         if not 0 <= self.session_close_hour <= 23:
             raise ValueError("session_close_hour must be in 0..23")
+        if not 0 <= self.session_open_minute <= 59:
+            raise ValueError("session_open_minute must be in 0..59")
+        if not 0 <= self.session_close_minute <= 59:
+            raise ValueError("session_close_minute must be in 0..59")
         if self.opening_range_minutes <= 0:
             raise ValueError("opening_range_minutes must be positive")
+        # ORB is documented as intraday-only; an open >= close minute-of-
+        # day silently creates an overnight window that downstream
+        # SessionFilterMixin would happily process. Wall-clock integers
+        # only — DST handling is deferred to SessionFilterMixin at run
+        # time (config-time has no tz context).
+        open_mod = self.session_open_hour * 60 + self.session_open_minute
+        close_mod = self.session_close_hour * 60 + self.session_close_minute
+        if open_mod >= close_mod:
+            raise ValueError(
+                "session_open must be earlier than session_close (intraday-only); "
+                f"got open={self.session_open_hour:02d}:{self.session_open_minute:02d} "
+                f"close={self.session_close_hour:02d}:{self.session_close_minute:02d}"
+            )
+        # Opening-range cannot exceed total session length, otherwise the
+        # OR phase swallows the entire trading day and no breakout fires.
+        session_minutes = close_mod - open_mod
+        if self.opening_range_minutes >= session_minutes:
+            raise ValueError(
+                f"opening_range_minutes ({self.opening_range_minutes}) must be "
+                f"< session length ({session_minutes} minutes)"
+            )
 
 
 # Phase 1: ORB opts out of regime routing (regimes=[]). Phase 2 will

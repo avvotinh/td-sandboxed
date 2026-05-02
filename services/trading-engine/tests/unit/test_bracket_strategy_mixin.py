@@ -7,7 +7,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.strategies.bracket_strategy import BracketStrategyMixin
+from nautilus_trader.model.data import BarType
+from nautilus_trader.model.identifiers import InstrumentId
+
+from src.strategies.bracket_strategy import (
+    BracketStrategyConfig,
+    BracketStrategyMixin,
+)
 
 
 class _Host(BracketStrategyMixin):
@@ -86,3 +92,67 @@ class TestReadAccountBalance:
         portfolio.account.return_value = account
         host = _Host(portfolio=portfolio, bar_type=self._bar_type())
         assert host._read_account_balance() == Decimal("0")
+
+
+# ---------------------------------------------------------------------------
+# BracketStrategyConfig — cross-cutting R:R guard (review 2026-05-02 priority 1)
+# ---------------------------------------------------------------------------
+
+
+def _bracket_config(**overrides):
+    base = dict(
+        instrument_id=InstrumentId.from_str("XAUUSD.BROKER"),
+        bar_type=BarType.from_str("XAUUSD.BROKER-1-MINUTE-LAST-EXTERNAL"),
+    )
+    base.update(overrides)
+    return BracketStrategyConfig(**base)
+
+
+@pytest.mark.unit
+class TestBracketStrategyConfigValidation:
+    def test_defaults_pass(self) -> None:
+        cfg = _bracket_config()
+        assert cfg.sl_atr_mult == Decimal("1.5")
+        assert cfg.tp_atr_mult == Decimal("3.0")
+
+    @pytest.mark.parametrize("bad", [0, -1, -14])
+    def test_atr_period_must_be_positive(self, bad: int) -> None:
+        with pytest.raises(ValueError, match="atr_period"):
+            _bracket_config(atr_period=bad)
+
+    @pytest.mark.parametrize(
+        "field, bad_value",
+        [
+            ("sl_atr_mult", Decimal("0")),
+            ("sl_atr_mult", Decimal("-0.5")),
+            ("tp_atr_mult", Decimal("0")),
+            ("tp_atr_mult", Decimal("-1.0")),
+            ("risk_percent", Decimal("0")),
+            ("risk_percent", Decimal("-0.1")),
+            ("pip_size", Decimal("0")),
+            ("pip_value_per_lot", Decimal("0")),
+        ],
+    )
+    def test_decimal_fields_must_be_positive(
+        self, field: str, bad_value: Decimal
+    ) -> None:
+        with pytest.raises(ValueError, match=field):
+            _bracket_config(**{field: bad_value})
+
+    def test_sl_must_be_strictly_less_than_tp(self) -> None:
+        # R:R below 1 is degenerate for ATR brackets — TP closer to entry
+        # than SL implies the strategy expects to lose on average.
+        with pytest.raises(ValueError, match="sl_atr_mult"):
+            _bracket_config(
+                sl_atr_mult=Decimal("3.0"),
+                tp_atr_mult=Decimal("1.0"),
+            )
+
+    def test_sl_equal_to_tp_is_rejected(self) -> None:
+        # 1:1 R:R is the boundary; reject it explicitly so backtest
+        # operators can't ship a no-edge config by accident.
+        with pytest.raises(ValueError, match="sl_atr_mult"):
+            _bracket_config(
+                sl_atr_mult=Decimal("2.0"),
+                tp_atr_mult=Decimal("2.0"),
+            )

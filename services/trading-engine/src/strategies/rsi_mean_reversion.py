@@ -42,6 +42,7 @@ class RSIMeanReversionConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     tp_atr_mult: Decimal = Decimal("2.0")
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if self.rsi_period <= 0:
             raise ValueError(f"rsi_period must be positive, got {self.rsi_period}")
         if not 0 <= self.oversold < self.exit_neutral < self.overbought <= 1:

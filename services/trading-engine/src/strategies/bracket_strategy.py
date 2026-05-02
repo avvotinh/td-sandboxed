@@ -50,6 +50,32 @@ class BracketStrategyConfig(BaseStrategyConfig, frozen=True, kw_only=True):
     pip_size: Decimal = Decimal("0.01")
     pip_value_per_lot: Decimal = Decimal("1.0")
 
+    def __post_init__(self) -> None:
+        if self.atr_period <= 0:
+            raise ValueError(
+                f"atr_period must be positive, got {self.atr_period}"
+            )
+        for field_name in (
+            "sl_atr_mult",
+            "tp_atr_mult",
+            "risk_percent",
+            "pip_size",
+            "pip_value_per_lot",
+        ):
+            value = getattr(self, field_name)
+            if value <= 0:
+                raise ValueError(
+                    f"{field_name} must be > 0, got {value}"
+                )
+        # R:R below 1 is degenerate for ATR brackets — TP closer to entry
+        # than SL implies the strategy expects to lose on average. Reject
+        # equality too so 1:1 (no-edge) configs cannot ship by accident.
+        if self.sl_atr_mult >= self.tp_atr_mult:
+            raise ValueError(
+                "sl_atr_mult must be < tp_atr_mult (R:R > 1), "
+                f"got sl={self.sl_atr_mult} tp={self.tp_atr_mult}"
+            )
+
 
 class BracketStrategyMixin:
     """Reusable bracket-order machinery.
