@@ -1,7 +1,6 @@
 ---
 stepsCompleted: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 inputDocuments:
-  - docs/product-brief-multi-account-trading-system-2025-12-07.md
   - docs/architecture.md
 workflowType: 'prd'
 lastStep: 11
