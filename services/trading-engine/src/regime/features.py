@@ -16,6 +16,7 @@ statistically thin window.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from nautilus_trader.model.data import Bar
@@ -43,6 +44,26 @@ class RegimeFeatures:
     realized_vol: float
     ema_slope: float
     is_warmed_up: bool
+
+    def __post_init__(self) -> None:
+        # NaN reaching the classifier silently bypasses every threshold
+        # comparison (NaN >= x is always False) — that would let an upstream
+        # indicator glitch leak past the HIGH_VOLATILITY kill-switch on a
+        # financial-decision path. Reject at construction so the failure is
+        # loud and caught at the extractor boundary.
+        for field_name in (
+            "adx",
+            "plus_di",
+            "minus_di",
+            "bb_width_pct",
+            "realized_vol",
+            "ema_slope",
+        ):
+            value = getattr(self, field_name)
+            if math.isnan(value):
+                raise ValueError(
+                    f"RegimeFeatures.{field_name} must not be NaN"
+                )
 
 
 class FeatureExtractor:

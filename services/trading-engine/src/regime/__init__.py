@@ -13,11 +13,15 @@ See ``docs/research/regime-classifier.md`` and
 
 from __future__ import annotations
 
+from src.regime.classifier import RuleBasedRegimeClassifier
+from src.regime.decision import RegimeDecision
 from src.regime.features import FeatureExtractor, RegimeFeatures
 from src.regime.states import RegimeState
 
 __all__ = [
     "FeatureExtractor",
+    "RegimeDecision",
     "RegimeFeatures",
     "RegimeState",
+    "RuleBasedRegimeClassifier",
 ]

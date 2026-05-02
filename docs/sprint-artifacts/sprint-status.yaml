@@ -199,7 +199,7 @@ development_status:
   11-1-regime-indicators-and-features: done     # L  — BB width %, realized vol, EMA slope indicators + RegimeState enum + RegimeFeatures + FeatureExtractor (rolling 200 bars)
   11-2-regime-config-schema: done               # M  — RegimeConfig/RegimeThresholds/InstrumentRegimeConfig pydantic + extend FirmProfile + ftmo.yaml regime_classifier block (enabled:false)
   # Phase 11.B — Classifier core
-  11-3-rule-based-classifier: backlog           # M  — RuleBasedRegimeClassifier.decide() pure + RegimeDecision dataclass; priority HIGH_VOL → trending → ranging → UNKNOWN
+  11-3-rule-based-classifier: done              # M  — RuleBasedRegimeClassifier.decide() pure + RegimeDecision dataclass; priority HIGH_VOL → trending → ranging → UNKNOWN
   11-4-hysteresis-filter: backlog               # M  — HysteresisFilter 2-bar confirmation per-BarType state; flicker prevention
   # Phase 11.C — Audit + routing primitives
   11-5-regime-audit-adapter: backlog            # M  — RegimeAuditAdapter → AuditEntry via existing AuditLogger (event_type=regime_decision); security-reviewer gate
