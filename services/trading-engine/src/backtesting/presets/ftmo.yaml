@@ -1,0 +1,63 @@
+# FTMO Prop Firm Rule Preset
+# Based on FTMO Challenge and Funded account rules
+# Reference: https://ftmo.com/en/trading-rules/
+# Last Updated: 2025-12
+
+name: "FTMO Challenge"
+version: "2025.1"
+description: "FTMO prop firm trading rules - 5 rules: daily loss (5%), max drawdown (10%), position limits, profit target (10%), minimum trading days (4)"
+
+rules:
+  # =============================================================================
+  # BLOCKING RULES (Priority 1-10) - These PREVENT trading when limits are hit
+  # =============================================================================
+
+  # Daily Loss Limit: Maximum 5% of initial balance per day
+  # BLOCKING: Exceeding this blocks all new trades until daily reset (midnight CET)
+  # Reference: https://academy.ftmo.com/lesson/maximum-daily-loss/
+  - type: daily_loss_limit
+    threshold_percent: 5.0
+    reset_time: "00:00"
+    timezone: "CET"  # FTMO uses Central European Time
+    action: "block_trading"
+    warning_at: [70, 80, 90]  # Warning at 3.5%, 4%, 4.5%
+
+  # Maximum Drawdown: 10% of initial balance (trailing)
+  # BLOCKING: Exceeding this fails the challenge/funded account
+  # Reference: https://academy.ftmo.com/lesson/maximum-loss/
+  # TODO(P0.6 follow-up): switch to method: "balance_based" once RiskState
+  # gains an account_initial_balance field separate from daily_starting_balance
+  # — see validated_adapter.py:308 wiring. Until then, equity_peak (default)
+  # is the correct method given the available state.
+  - type: max_drawdown
+    threshold_percent: 10.0
+    reference: "initial_balance"
+    action: "block_trading"
+    warning_at: [50, 70, 85]  # Warning at 5%, 7%, 8.5%
+
+  # Maximum Position Size: Scaled by account balance
+  # BLOCKING: Orders exceeding this limit are rejected
+  # Default: 1 lot per $10,000 balance (base multiplier: 100 lots for $1M account)
+  - type: max_position_size
+    max_lots: 100.0
+    scaling: "per_10k_balance"
+    warning_at: [70, 80, 90]
+
+  # =============================================================================
+  # INFORMATIONAL RULES (Priority 100) - These NOTIFY but never block trading
+  # =============================================================================
+
+  # Profit Target: 10% for Challenge, 5% for Verification (informational)
+  # INFORMATIONAL: Notifies when profit target is reached, never blocks
+  # Reference: https://ftmo.com/en/how-to-pass-ftmo-challenge/
+  - type: profit_target
+    threshold_percent: 10.0
+    action: "notify"
+
+  # Minimum Trading Days: 4 days required for Challenge/Verification
+  # INFORMATIONAL: Tracks progress toward 4-day requirement, never blocks
+  # A "trading day" = any day with at least one opened trade
+  # Reference: https://ftmo.com/en/faq/step-1-ftmo-challenge/
+  - type: min_trading_days
+    required_days: 4
+    action: "notify"

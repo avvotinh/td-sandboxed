@@ -1,0 +1,240 @@
+"""Data routing for strategy market data.
+
+This module provides routing of market data (bars, ticks) from adapters
+to account strategies based on signal filtering rules.
+
+Integration Pattern with RedisAdapter:
+--------------------------------------
+The StrategyDataRouter is designed to integrate with RedisAdapter via callbacks:
+
+    # Setup router with accounts
+    router = StrategyDataRouter(accounts)
+
+    # Connect to RedisAdapter for bar routing
+    redis_adapter.set_bar_callback(router.route_bar)
+
+    # Or for async contexts
+    redis_adapter.set_bar_callback(router.route_bar_async)
+
+Signal Filtering:
+-----------------
+- Bars/ticks are filtered based on account.signal_filter.symbols
+- Empty symbols list allows all symbols (permissive by default)
+- Symbol matching is case-insensitive (e.g., "xauusd" matches "XAUUSD")
+- Filtered signals are logged at DEBUG level for troubleshooting
+
+See also:
+- src/adapters/redis_adapter.py for callback integration
+- src/accounts/models.py for SignalFilter configuration
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from src.adapters.redis_models import Bar
+    from src.strategies.base_strategy import BaseStrategy
+
+logger = logging.getLogger(__name__)
+
+
+class HasStrategy(Protocol):
+    """Protocol for objects with a strategy and signal filter."""
+
+    id: str
+    strategy_instance: BaseStrategy | None
+    strategy: str
+    status: str
+
+    @property
+    def signal_filter(self):
+        """Signal filter configuration."""
+        ...
+
+
+class StrategyDataRouter:
+    """Routes market data from adapters to account strategies.
+
+    Provides callbacks for bar and tick data that route to appropriate
+    strategy instances based on account configuration and signal filters.
+
+    Example:
+        router = StrategyDataRouter(accounts)
+        redis_adapter.set_bar_callback(router.route_bar)
+        zmq_adapter.set_tick_callback(router.route_tick)
+    """
+
+    def __init__(self, accounts: list[HasStrategy]):
+        """Initialize data router.
+
+        Args:
+            accounts: List of account configurations with strategy instances
+        """
+        self._accounts = accounts
+
+    @property
+    def bound_accounts(self) -> list[HasStrategy]:
+        """Read-only snapshot of the bound accounts.
+
+        Exposed for :class:`RegimeAwareRouter` (story 11.7) which iterates
+        the same account list to apply regime filtering before delegating
+        per-account dispatch back to :meth:`_route_bar_to_account`.
+        """
+        return list(self._accounts)
+
+    def route_bar(self, bar: Bar) -> None:
+        """Route bar data to matching account strategies.
+
+        Routes bar to all active accounts whose signal filter
+        allows the bar's symbol.
+
+        Args:
+            bar: Bar data to route
+        """
+        for account in self._accounts:
+            self._route_bar_to_account(account, bar)
+
+    def _route_bar_to_account(self, account: HasStrategy, bar: Bar) -> None:
+        """Dispatch one bar to a single account's strategy.
+
+        Stable contract for :class:`RegimeAwareRouter` (story 11.7): the
+        wrapper applies regime filtering across accounts and calls this
+        method for each account that should receive the bar, leaving
+        symbol-filter, strategy-instance, and exception handling here.
+        """
+        if not self._should_route_to_account(account, bar.symbol):
+            return
+
+        strategy = getattr(account, 'strategy_instance', None)
+        if strategy is None:
+            return
+
+        try:
+            strategy.on_bar(bar)
+        except Exception as e:
+            logger.error(
+                "Error routing bar to strategy %s: %s",
+                account.strategy,
+                e,
+            )
+
+    async def route_bar_async(self, bar: Bar) -> None:
+        """Async version of bar routing.
+
+        Args:
+            bar: Bar data to route
+        """
+        self.route_bar(bar)
+
+    def route_tick(self, tick) -> None:
+        """Route tick data to matching account strategies.
+
+        Routes tick to all active accounts whose signal filter
+        allows the tick's symbol.
+
+        Args:
+            tick: Tick data to route (with .symbol attribute)
+        """
+        symbol = getattr(tick, 'symbol', None)
+        if symbol is None:
+            return
+
+        for account in self._accounts:
+            if not self._should_route_to_account(account, symbol):
+                continue
+
+            strategy = getattr(account, 'strategy_instance', None)
+            if strategy is None:
+                continue
+
+            try:
+                if hasattr(strategy, 'on_tick'):
+                    strategy.on_tick(tick)
+            except Exception as e:
+                logger.error(
+                    "Error routing tick to strategy %s: %s",
+                    account.strategy,
+                    e,
+                )
+
+    async def route_tick_async(self, tick) -> None:
+        """Async version of tick routing.
+
+        Args:
+            tick: Tick data to route
+        """
+        self.route_tick(tick)
+
+    def _should_route_to_account(self, account: HasStrategy, symbol: str) -> bool:
+        """Check if data should be routed to an account.
+
+        Args:
+            account: Account to check
+            symbol: Symbol of the data
+
+        Returns:
+            True if data should be routed to this account
+        """
+        # Skip inactive accounts
+        if account.status != "active":
+            return False
+
+        # Get signal filter
+        signal_filter = getattr(account, 'signal_filter', None)
+        if signal_filter is None:
+            return True  # No filter = allow all
+
+        # Check symbol filter
+        allowed_symbols = getattr(signal_filter, 'symbols', [])
+        if not allowed_symbols:
+            return True  # Empty = allow all
+
+        # Normalize and compare (case-insensitive)
+        symbol_upper = symbol.upper()
+        allowed_upper = [s.upper() for s in allowed_symbols]
+
+        if symbol_upper not in allowed_upper:
+            logger.debug(
+                "Filtered data for %s - not in account %s filter (allowed: %s)",
+                symbol,
+                getattr(account, 'id', 'unknown'),
+                allowed_symbols,
+            )
+            return False
+
+        return True
+
+    def get_bar_callback(self) -> Callable[[Bar], None]:
+        """Get sync callback for bar routing.
+
+        Returns:
+            Callback function for bar routing
+        """
+        return self.route_bar
+
+    def get_bar_callback_async(self) -> Callable[[Bar], Awaitable[None]]:
+        """Get async callback for bar routing.
+
+        Returns:
+            Async callback function for bar routing
+        """
+        return self.route_bar_async
+
+    def get_tick_callback(self) -> Callable:
+        """Get sync callback for tick routing.
+
+        Returns:
+            Callback function for tick routing
+        """
+        return self.route_tick
+
+    def get_tick_callback_async(self) -> Callable:
+        """Get async callback for tick routing.
+
+        Returns:
+            Async callback function for tick routing
+        """
+        return self.route_tick_async

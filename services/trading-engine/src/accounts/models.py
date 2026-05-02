@@ -1,0 +1,240 @@
+"""Account Pydantic models for trading account configuration.
+
+This module defines the data models for:
+- MT5 connection configuration
+- Signal filtering rules
+- Individual account configuration
+- Collection of multiple accounts
+
+All models use Pydantic v2 for validation and serialization.
+"""
+
+from enum import Enum
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Multi-account configuration constants
+MAX_ACCOUNTS = 5
+"""Maximum number of trading accounts supported."""
+
+
+class AccountType(str, Enum):
+    """Trading account type enumeration."""
+
+    PROP_FIRM = "prop_firm"
+    PERSONAL = "personal"
+    DEMO = "demo"
+
+
+class MT5Config(BaseModel):
+    """MT5 connection configuration.
+
+    Attributes:
+        server: MT5 broker server name
+        login: MT5 account login number (must be positive)
+        password_env: Environment variable name containing the MT5 password
+        zmq_host: ZeroMQ bridge host for this account
+        zmq_tick_port: Port for tick subscription (SUB socket)
+        zmq_order_port: Port for order publication (PUB socket)
+    """
+
+    server: str = Field(..., description="MT5 server name")
+    login: int = Field(..., gt=0, description="MT5 login number")
+    password_env: str = Field(..., description="Environment variable name for password")
+    zmq_host: str = Field(default="localhost", description="ZeroMQ bridge host")
+    zmq_tick_port: int = Field(default=5556, ge=1024, le=65535, description="Port for tick subscription")
+    zmq_order_port: int = Field(default=5557, ge=1024, le=65535, description="Port for order publication")
+
+    @field_validator("password_env")
+    @classmethod
+    def validate_password_env(cls, v: str) -> str:
+        """Validate password_env is uppercase with underscores only."""
+        if not v.isupper() or not v.replace("_", "").isalnum():
+            raise ValueError("password_env must be uppercase with underscores only")
+        return v
+
+
+class SignalFilter(BaseModel):
+    """Signal filtering configuration.
+
+    Controls which trading signals are processed for an account.
+
+    Attributes:
+        symbols: List of allowed trading symbols (empty = all allowed)
+        sessions: List of allowed trading sessions (empty = all allowed)
+        max_spread_pips: Maximum allowed spread in pips (None = no limit)
+    """
+
+    symbols: list[str] = Field(default_factory=list, description="Allowed symbols")
+    sessions: list[str] = Field(default_factory=list, description="Allowed sessions")
+    max_spread_pips: Optional[float] = Field(
+        default=None, ge=0, description="Maximum spread in pips"
+    )
+
+
+class AccountConfig(BaseModel):
+    """Single trading account configuration.
+
+    Represents a complete trading account setup including MT5 connection,
+    strategy assignment, and compliance rules.
+
+    Rule-source options (pick one — validated by ``validate_rules_source``):
+
+    1. **Firm-bound (Epic 9+)** — ``firm_id`` + ``product_id`` + ``phase``
+       (+ optional ``rule_overrides``). Resolved against :class:`FirmRegistry`
+       to load a ``FirmProfile`` → ``AccountProduct`` → ``AccountPhase``.
+    2. **Personal** — ``rules_file`` pointing at a custom YAML.
+    3. **Demo** — no rule source required.
+
+    Story 10.12 — the legacy preset path (``prop_firm: <name>`` pointing
+    at a built-in preset YAML) was removed. Operators migrating from the
+    legacy path before Epic 9 should use firm bindings published under
+    ``configs/firms/*.yaml``.
+
+    Attributes:
+        id: Unique account identifier (alphanumeric with dashes/underscores)
+        name: Human-readable account name
+        type: Account type (prop_firm, personal, demo)
+        firm_id: FirmRegistry firm id (Epic 9)
+        product_id: FirmRegistry product id (Epic 9)
+        phase: Product phase id (Epic 9)
+        rule_overrides: Per-account rule overrides; merged + safety-guarded
+            at rule-assignment time by ``rules.override_merger`` (Epic 9 P0.16).
+            Account overrides may only tighten guarded block thresholds.
+        rules_file: Path to custom rules file
+        mt5: MT5 connection configuration
+        strategy: Strategy name to execute on this account
+        strategy_params: Strategy-specific parameters
+        signal_filter: Signal filtering rules
+        status: Account status (active, paused, stopped)
+    """
+
+    id: str = Field(..., min_length=1, description="Unique account identifier")
+    name: str = Field(..., min_length=1, description="Human-readable name")
+    type: AccountType = Field(..., description="Account type")
+    firm_id: Optional[str] = Field(default=None, description="FirmRegistry firm id")
+    product_id: Optional[str] = Field(default=None, description="FirmRegistry product id")
+    phase: Optional[str] = Field(default=None, description="FirmRegistry phase id")
+    rule_overrides: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Per-account rule overrides keyed by rule_type. Merged against "
+            "the product + phase baseline at rule-assignment time; account "
+            "overrides may only tighten guarded block thresholds."
+        ),
+    )
+    rules_file: Optional[str] = Field(default=None, description="Custom rules file path")
+    mt5: MT5Config
+    strategy: str = Field(..., min_length=1, description="Strategy name")
+    strategy_params: dict[str, Any] = Field(default_factory=dict, description="Strategy parameters")
+    signal_filter: SignalFilter = Field(default_factory=SignalFilter)
+    status: str = Field(default="active", pattern="^(active|paused|stopped)$")
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        """Validate account ID format (alphanumeric with dashes/underscores)."""
+        if not v.replace("-", "").replace("_", "").isalnum():
+            raise ValueError("id must be alphanumeric with dashes/underscores only")
+        return v
+
+    @field_validator("firm_id", mode="before")
+    @classmethod
+    def normalize_firm_id(cls, v: Optional[str]) -> Optional[str]:
+        """Normalize firm_id to lowercase for case-insensitive registry lookup."""
+        if v is not None:
+            return v.lower()
+        return v
+
+    @model_validator(mode="after")
+    def validate_rules_source(self) -> "AccountConfig":
+        """Validate that non-demo accounts have exactly one rule source.
+
+        Valid rule sources (pick one):
+          * Firm-bound: ``firm_id`` + ``product_id`` + ``phase`` (Epic 9+)
+          * Personal: ``rules_file``
+          * (Demo accounts need none.)
+
+        The two sources are mutually exclusive to prevent ambiguity about
+        which rule set wins. Story 10.12 dropped the legacy preset
+        source (``prop_firm`` field).
+        """
+        sources = []
+        if self.firm_id is not None or self.product_id is not None or self.phase is not None:
+            sources.append("firm")
+        if self.rules_file is not None:
+            sources.append("personal")
+
+        if len(sources) > 1:
+            raise ValueError(
+                f"Account '{self.id}' must specify exactly one rule source; "
+                f"got {sources}. Use firm_id+product_id+phase OR rules_file."
+            )
+
+        if self.type != AccountType.DEMO and not sources:
+            raise ValueError(
+                f"Account '{self.id}' of type '{self.type.value}' must have a rule source: "
+                "firm_id+product_id+phase or rules_file."
+            )
+
+        if self.type == AccountType.DEMO and sources:
+            raise ValueError(
+                f"Account '{self.id}' is type 'demo' but specifies rule sources {sources}; "
+                "demo accounts must have no rule source."
+            )
+
+        if "firm" in sources:
+            missing = [
+                f for f, v in
+                [("firm_id", self.firm_id), ("product_id", self.product_id), ("phase", self.phase)]
+                if not v
+            ]
+            if missing:
+                raise ValueError(
+                    f"Account '{self.id}' firm binding is incomplete: missing {missing}. "
+                    "firm_id, product_id, and phase are all required together."
+                )
+
+        if "firm" not in sources and self.rule_overrides:
+            raise ValueError(
+                f"Account '{self.id}' sets rule_overrides but is not firm-bound. "
+                "rule_overrides only apply when firm_id+product_id+phase are set."
+            )
+
+        return self
+
+
+class AccountsConfig(BaseModel):
+    """Root configuration containing all trading accounts.
+
+    Attributes:
+        accounts: List of account configurations
+    """
+
+    accounts: list[AccountConfig] = Field(default_factory=list)
+
+    @field_validator("accounts")
+    @classmethod
+    def validate_accounts(cls, v: list[AccountConfig]) -> list[AccountConfig]:
+        """Validate account list constraints (max count, unique IDs).
+
+        Validation order:
+        1. Max accounts check (run FIRST - more common user error)
+        2. Unique ID check with AC3-compliant error format
+        """
+        # 1. Check max accounts FIRST (more common user error)
+        if len(v) > MAX_ACCOUNTS:
+            raise ValueError(
+                f"Maximum {MAX_ACCOUNTS} accounts supported. "
+                f"Got {len(v)} accounts. Remove {len(v) - MAX_ACCOUNTS} account(s)."
+            )
+
+        # 2. Check unique IDs with AC3-compliant error format
+        seen: set[str] = set()
+        for acc in v:
+            if acc.id in seen:
+                raise ValueError(f"Duplicate account ID: {acc.id}")
+            seen.add(acc.id)
+
+        return v

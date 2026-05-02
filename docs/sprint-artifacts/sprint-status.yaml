@@ -1,7 +1,6 @@
-# Sprint Status - Trading Engine
-# generated: 2025-12-03
+# generated: 2026-01-03 (Epic 5 contexted with Redis/NautilusTrader research via Context7)
 # project: Sandboxed
-# project_key: trading-engine
+# project_key: sandboxed
 # tracking_system: file-system
 # story_location: {project-root}/docs/sprint-artifacts
 
@@ -9,114 +8,202 @@
 # ==================
 # Epic Status:
 #   - backlog: Epic exists in epic file but not contexted
-#   - contexted or in-progress
-#   - done: Epic completed
+#   - contexted: Epic tech context created (required before drafting stories)
 #
 # Story Status:
 #   - backlog: Story only exists in epic file
-#   - drafted: Story file created in stories folder by *create-story
-#   - ready-for-dev: Draft approved and story context created by *story-ready
-#   - in-progress: Developer actively working on implementation by *dev-story
-#   - review: Implementation complete, ready for review by *code-review
-#   - done: Story completed by *story-done
+#   - drafted: Story file created in stories folder
+#   - ready-for-dev: Draft approved and story context created
+#   - in-progress: Developer actively working on implementation
+#   - review: Under SM review (via code-review workflow)
+#   - done: Story completed
 #
 # Retrospective Status:
 #   - optional: Can be completed but not required
-#   - completed: Retrospective has been done by *retrospective
+#   - completed: Retrospective has been done
 #
 # WORKFLOW NOTES:
 # ===============
-# - Epics should be marked `in-progress` before stories can be marked beyond `backlog`
-# - SM typically drafts next story ONLY after previous one is 'done' to incorporate learnings
-# - Dev moves story to 'review', dev reviews, then Dev moves to 'done'
+# - Epics should be 'contexted' before stories can be 'drafted'
+# - Stories can be worked in parallel if team capacity allows
+# - SM typically drafts next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', SM reviews, then Dev moves to 'done'
 
-generated: 2025-12-03
+generated: 2025-12-20
 project: Sandboxed
-project_key: trading-engine
+project_key: sandboxed
 tracking_system: file-system
 story_location: "{project-root}/docs/sprint-artifacts"
 
 development_status:
-  # Epic 1: Foundation & Project Setup
-  epic-1: backlog
-  1-1-initialize-project-structure: backlog
-  1-2-configuration-system-with-validation: backlog
-  1-3-structured-logging-setup: backlog
-  1-4-cli-entry-point: backlog
-  1-5-docker-configuration: backlog
+  # Epic 1: Foundation & Infrastructure (9 stories)
+  epic-1: contexted
+  1-1-project-structure-and-monorepo-setup: done
+  1-2-docker-compose-infrastructure-stack: done
+  1-3-timescaledb-schema-initialization: done
+  1-4-environment-configuration-setup: done
+  1-5-makefile-build-commands: done
+  1-6-trading-engine-service-scaffold: done
+  1-7-mt5-bridge-service-scaffold: done
+  1-8-notification-service-scaffold: done
+  1-9-docker-compose-full-stack: done
   epic-1-retrospective: optional
 
-  # Epic 2: Adapters & External Integration
-  epic-2: backlog
-  2-1-redis-data-adapter: backlog
-  2-2-timescaledb-adapter: backlog
-  2-3-zeromq-execution-adapter: backlog
-  2-4-mock-adapters-for-testing: backlog
-  2-5-data-quality-validation: backlog
+  # Epic 2: Single Account Trading Core (10 stories)
+  epic-2: contexted
+  2-1-account-model-and-configuration: done
+  2-2-account-lifecycle-management-start-stop: done
+  2-3-mt5-bridge-zeromq-server: done
+  2-4-trading-engine-zeromq-adapter: done
+  2-5-order-execution-flow: done
+  2-6-redis-market-data-subscription: done
+  2-7-basic-strategy-framework: done
+  2-8-ma-crossover-strategy-implementation: done
+  2-9-signal-filtering-by-symbol: done
+  2-10-cli-engine-commands: done
   epic-2-retrospective: optional
 
-  # Epic 3: FTMO Compliance Engine
-  epic-3: backlog
-  3-1-yaml-rule-configuration-loader: backlog
-  3-2-daily-loss-validator: backlog
-  3-3-total-drawdown-validator: backlog
-  3-4-profit-target-trading-days-tracker: backlog
-  3-5-multi-layer-compliance-validation: backlog
-  3-6-immutable-audit-logger: backlog
-  3-7-emergency-stop-mechanism: backlog
+  # Epic 3: Multi-Account Management (7 stories)
+  epic-3: contexted
+  3-1-multi-account-configuration: done
+  3-2-account-manager-multi-account-orchestration: done
+  3-3-signal-router-multi-account-distribution: done  
+  3-4-per-account-mt5-connections: done
+  3-5-per-account-risk-isolation: done
+  3-6-per-account-equity-and-balance-tracking: done
+  3-7-account-rule-assignment: done
   epic-3-retrospective: optional
 
-  # Epic 4: Strategy Framework
-  epic-4: backlog
-  4-1-ftmo-base-strategy-class: backlog
-  4-2-ftmo-position-sizer: backlog
-  4-3-ma-crossover-example-strategy: backlog
-  4-4-multi-symbol-management: backlog
-  4-5-trade-decision-logging: backlog
+  # Epic 4: FTMO Compliance Rule Engine (8 stories)
+  epic-4: done
+  4-1-rule-engine-framework: done
+  4-2-daily-loss-limit-rule: done
+  4-3-max-drawdown-rule: done
+  4-4-position-size-limit-rule: done
+  4-5-ftmo-preset-configuration: done
+  4-6-rule-validation-before-trade: done
+  4-7-real-time-pnl-tracking: done
+  4-8-rule-check-audit-logging: done
   epic-4-retrospective: optional
 
-  # Epic 5: Backtesting & Validation
-  epic-5: backlog
-  5-1-nautilus-backtest-integration: backlog
-  5-2-dynamic-spread-model: backlog
-  5-3-slippage-simulation: backlog
-  5-4-latency-simulation: backlog
-  5-5-walk-forward-analysis: backlog
-  5-6-validation-report-generator: backlog
+  # Epic 5: State Persistence & Crash Recovery (7 stories)
+  epic-5: contexted
+  5-1-redis-state-snapshots: done
+  5-2-crash-detection-and-recovery-initiation: done
+  5-3-position-reconciliation-with-mt5: done
+  5-4-daily-pnl-recalculation: done
+  5-5-trading-resume-after-recovery: done
+  5-6-graceful-shutdown-with-state-persistence: done
+  5-7-timescaledb-cold-storage-backup: done 
   epic-5-retrospective: optional
 
-  # Epic 6: State Management & Recovery
-  epic-6: backlog
-  6-1-real-time-state-cache: backlog
-  6-2-redis-state-snapshots: backlog
-  6-3-crash-recovery-manager: backlog
-  6-4-broker-state-reconciliation: backlog
-  6-5-trade-persistence: backlog
+  # Epic 6: Notifications & Emergency Control (6 stories)
+  epic-6: contexted
+  6-1-notification-service-setup: done
+  6-2-redis-alert-subscription: done
+  6-3-trade-execution-notifications: done
+  6-4-rule-violation-alerts: done
+  6-5-emergency-stop-command: done
+  6-6-resume-trading-command: done
   epic-6-retrospective: optional
 
-  # Epic 7: Risk Management & Safety
-  epic-7: backlog
-  7-1-duplicate-order-prevention: backlog
-  7-2-connection-health-monitor: backlog
-  7-3-automatic-reconnection: backlog
-  7-4-fail-safe-defaults: backlog
-  7-5-aggregate-exposure-tracking: backlog
+  # Epic 7: Audit & Compliance Logging (6 stories)
+  epic-7: done
+  7-1-trade-execution-audit-logging: done
+  7-2-comprehensive-audit-log-table: done
+  7-3-rule-violation-tracking: done
+  7-4-daily-account-snapshots: done
+  7-5-cli-audit-query-commands: done
+  7-6-compliance-report-generation: done
   epic-7-retrospective: optional
 
-  # Epic 8: Paper Trading & CLI
-  epic-8: backlog
-  8-1-paper-trading-mode: backlog
-  8-2-mode-indication-in-logs-and-alerts: backlog
-  8-3-paper-vs-backtest-comparison: backlog
-  8-4-live-trading-mode: backlog
-  8-5-hot-reload-configuration: backlog
+  # Epic 8: Strategies & Backtesting Framework (10 stories)
+  epic-8: done
+  8-0-foundation-mixins-sizer-deps: done
+  8-1-indicator-module: done
+  8-2-backtest-engine-metrics-ftmo-actor: done
+  8-3-backtest-data-loader: done
+  8-4-supertrend-strategy: done
+  8-5-donchian-breakout-strategy: done
+  8-6-rsi-bollinger-mean-reversion: done
+  8-7-opening-range-breakout: done
+  8-8-walk-forward-parameter-sweep-cli: done
+  8-9-documentation: done
   epic-8-retrospective: optional
 
-  # Epic 9: Testing & Quality
-  epic-9: backlog
-  9-1-unit-test-framework: backlog
-  9-2-integration-test-suite: backlog
-  9-3-historical-scenario-replay: backlog
-  9-4-backtest-as-integration-test: backlog
-  9-5-zero-false-negatives-validation: backlog
+  # Epic 9: Multi-firm Foundation (16 tasks P0.1–P0.16; P0.9 dropped)
+  # Commit → task mapping: story 9.X commit = P0.X task
+  epic-9: done
+  # done — shipped 2026-04-26
+  9-1-firm-profile-dataclasses: done          # e732842 2026-04-26 FirmProfile/AccountProduct/AccountPhase frozen dataclasses
+  9-2-firm-registry-yaml-loader: done         # ca7895a 2026-04-26 FirmRegistry load from configs/firms/*.yaml
+  9-3-account-model-firm-binding: done        # 8f4bb35 2026-04-26 Account firm_id+product_id+phase coexistence + migration 009
+  9-4-ftmo-to-propfirm-rename: done           # f3357a5 2026-04-26 FTMO* → PropFirm* hard cutover + migration 010
+  # done — shipped 2026-04-27
+  9-5-timezone-aware-daily-reset: done        # 467a886 2026-04-27 Timezone-aware daily reset (fixes Review 1 C1)
+  9-6-dd-calculation-variant: done            # 7e1b66c 2026-04-27 MaxDrawdownRule equity_peak vs balance_based
+  9-7-consistency-rule: done                  # af142ba 2026-04-27 ConsistencyRule + DailyProfitHistory + backtest parity
+  9-8-weekly-target-rule: done               # d980183 2026-04-27 WeeklyTargetRule (The5ers Bootstrap)
+  9-9-min-holding-duration: dropped          # P0.9 dropped — no MVP product requires it
+  9-10-accounts-promote-cli: done            # faa5cac 2026-04-27 accounts promote CLI + audit entry
+  # backlog — not yet started
+  9-11-migrate-firm-yaml-profiles: done      # 0ca52f7 2026-04-28 configs/firms/ftmo.yaml + the5ers.yaml (3 products) + 30 integration tests
+  9-12-order-gateway-protocol: done          # a13f936 2026-04-28 OrderGateway Protocol (6 members) + ZmqAdapter + ValidatedZmqAdapter retrofit
+  9-13-commission-profile-per-firm: done      # 35d6bcf 2026-04-28 CommissionProfile per-firm + backtest venue config
+  9-14-e2e-ftmo-the5ers-test: done           # 3468dda 2026-04-28 E2E test FTMO + 3 The5ers products in one engine (22 tests)
+  9-15-consistency-rule-latency-test: done   # P0.15 — integration test consistency rule latency < 10ms (4 tests, worst p99 0.19ms @ 365 days)
+  9-16-rule-overrides-merge-guard: done      # P0.16 — per-account rule_overrides merge + safety guard (39 tests; product → phase → account; no loosening)
   epic-9-retrospective: optional
+
+  # Epic 10: Operational Hardening (15 stories — 5 phases)
+  # Source: docs/architecture-review-2026-04-30.md (10 findings D1-D10)
+  # Context: docs/epic-10-context.md
+  # Goal: live trading readiness (audit double-entry, live orchestrator, kill-switch, news blackout)
+  epic-10: done
+  # Phase 1 — Architectural foundation (precondition)
+  10-1-engine-split: done                     # XL — split TradingEngine god-object → RecoveryOrchestrator + LiveOrchestrator + EngineLifecycle (D1+D5); 31 unit tests, 96% coverage; AC2/AC3/AC4 interface tightening deferred to 10.2 DI container
+  10-2-di-container: done                     # M  — EngineConfig DI container with feature flags + LockLostMediator + collaborator bundles; resolves all three TODO(10.2) deviations from 10.1; 35 unit tests, 95% coverage
+  # Phase 2 — Audit double-entry & race fix
+  10-3-audit-writer-bounded-queue: done        # L  — AuditWriter bounded asyncio.Queue + worker; log_sync/log_async surfaces; drain wired into GracefulShutdown._persist_final_state; double-entry call sites migrated (execution_service trade fill/close, lifecycle engine_start/stop/lock_lost, recovery_orchestrator, daily_snapshot_service); 21 audit_writer tests + full unit suite 2465 passing (D3); committed 4e0c76d 2026-05-01
+  10-4-atomic-validate-send: done              # M  — atomic_reserve.lua + atomic_release.lua + ExposureReservation Python wrapper; integrated into ValidatedZmqAdapter via opt-in max_lots_provider; release after PnL update; wired into EngineConfig + EngineLifecycle.run; 15 reservation + 14 adapter atomic tests; full unit suite 2494 passing (D6); committed 6bfd547 2026-05-01
+  # Phase 3 — Live trading P0 blockers
+  10-5a-live-orchestrator-foundation: done    # part of XL 10.5 — LiveAccountSession state machine + per-account lifecycle (start/stop/add/remove/reload) + shared build_compliance_actor factory + crash isolation (pause + node_crashed audit) + sync health() snapshot; 25 new tests; full unit suite 2519 passing; committed 69694a1 2026-05-01
+  10-5b-redis-data-client: done                # part of XL 10.5 — RedisDataClient Nautilus subclass; bar_translator (timeframe parse + Pydantic Bar → Nautilus Bar) + run_redis_bar_listener (pubsub drain + filter + error isolation); 33 new tests; full unit suite 2574 passing (AC3); committed 9f67854 2026-05-01
+  10-5c-zmq-execution-client: done             # part of XL 10.5 — ZmqExecutionClient Nautilus subclass; order_translator (Nautilus → internal Order, MARKET only) + submit_dispatcher (validate/send/translate→Nautilus events: filled/rejected/denied/timeout); 22 tests; full unit suite 2541 passing (AC4); committed b548238 2026-05-01
+  10-5d-live-compliance-actor: done            # part of XL 10.5 — equity_provider seam threads PnLTrackerRegistry into PropFirmComplianceActor (live on_bar reads engine equity, not Nautilus Portfolio); per-account closures bound to account_id with cross-account ValueError guard; backtest path preserved (provider=None falls back to portfolio); 17 new tests + 22-test multi_firm_e2e parity baseline unchanged; full unit suite 2786 passing (AC5); committed 9d71006 2026-05-01
+  10-5e1-orchestrator-wiring-and-health: done  # part of XL 10.5 — _build_session_components resolves RuleEngine + PropFirmComplianceActor + bar_subscriptions per account; health surface push to Redis (5s SETEX TTL 30s); rule_assignment_service wired through EngineConfig + builder; 11 new tests; full unit suite 2585 passing (AC1 partial + AC7); committed 1348253 2026-05-01
+  10-5e2-trading-node-integration: done         # part of XL 10.5 (scope C-prime: factory + lifecycle + crash isolation only) — node_factory.build_account_trading_node constructs Nautilus TradingNode per account with closure-based RedisDataClient + ZmqExecutionClient factories (LiveDataClientFactory/LiveExecClientFactory subclasses), resolves strategy via backtest registry, attaches PropFirmComplianceActor; LiveOrchestrator gains validated_adapter + node_factory params, _build_trading_node_if_ready helper, _launch_node_if_present spawns run_async() as tracked task with done-callback crash watcher, _handle_node_run_crash routes runtime crash through existing _isolate_failed_session (AC8); _teardown_session_components calls stop_async() (5s wait_for) + cancel + dispose (idempotent vs is_disposed); _pending_isolation_tasks set keeps crash-isolation tasks alive; 16 new tests (9 factory + 7 lifecycle); full unit suite 2804 + multi_firm_e2e 22 passing (AC1 full + AC8 full); reload subscriber + CLI publish (AC6) deferred to follow-up 10.5e3; committed 841184e 2026-05-02
+  10-5e3-reload-subscriber: done               # part of XL 10.5 — Redis pub/sub `account:phase-changed:*` listener + CLI promote publish (AC6). LiveOrchestrator psubscribes pattern on start, drains pmessages → reload_account; failure-isolated (malformed channel, unknown account, reload exception all keep listener alive). publish_phase_change_event helper in phase_promotion.py emits JSON payload (account_id+from/to_phase+correlation_id+ts); CLI accounts promote calls it best-effort after audit DB write, prints subscriber count or offline note. CLI helper has try/finally so a connect failure runs cleanup; runtime guards switched from assert to RuntimeError (-O safe). 16 new tests (12 listener + 4 publisher incl. psubscribe-failure isolation); full unit suite 2820 + multi_firm_e2e 22 passing; committed bde7c2e 2026-05-02
+  10-5f-backtest-parity-and-e2e: done          # part of XL 10.5 — full Nautilus TradingNode E2E with fakeredis + stub ValidatedZmqAdapter + test_emit strategy. 6 AC9 tests cover orchestrator boot/bar dispatch/order routing/compliance actor wiring/BLOCK path/graceful shutdown. AC10 multi_firm_e2e parity unchanged across the entire 10.5 super-story. fakeredis[lua] added to dev deps. Two latent bugs surfaced + fixed: RedisDataClient missing _subscribe_bars/_unsubscribe_bars overrides (data engine crashed on first strategy.subscribe_bars), ZmqExecutionClient missing reconciliation report stubs (LiveExecutionClient base raises NotImplementedError → reconciliation hangs); node_factory client_name now sanitises "-" → "_" because Nautilus's TradingNodeBuilder splits the dict key on "-" (was registering factories under wrong name). reviewer fixes: stub reports promoted from silent-empty to logged-WARNING (phantom-flat risk visible in logs); _subscribe_bars warns when strategy bar_type not in psubscribed set; asyncio.get_running_loop instead of deprecated get_event_loop. 6 new tests + 9 unit (factory key fix); full unit suite 2820 + multi_firm_e2e 22 + e2e_live 6 passing; committed 8fdca5a 2026-05-02
+  10-6-strategy-validation-gate-audit: done     # S  — audit confirms 0 bypasses across 5 bracket strategies + ma_crossover; single seam at base_strategy._submit_bracket_via_factory; 8 AST-based regression-guard tests; full audit doc at docs/sprint-artifacts/10-6-validation-gate-audit.md (D7#2); committed ff280e0 2026-05-01
+  10-7-kill-switch-flat-positions: done       # M  — EmergencyStopHandler subscribes to emergency:stop Redis channel; for each active account: query_positions → opposite-side market close per position → pause_account → publish emergency:stop_confirmation; sync audit rows (triggered+complete); wired into EngineConfig.feature_flags.emergency_stop + lifecycle.start/stop; 30 new tests (15 builder + 15 handler); full unit suite 2647 passing (D7#4); committed e462fe0 2026-05-01
+  10-8-news-blackout-rule: done                # M  — CalendarEvent + EventIndex (bisect-based active_events_at) + ForexFactory XML parser (tolerant) + EconomicCalendarService (daily fetch + Redis 26h TTL cache + static fallback + background refresh loop) + NewsBlackoutRule (BaseRule, registered in parser, late-binds snapshot_provider, fail-open WARN when calendar unavailable); 74 new tests; full unit suite 2721 passing (D7#5); committed 12242a6 2026-05-01
+  # Phase 4 — Backtest parity + infra debt
+  10-9-backtest-spread-parity: done            # M (spread only) — SpreadAwareFeeModel(FeeModel) Nautilus subclass charges per_lot_usd + spread_pips × pip_value × fill_qty per fill; commission_profile_to_fee_model dispatches to SpreadAwareFeeModel when spread_pips non-empty (legacy PerContractFeeModel preserved when only per-lot); per-symbol pip_value mapping with default 10 USD/pip/lot; 26 new tests; full unit suite 2747 passing. Swap_long/short still deferred — needs Nautilus SimulationModule for rollover-time accrual; tracked as 10.9b follow-up (D8); committed ef2ac8b 2026-05-01
+  10-10-alembic-bootstrap: done                # M  — alembic.ini + env.py (DATABASE_URL resolution, postgres+asyncpg→postgres coercion) + script template + 6 ported revisions (005-010) with op.execute SQL + sane downgrade story (NotImplementedError for hypertable destructive paths); 24 tests verify chain integrity + per-revision content + raw-SQL parity; full unit suite 2609 passing; committed dd6702a 2026-05-01
+  # Phase 5 — Legacy cleanup (gated by 10.11 ops cutover sign-off)
+  10-11-migration-audit-cli: done              # S  — `accounts audit-rules-source [--strict] [--json]` CLI; pure classify_accounts via RuleAssignment.from_account_config; per-account roster + aggregate counts + prop_firm_legacy_count; --strict exits 1 when any prop_firm-type account still on preset_legacy (gates 10.12-10.14); 22 tests; full unit suite 2769 passing
+  10-12-drop-prop-firm-field: done            # S  — AccountConfig.prop_firm + VALID_PROP_FIRMS + validate_prop_firm_preset + normalize_prop_firm dropped; validate_rules_source rewritten (only firm-bound + personal); RuleAssignment.from_account_config preset branch removed; audit_rules_source dropped preset_legacy classification; configs/accounts.yaml.example migrated to firm-bound; ~80 affected tests rewired (firm_registry fixture loaded from configs/firms in 4 integration files); committed ae2e10d 2026-05-02
+  10-13-drop-preset-yaml: done                # S  — src/rules/preset_loader.py deleted; src/rules/presets/*.yaml relocated to src/backtesting/presets/ (backtest-only consumer); RuleAssignmentService preset branch raises NotImplementedError; tests/unit/test_rule_assignment.py preset class deleted; tests/integration/test_prop_firm_preset.py deleted; remaining test files use _load_preset_rules helper that reads backtest-local YAML + RuleParser; committed aff1de1 2026-05-02
+  10-14-drop-prop-firm-id-schema: done        # S  — alembic revision 011_drop_prop_firm_legacy + raw SQL mirror; pre-flight gate refuses if any accounts.prop_firm_id IS NOT NULL; LOCK TABLE accounts SHARE ROW EXCLUSIVE prevents race; audit_logs INSERT before destructive DDL (financial-table audit discipline); DROP TABLE without CASCADE; downgrade NotImplementedError → pg_dump runbook. init.sql cleaned of prop_firms/prop_firm_id. 29 alembic tests (added head=011, downgrade-raises, init.sql consistency); database-reviewer + security-reviewer dual signoff applied (HIGH-1 audit_logs insert + HIGH-2 nested transaction fix); committed 56b7a62 2026-05-02
+  10-15-gitignore-compliance-reports: done     # XS — .gitignore patterns added; one stale report (2026-02-27, accidentally committed in 7.6) untracked via git rm --cached (D9)
+  # Epic 10 — DONE 2026-05-02 (15/15 stories shipped); only 10.9b swap accrual remains as a follow-up tracked outside the epic.
+  epic-10-retrospective: optional
+
+  # Epic 11: Market Regime Classifier — Phase 1 (rule-based) (7 stories — 4 sub-phases)
+  # Source: docs/research/regime-classifier.md + docs/research/regime-classifier-architecture.md
+  # Context: docs/epic-11-context.md
+  # Goal: route bars to strategies matching market regime (TRENDING_UP/DOWN, RANGING, HIGH_VOL kill-switch)
+  epic-11: done
+  # Phase 11.A — Foundation (indicators + config)
+  11-1-regime-indicators-and-features: done     # L  — BB width %, realized vol, EMA slope indicators + RegimeState enum + RegimeFeatures + FeatureExtractor (rolling 200 bars)
+  11-2-regime-config-schema: done               # M  — RegimeConfig/RegimeThresholds/InstrumentRegimeConfig pydantic + extend FirmProfile + ftmo.yaml regime_classifier block (enabled:false)
+  # Phase 11.B — Classifier core
+  11-3-rule-based-classifier: done              # M  — RuleBasedRegimeClassifier.decide() pure + RegimeDecision dataclass; priority HIGH_VOL → trending → ranging → UNKNOWN
+  11-4-hysteresis-filter: done                  # M  — HysteresisFilter 2-bar confirmation per-BarType state; flicker prevention
+  # Phase 11.C — Audit + routing primitives
+  11-5-regime-audit-adapter: done               # M  — RegimeAuditAdapter → AuditEntry via existing AuditLogger (event_type=regime_decision); security-reviewer gate
+  11-6-strategy-regime-registration: done       # S  — register_strategy(regimes=) decorator + StrategyRegistry._strategy_regimes; backwards compat (missing kwarg = always-allow)
+  # Phase 11.D — Integration
+  11-7-regime-aware-router-integration: done    # XL — RegimeAwareRouter wraps StrategyDataRouter + factory + wire account_binding.py:40,136 behind feature flag + add regimes=[...] to 6 strategies + E2E CSV fixtures
+  epic-11-retrospective: optional

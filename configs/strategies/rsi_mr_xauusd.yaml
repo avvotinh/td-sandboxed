@@ -1,0 +1,25 @@
+# RSI Mean Reversion — XAUUSD M15.
+#
+# Target regime: ranging / sideways markets. Avoid in strong trends where
+# RSI can stay overbought/oversold for extended periods.
+#
+# Note: Nautilus RSI returns 0–1 scale (not 0–100). 0.3 = 30, 0.7 = 70.
+
+strategy: rsi_mean_reversion
+instrument_id: XAUUSD.BROKER
+bar_type: XAUUSD.BROKER-15-MINUTE-LAST-EXTERNAL
+trade_size: "0.10"   # ignored — sized by RiskBasedPositionSizer
+account_id: ftmo-main
+
+rsi_period: 14
+oversold: 0.3
+overbought: 0.7
+exit_neutral: 0.5
+
+atr_period: 14
+sl_atr_mult: "1.0"
+tp_atr_mult: "2.0"
+
+risk_percent: "1.0"
+pip_size: "0.01"
+pip_value_per_lot: "1.0"

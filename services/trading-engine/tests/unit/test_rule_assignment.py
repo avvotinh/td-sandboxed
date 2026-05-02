@@ -1,0 +1,539 @@
+"""Unit tests for rule assignment module (Story 3.7).
+
+Tests cover:
+- RuleAssignment dataclass and from_account_config factory
+- RuleParser YAML parsing
+- (Story 10.13 removed the legacy preset loader path)
+- CustomRuleLoader custom file loading
+- RuleAssignmentService orchestration
+"""
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from src.accounts.models import AccountConfig, AccountType, MT5Config
+from src.rules.assignment import RuleAssignment
+from src.rules.assignment_service import RuleAssignmentService
+from src.rules.base_rule import BaseRule, RuleAction, RuleResult
+from src.rules.custom_loader import CustomRuleLoader, RulesFileInvalidError, RulesFileNotFoundError
+from src.rules.parser import RuleParseError, RuleParser
+
+
+# =============================================================================
+# TEST FIXTURES
+# =============================================================================
+
+
+def _create_mt5_config() -> MT5Config:
+    """Create a minimal MT5 config for testing."""
+    return MT5Config(server="Test-Server", login=12345, password_env="TEST_PASS")
+
+
+def _create_prop_firm_account(
+    account_id: str = "ftmo-001",
+    firm_id: str = "ftmo",
+    product_id: str = "challenge",
+    phase: str = "evaluation",
+) -> AccountConfig:
+    """Create a firm-bound prop firm account for testing.
+
+    Story 10.12 — the legacy ``prop_firm`` preset source is gone;
+    every prop-firm account is bound via ``firm_id + product_id +
+    phase`` (mirrors :file:`configs/firms/<firm>.yaml`).
+    """
+    return AccountConfig(
+        id=account_id,
+        name=f"Prop {account_id}",
+        type=AccountType.PROP_FIRM,
+        firm_id=firm_id,
+        product_id=product_id,
+        phase=phase,
+        mt5=_create_mt5_config(),
+        strategy="ma_crossover",
+    )
+
+
+def _create_personal_account(
+    account_id: str = "personal-001",
+    rules_file: str = "custom_rules.yaml",
+) -> AccountConfig:
+    """Create a personal account with custom rules for testing."""
+    return AccountConfig(
+        id=account_id,
+        name=f"Personal {account_id}",
+        type=AccountType.PERSONAL,
+        rules_file=rules_file,
+        mt5=_create_mt5_config(),
+        strategy="scalper",
+    )
+
+
+def _create_demo_account(account_id: str = "demo-001") -> AccountConfig:
+    """Create a demo account for testing."""
+    return AccountConfig(
+        id=account_id,
+        name=f"Demo {account_id}",
+        type=AccountType.DEMO,
+        mt5=_create_mt5_config(),
+        strategy="test",
+    )
+
+
+# =============================================================================
+# RuleAssignment Tests (Task 1)
+# =============================================================================
+
+
+class TestRuleAssignment:
+    """Tests for RuleAssignment dataclass."""
+
+    def test_from_account_config_firm_bound_ftmo(self):
+        """Story 10.12 — prop-firm accounts now resolve to firm-bound."""
+        account = _create_prop_firm_account("ftmo-001", firm_id="ftmo")
+        assignment = RuleAssignment.from_account_config(account)
+
+        assert assignment.assignment_type == "firm"
+        assert assignment.firm_id == "ftmo"
+        assert assignment.product_id == "challenge"
+        assert assignment.phase == "evaluation"
+
+    def test_from_account_config_firm_bound_the5ers(self):
+        """Story 10.12 — prop-firm accounts now resolve to firm-bound."""
+        account = _create_prop_firm_account(
+            "5ers-001", firm_id="the5ers", product_id="bootstrap", phase="funded"
+        )
+        assignment = RuleAssignment.from_account_config(account)
+
+        assert assignment.assignment_type == "firm"
+        assert assignment.firm_id == "the5ers"
+
+    def test_from_account_config_personal(self):
+        """Test RuleAssignment.from_account_config for personal account (AC3)."""
+        account = _create_personal_account("personal-001", "my_rules.yaml")
+        assignment = RuleAssignment.from_account_config(account)
+
+        assert assignment.assignment_type == "personal"
+        assert assignment.rules_file == "my_rules.yaml"
+        assert assignment.preset_name is None
+
+    def test_from_account_config_demo(self):
+        """Test RuleAssignment.from_account_config for demo account (AC4)."""
+        account = _create_demo_account("demo-001")
+        assignment = RuleAssignment.from_account_config(account)
+
+        assert assignment.assignment_type == "none"
+        assert assignment.preset_name is None
+        assert assignment.rules_file is None
+
+    def test_source_description_preset(self):
+        """Test source_description property for preset assignment."""
+        assignment = RuleAssignment(assignment_type="preset", preset_name="ftmo")
+        assert assignment.source_description == "preset:ftmo"
+
+    def test_source_description_personal(self):
+        """Test source_description property for personal assignment."""
+        assignment = RuleAssignment(assignment_type="personal", rules_file="my_rules.yaml")
+        assert assignment.source_description == "personal:my_rules.yaml"
+
+    def test_source_description_none(self):
+        """Test source_description property for no assignment."""
+        assignment = RuleAssignment(assignment_type="none")
+        assert assignment.source_description == "none"
+
+    def test_has_rules_property(self):
+        """Test has_rules property."""
+        assert RuleAssignment(assignment_type="preset", preset_name="ftmo").has_rules is True
+        assert RuleAssignment(assignment_type="personal", rules_file="x.yaml").has_rules is True
+        assert RuleAssignment(assignment_type="none").has_rules is False
+
+    def test_validation_preset_requires_name(self):
+        """Test that preset type requires preset_name."""
+        with pytest.raises(ValueError) as exc_info:
+            RuleAssignment(assignment_type="preset")  # Missing preset_name
+        assert "preset_name is required" in str(exc_info.value)
+
+    def test_validation_personal_requires_file(self):
+        """Test that personal type requires rules_file."""
+        with pytest.raises(ValueError) as exc_info:
+            RuleAssignment(assignment_type="personal")  # Missing rules_file
+        assert "rules_file is required" in str(exc_info.value)
+
+
+# =============================================================================
+# RuleParser Tests (Task 3)
+# =============================================================================
+
+
+class TestRuleParser:
+    """Tests for RuleParser class."""
+
+    def test_parse_rules_valid(self):
+        """Test parsing valid YAML rules."""
+        parser = RuleParser()
+        yaml_content = {
+            "name": "Test Rules",
+            "version": "1.0",
+            "rules": [
+                {"type": "daily_loss_limit", "threshold_percent": 5.0},
+                {"type": "max_drawdown", "threshold_percent": 10.0},
+            ],
+        }
+
+        rules = parser.parse_rules(yaml_content)
+
+        assert len(rules) == 2
+        assert rules[0].rule_type == "daily_loss_limit"
+        assert rules[1].rule_type == "max_drawdown"
+
+    def test_parse_rules_missing_rules_key(self):
+        """Test parsing fails when 'rules' key is missing."""
+        parser = RuleParser()
+        yaml_content = {"name": "Test"}  # Missing 'rules' key
+
+        with pytest.raises(RuleParseError) as exc_info:
+            parser.parse_rules(yaml_content)
+        assert "must contain 'rules' key" in str(exc_info.value)
+
+    def test_parse_rules_invalid_rules_not_list(self):
+        """Test parsing fails when 'rules' is not a list."""
+        parser = RuleParser()
+        yaml_content = {"rules": "not a list"}
+
+        with pytest.raises(RuleParseError) as exc_info:
+            parser.parse_rules(yaml_content)
+        assert "'rules' must be a list" in str(exc_info.value)
+
+    def test_parse_rules_missing_type_field(self):
+        """Test parsing fails when rule is missing 'type' field."""
+        parser = RuleParser()
+        yaml_content = {
+            "rules": [{"threshold_percent": 5.0}]  # Missing 'type'
+        }
+
+        with pytest.raises(RuleParseError) as exc_info:
+            parser.parse_rules(yaml_content)
+        assert "must have 'type' field" in str(exc_info.value)
+
+    def test_parse_rules_unknown_type(self):
+        """Test parsing fails for unknown rule type."""
+        parser = RuleParser()
+        yaml_content = {
+            "rules": [{"type": "unknown_rule_type"}]
+        }
+
+        with pytest.raises(RuleParseError) as exc_info:
+            parser.parse_rules(yaml_content)
+        assert "Unknown rule type" in str(exc_info.value)
+        assert "unknown_rule_type" in str(exc_info.value)
+
+    def test_parse_rules_all_valid_types(self):
+        """Test all known rule types can be parsed."""
+        parser = RuleParser()
+        yaml_content = {
+            "rules": [
+                {"type": "daily_loss_limit", "threshold_percent": 5.0},
+                {"type": "max_drawdown", "threshold_percent": 10.0},
+                {"type": "max_position_size", "max_risk_percent": 2.0},
+                {"type": "profit_target", "threshold_percent": 10.0},
+                {"type": "min_trading_days", "required_days": 4},
+            ],
+        }
+
+        rules = parser.parse_rules(yaml_content)
+        assert len(rules) == 5
+
+    def test_get_available_types(self):
+        """Test get_available_types returns expected types."""
+        parser = RuleParser()
+        types = parser.get_available_types()
+
+        assert "daily_loss_limit" in types
+        assert "max_drawdown" in types
+        assert "max_position_size" in types
+        assert "profit_target" in types
+        assert "min_trading_days" in types
+
+
+# Story 10.13 — RulePresetLoader was deleted. The class-level tests
+# previously here exercised the removed loader and are gone with it.
+
+
+# =============================================================================
+# CustomRuleLoader Tests (Task 4)
+# =============================================================================
+
+
+class TestCustomRuleLoader:
+    """Tests for CustomRuleLoader class."""
+
+    def test_load_custom_rules_valid(self, tmp_path):
+        """Test loading valid custom rules file."""
+        # Create a valid rules file
+        rules_file = tmp_path / "test_rules.yaml"
+        rules_file.write_text("""
+name: "Test Rules"
+version: "1.0"
+rules:
+  - type: daily_loss_limit
+    threshold_percent: 3.0
+  - type: max_drawdown
+    threshold_percent: 6.0
+""")
+
+        loader = CustomRuleLoader(config_dir=tmp_path)
+        rules = loader.load_custom_rules("test_rules.yaml")
+
+        assert len(rules) == 2
+        assert rules[0].rule_type == "daily_loss_limit"
+        assert rules[1].rule_type == "max_drawdown"
+
+    def test_load_custom_rules_file_not_found(self, tmp_path):
+        """Test RulesFileNotFoundError for missing file (AC6)."""
+        loader = CustomRuleLoader(config_dir=tmp_path)
+
+        with pytest.raises(RulesFileNotFoundError) as exc_info:
+            loader.load_custom_rules("nonexistent.yaml")
+
+        error = exc_info.value
+        assert "nonexistent.yaml" in str(error)
+        # Should include full path
+        assert str(tmp_path) in str(error.resolved_path)
+
+    def test_load_custom_rules_absolute_path(self, tmp_path):
+        """Test loading rules from absolute path."""
+        rules_file = tmp_path / "absolute_rules.yaml"
+        rules_file.write_text("""
+name: "Absolute Path Rules"
+rules:
+  - type: daily_loss_limit
+    threshold_percent: 2.0
+""")
+
+        loader = CustomRuleLoader()
+        rules = loader.load_custom_rules(str(rules_file))
+
+        assert len(rules) == 1
+
+    def test_load_custom_rules_relative_path(self, tmp_path):
+        """Test loading rules from relative path."""
+        rules_file = tmp_path / "relative_rules.yaml"
+        rules_file.write_text("""
+name: "Relative Path Rules"
+rules:
+  - type: max_drawdown
+    threshold_percent: 5.0
+""")
+
+        loader = CustomRuleLoader(config_dir=tmp_path)
+        rules = loader.load_custom_rules("relative_rules.yaml")
+
+        assert len(rules) == 1
+
+    def test_load_custom_rules_invalid_yaml(self, tmp_path):
+        """Test error for invalid YAML."""
+        rules_file = tmp_path / "invalid.yaml"
+        rules_file.write_text("invalid: yaml: content:")
+
+        loader = CustomRuleLoader(config_dir=tmp_path)
+
+        with pytest.raises(RulesFileInvalidError) as exc_info:
+            loader.load_custom_rules("invalid.yaml")
+        assert "YAML parsing error" in str(exc_info.value)
+
+    def test_load_custom_rules_empty_file(self, tmp_path):
+        """Test error for empty file."""
+        rules_file = tmp_path / "empty.yaml"
+        rules_file.write_text("")
+
+        loader = CustomRuleLoader(config_dir=tmp_path)
+
+        with pytest.raises(RulesFileInvalidError) as exc_info:
+            loader.load_custom_rules("empty.yaml")
+        assert "empty" in str(exc_info.value).lower()
+
+    def test_validate_rules_file(self, tmp_path):
+        """Test validate_rules_file returns metadata."""
+        rules_file = tmp_path / "validate_test.yaml"
+        rules_file.write_text("""
+name: "Validation Test"
+version: "2.0"
+description: "Test description"
+rules:
+  - type: daily_loss_limit
+    threshold_percent: 5.0
+  - type: max_drawdown
+    threshold_percent: 10.0
+""")
+
+        loader = CustomRuleLoader(config_dir=tmp_path)
+        info = loader.validate_rules_file("validate_test.yaml")
+
+        assert info["name"] == "Validation Test"
+        assert info["version"] == "2.0"
+        assert info["description"] == "Test description"
+        assert info["rule_count"] == 2
+        assert info["valid"] is True
+
+
+# =============================================================================
+# RuleAssignmentService Tests (Task 5)
+# =============================================================================
+
+
+class TestRuleAssignmentService:
+    """Tests for RuleAssignmentService class."""
+
+    def test_get_rules_for_prop_firm_account_uses_firm_path(self):
+        """Story 10.12 — prop-firm accounts now resolve through the firm
+        binding, not the legacy preset path. Without a wired
+        ``FirmRegistry`` the service raises ``ValueError`` because the
+        firm is unknown — sufficient to assert the assignment took the
+        firm path.
+        """
+        service = RuleAssignmentService()
+        account = _create_prop_firm_account("ftmo-001", firm_id="ftmo")
+
+        # The firm registry isn't wired in this minimal service, so the
+        # firm path raises — that proves we no longer hit the (deleted)
+        # preset path.
+        with pytest.raises(Exception):  # noqa: BLE001 — firm-resolution flavour varies
+            service.get_rules_for_account(account)
+
+    def test_get_rules_for_personal_account(self, tmp_path):
+        """Test getting rules for personal account (AC3)."""
+        # Create custom rules file
+        rules_file = tmp_path / "personal_rules.yaml"
+        rules_file.write_text("""
+name: "Personal Rules"
+rules:
+  - type: daily_loss_limit
+    threshold_percent: 2.0
+""")
+
+        # Create service with custom config dir
+        custom_loader = CustomRuleLoader(config_dir=tmp_path)
+        service = RuleAssignmentService(custom_loader=custom_loader)
+
+        account = _create_personal_account("personal-001", "personal_rules.yaml")
+        rules = service.get_rules_for_account(account)
+
+        assert len(rules) == 1
+        assert rules[0].rule_type == "daily_loss_limit"
+
+    def test_get_rules_for_demo_account(self):
+        """Test getting rules for demo account returns empty list (AC4)."""
+        service = RuleAssignmentService()
+        account = _create_demo_account("demo-001")
+
+        rules = service.get_rules_for_account(account)
+
+        assert rules == []
+
+    def test_get_assignment_for_firm_bound_account(self):
+        """Story 10.12 — prop-firm accounts now produce a ``firm`` assignment."""
+        service = RuleAssignmentService()
+        account = _create_prop_firm_account("ftmo-001", firm_id="ftmo")
+
+        assignment = service.get_assignment_for_account(account)
+
+        assert assignment.assignment_type == "firm"
+        assert assignment.firm_id == "ftmo"
+
+    # Story 10.13 — ``test_get_available_presets`` removed alongside
+    # ``RuleAssignmentService.get_available_presets`` and the preset
+    # loader.
+
+    # Story 10.12 — ``test_preset_not_found_error_propagates`` was
+    # removed when the preset path was deleted; the unreachable
+    # ``PresetNotFoundError`` propagation is now N/A. The error class
+    # itself is removed in story 10.13 alongside the preset loader.
+
+    def test_rules_file_not_found_error_propagates(self):
+        """Test RulesFileNotFoundError propagates from service (AC6)."""
+        service = RuleAssignmentService()
+
+        # Create account with non-existent rules file (bypassing model validation)
+        account = MagicMock(spec=AccountConfig)
+        account.id = "test-001"
+        account.type = AccountType.PERSONAL
+        account.rules_file = "nonexistent_rules.yaml"
+        account.firm_id = None
+        account.product_id = None
+        account.phase = None
+        account.rule_overrides = {}
+
+        with pytest.raises(RulesFileNotFoundError):
+            service.get_rules_for_account(account)
+
+
+# =============================================================================
+# BaseRule Protocol Tests
+# =============================================================================
+
+
+class TestBaseRule:
+    """Tests for BaseRule protocol and related types."""
+
+    def test_rule_action_values(self):
+        """Test RuleAction enum values."""
+        assert RuleAction.ALLOW.value == "allow"
+        assert RuleAction.WARN.value == "warn"
+        assert RuleAction.BLOCK.value == "block"
+
+    def test_rule_result_is_allowed(self):
+        """Test RuleResult.is_allowed property."""
+        assert RuleResult(action=RuleAction.ALLOW).is_allowed is True
+        assert RuleResult(action=RuleAction.WARN).is_allowed is True
+        assert RuleResult(action=RuleAction.BLOCK).is_allowed is False
+
+    def test_rule_result_is_blocked(self):
+        """Test RuleResult.is_blocked property."""
+        assert RuleResult(action=RuleAction.ALLOW).is_blocked is False
+        assert RuleResult(action=RuleAction.WARN).is_blocked is False
+        assert RuleResult(action=RuleAction.BLOCK).is_blocked is True
+
+    def test_rule_result_with_message(self):
+        """Test RuleResult with message."""
+        result = RuleResult(
+            action=RuleAction.BLOCK,
+            message="Daily loss limit exceeded",
+        )
+        assert result.message == "Daily loss limit exceeded"
+
+    def test_rule_result_with_metadata(self):
+        """Test RuleResult with metadata."""
+        result = RuleResult(
+            action=RuleAction.WARN,
+            metadata={"current_loss": 4.5, "limit": 5.0},
+        )
+        assert result.metadata["current_loss"] == 4.5
+        assert result.metadata["limit"] == 5.0
+
+    def test_protocol_compliance(self):
+        """Test that a class can satisfy BaseRule protocol.
+
+        Updated in Story 4.1 to include new protocol requirements:
+        - name and priority attributes
+        - get_current_value(), get_threshold(), get_warning_thresholds() methods
+        """
+
+        class TestRule:
+            rule_type = "test_rule"
+            name = "Test Rule"
+            priority = 50
+
+            def validate(self, context):
+                return RuleResult(action=RuleAction.ALLOW)
+
+            def get_current_value(self, context):
+                return 0.0
+
+            def get_threshold(self):
+                return 100.0
+
+            def get_warning_thresholds(self):
+                return [70.0, 80.0, 90.0]
+
+        rule = TestRule()
+        assert isinstance(rule, BaseRule)

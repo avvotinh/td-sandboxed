@@ -1,0 +1,113 @@
+# FTMO firm profile (Epic 9 P0.11)
+#
+# Source of truth for FTMO products, rules, and session timing. Replaces the
+# legacy preset file at services/trading-engine/src/rules/presets/ftmo.yaml.
+# Loaded by FirmRegistry from configs/firms/ at startup.
+#
+# References:
+#   - https://ftmo.com/en/trading-rules/
+#   - docs/epic-9-context.md (architectural decisions)
+#
+# Threshold values match the legacy preset (5% daily loss, 10% max drawdown).
+
+firm_id: ftmo
+name: "FTMO"
+version: "2026.1"
+instrument_class: forex_cfd
+
+# FTMO uses Central European Time for the daily reset window.
+# Daily reset at 00:00 CET — engine handles DST automatically via zoneinfo.
+session:
+  timezone: "CET"
+  reset_time: "00:00"
+  reset_anchor: midnight
+
+# Default commission for FTMO (per-product overrides not currently used).
+# Per-lot in USD; spread/swap kept minimal until backtest parity work lands
+# in P0.13 (CommissionProfile per-firm).
+commission:
+  per_lot_usd: 7.0
+
+products:
+  # FTMO Challenge program — three-phase lifecycle:
+  #   evaluation (Step 1)  → verification (Step 2)  → funded (live)
+  # Phases share daily-loss/max-drawdown/position-size/consistency rules
+  # at the product level; phase rule_overrides tune the profit target so
+  # Step 1 requires 10%, Step 2 requires 5%, and funded ignores the
+  # informational target.
+  challenge:
+    product_id: challenge
+    name: "FTMO Challenge"
+    drawdown_method: balance_based
+    rules:
+      - type: daily_loss_limit
+        threshold_percent: 5.0
+        reset_time: "00:00"
+        timezone: "CET"
+        action: "block_trading"
+        warning_at: [70, 80, 90]
+      - type: max_drawdown
+        threshold_percent: 10.0
+        reference: "initial_balance"
+        method: "balance_based"
+        action: "block_trading"
+        warning_at: [50, 70, 85]
+      - type: max_position_size
+        max_lots: 100.0
+        scaling: "per_10k_balance"
+        warning_at: [70, 80, 90]
+      - type: profit_target
+        threshold_percent: 10.0
+        action: "notify"
+      - type: min_trading_days
+        required_days: 4
+        action: "notify"
+      - type: consistency
+        block_at: 50.0
+        warn_at: [40, 45, 48]
+    phases:
+      - phase_id: evaluation
+        name: "Step 1 — Challenge"
+        rule_overrides:
+          profit_target:
+            threshold_percent: 10.0
+        allowed_transitions: [verification]
+      - phase_id: verification
+        name: "Step 2 — Verification"
+        rule_overrides:
+          profit_target:
+            threshold_percent: 5.0
+        allowed_transitions: [funded]
+      - phase_id: funded
+        name: "Funded"
+
+report_template:
+  template_id: ftmo_daily
+
+# Market regime classifier (Epic 11 Phase 1, story 11.2).
+# Disabled by default — flip `enabled: true` once the rule-based classifier
+# has been shadow-validated on a test account. Thresholds calibrated from
+# academic consensus (State Street 2025, Imperial College working paper) and
+# adjusted for XAUUSD M5 dynamics; see docs/research/regime-classifier.md.
+regime_classifier:
+  enabled: false
+  confirmation_bars: 2
+  warmup_bars: 50
+  feature_window: 200
+  instruments:
+    XAUUSD:
+      timeframe: M5
+      adx_period: 14
+      bb_period: 20
+      bb_stddev: 2.0
+      bb_baseline_window: 100
+      realized_vol_window: 20
+      ema_slope_period: 20
+      ema_slope_lookback: 5
+      thresholds:
+        adx_trend_min: 25.0
+        adx_strong_trend: 40.0
+        bb_width_low_pct: 0.30
+        bb_width_high_pct: 0.80
+        realized_vol_high: 0.025
+        ema_slope_trend_threshold: 0.0005

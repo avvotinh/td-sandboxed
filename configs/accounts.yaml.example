@@ -1,0 +1,287 @@
+# Trading Accounts Configuration
+# ================================
+# This file defines all trading accounts managed by the trading engine.
+# Copy this file to accounts.yaml and configure your accounts.
+#
+# IMPORTANT: MT5 passwords are resolved from environment variables.
+# Never store passwords directly in this file!
+#
+# ============================================================================
+# MULTI-ACCOUNT LIMITS
+# ============================================================================
+# Maximum accounts: 5 (configurable in src/accounts/models.py)
+# Supported prop firms: ftmo, the5ers, wmt (case-insensitive)
+# Account IDs must be unique across all accounts
+#
+# ============================================================================
+# CLI ACCOUNT MANAGEMENT COMMANDS
+# ============================================================================
+# Start an account (from stopped or new state):
+#   trading-engine accounts start <account_id>
+#   Example: trading-engine accounts start ftmo-gold-001
+#
+# Stop an account (positions remain open):
+#   trading-engine accounts stop <account_id> [--force]
+#   Example: trading-engine accounts stop ftmo-gold-001 --force
+#
+# Pause an account temporarily:
+#   trading-engine accounts pause <account_id>
+#   Example: trading-engine accounts pause ftmo-gold-001
+#
+# Resume a paused account:
+#   trading-engine accounts resume <account_id>
+#   Example: trading-engine accounts resume ftmo-gold-001
+#
+# Show all account statuses:
+#   trading-engine accounts status
+#
+# Show specific account status:
+#   trading-engine accounts status <account_id>
+#   Example: trading-engine accounts status ftmo-gold-001
+#
+#
+# Environment Variable Naming Convention:
+#   <FIRM_NAME>_PASS_<ACCOUNT_ID>
+#   Examples:
+#     - FTMO_PASS_001 for FTMO account 001
+#     - THE5ERS_PASS_001 for The5ers account 001
+#     - PERSONAL_PASS for personal account
+
+accounts:
+  # ============================================================================
+  # PROP FIRM ACCOUNT EXAMPLE — FIRM-BOUND (Epic 9+, the only supported path)
+  # ============================================================================
+  # Prop firm accounts must reference a FirmRegistry entry by
+  # firm_id + product_id + phase. Rule sets are resolved from the firm
+  # profile's product (configs/firms/*.yaml).
+  #
+  # Story 10.12 — the legacy ``prop_firm: <preset_name>`` field was
+  # removed. Operators on the old preset path must migrate to firm
+  # bindings before upgrading.
+  #
+  - id: ftmo-gold-001
+    name: "FTMO Gold Challenge"
+    type: prop_firm
+
+    # Compliance rules source — firm binding (Epic 9+).
+    firm_id: ftmo                # Matches firm_id in configs/firms/ftmo.yaml
+    product_id: challenge        # Product within the firm profile
+    phase: evaluation            # One of the product's phase_ids
+
+    # MT5 Connection Configuration
+    mt5:
+      server: "FTMO-Server"           # MT5 broker server name
+      login: 12345678                 # MT5 account login number
+      password_env: "FTMO_PASS_001"   # Environment variable containing password
+
+    # Strategy Configuration
+    strategy: ma_crossover           # Strategy name to execute
+    strategy_params:                 # Strategy-specific parameters
+      fast_period: 20
+      slow_period: 50
+      timeframe: "H1"
+
+    # Signal Filtering (optional)
+    signal_filter:
+      symbols:                       # Only process signals for these symbols
+        - "EURUSD"
+        - "GBPUSD"
+        - "USDJPY"
+      sessions:                      # Only trade during these sessions
+        - "london"
+        - "new_york"
+      max_spread_pips: 2.0           # Skip signals with spread above this
+
+    # Account Status
+    # Options: active, paused, stopped
+    status: active
+
+  # ============================================================================
+  # FIRM-BOUND ACCOUNT EXAMPLE — with rule overrides
+  # ============================================================================
+  # Firm-bound accounts can also tighten thresholds per-account via
+  # ``rule_overrides``. Per P0.16, overrides may only make rules
+  # STRICTER, never looser.
+  #
+  # Requirements:
+  #   - firm_id, product_id, and phase must all be set together
+  #   - Mutually exclusive with rules_file (personal)
+  #
+  - id: ftmo-challenge-001
+    name: "FTMO Challenge (Firm-bound)"
+    type: prop_firm
+
+    firm_id: ftmo                 # Matches firm_id in configs/firms/ftmo.yaml
+    product_id: challenge         # Product within the firm profile
+    phase: evaluation             # One of the product's phase_ids
+
+    # Optional: tighten thresholds on this specific account.
+    # Per P0.16, overrides can only make rules STRICTER, never looser.
+    rule_overrides:
+      consistency:
+        block_at: 45              # ≤ firm default (50)
+
+    mt5:
+      server: "FTMO-Server"
+      login: 22334455
+      password_env: "FTMO_PASS_003"
+
+    strategy: ma_crossover
+    strategy_params:
+      fast_period: 20
+      slow_period: 50
+
+    status: active
+
+  # ============================================================================
+  # THE5ERS ACCOUNT EXAMPLE — also firm-bound
+  # ============================================================================
+  # Another prop firm referenced via firm binding.
+  #
+  - id: the5ers-swing-001
+    name: "The5ers Swing Trading"
+    type: prop_firm
+    firm_id: the5ers              # Case-insensitive (normalised to lowercase)
+    product_id: bootstrap         # See configs/firms/the5ers.yaml
+    phase: funded                 # Bootstrap goes straight to funded
+
+    mt5:
+      server: "The5ers-Server"
+      login: 87654321
+      password_env: "THE5ERS_PASS_001"
+
+    strategy: breakout_strategy
+    strategy_params:
+      breakout_periods: 20
+      atr_multiplier: 1.5
+
+    signal_filter:
+      symbols:
+        - "XAUUSD"
+        - "EURUSD"
+
+    status: active
+
+  # ============================================================================
+  # PERSONAL ACCOUNT WITH CUSTOM RULES EXAMPLE
+  # ============================================================================
+  # Personal accounts require either prop_firm preset or custom rules_file.
+  # This example shows using a custom rules file for personalized risk management.
+  #
+  - id: personal-scalper
+    name: "Personal Scalping Account"
+    type: personal
+
+    # Use custom rules file (bypasses prop_firm validation)
+    # Path is relative to the project root
+    rules_file: "configs/custom_rules/conservative.yaml"
+
+    mt5:
+      server: "ICMarkets-MT5"
+      login: 11111111
+      password_env: "PERSONAL_MT5_PASS"
+
+    strategy: scalper
+    strategy_params:
+      entry_threshold: 0.002
+      trailing_stop: true
+
+    signal_filter:
+      symbols:
+        - "EURUSD"
+        - "GBPUSD"
+      max_spread_pips: 1.5
+
+    status: active
+
+  # ============================================================================
+  # DEMO ACCOUNT EXAMPLE
+  # ============================================================================
+  # Demo accounts don't require compliance rules (prop_firm or rules_file).
+  # Use demo accounts for testing strategies without real money risk.
+  #
+  - id: demo-testing
+    name: "Strategy Testing Demo"
+    type: demo
+
+    mt5:
+      server: "Demo-Server"
+      login: 99999999
+      password_env: "DEMO_PASS"
+
+    strategy: experimental_strategy
+    strategy_params:
+      experimental_param: 100
+
+    # Default signal_filter (empty) = no filtering
+    # Default status = "active"
+
+  # ============================================================================
+  # PAUSED ACCOUNT EXAMPLE (commented out - uncomment to use)
+  # ============================================================================
+  # Paused accounts are loaded but won't process signals.
+  # Use this to temporarily disable an account without removing its config.
+  #
+  # - id: ftmo-paused-001
+  #   name: "FTMO Account (Paused)"
+  #   type: prop_firm
+  #   prop_firm: ftmo
+  #
+  #   mt5:
+  #     server: "FTMO-Server"
+  #     login: 55555555
+  #     password_env: "FTMO_PASS_002"
+  #
+  #   strategy: ma_crossover
+  #   strategy_params:
+  #     fast_period: 10
+  #     slow_period: 30
+  #
+  #   status: paused  # Account won't process signals
+
+# ============================================================================
+# CONFIGURATION REFERENCE
+# ============================================================================
+#
+# Multi-Account Limits:
+#   Maximum accounts: 5 (raises "Maximum 5 accounts supported" if exceeded)
+#   All account IDs must be unique (raises "Duplicate account ID: {id}" if not)
+#
+# Supported Prop Firms (case-insensitive):
+#   - ftmo
+#   - the5ers
+#   - wmt
+#   Invalid prop_firm raises "Unknown prop firm preset: {prop_firm}"
+#
+# Account Fields:
+#   id: (required) Unique identifier (alphanumeric, dashes, underscores)
+#   name: (required) Human-readable account name
+#   type: (required) One of: prop_firm, personal, demo
+#   prop_firm: (conditional) Preset name for prop firm rules
+#   rules_file: (conditional) Path to custom rules YAML
+#   mt5: (required) MT5 connection configuration
+#   strategy: (required) Strategy name to execute
+#   strategy_params: (optional) Strategy-specific parameters, default: {}
+#   signal_filter: (optional) Signal filtering rules
+#   status: (optional) Account status, default: "active"
+#
+# MT5 Configuration:
+#   server: (required) MT5 broker server name
+#   login: (required) MT5 account number (positive integer)
+#   password_env: (required) Environment variable name for password
+#                 Must be UPPERCASE with underscores only
+#
+# Signal Filter:
+#   symbols: (optional) List of allowed symbols, default: [] (all allowed)
+#   sessions: (optional) List of allowed sessions, default: [] (all allowed)
+#   max_spread_pips: (optional) Maximum spread filter, default: null (no limit)
+#
+# Status Values:
+#   active: Account is fully operational
+#   paused: Account is loaded but won't process signals
+#   stopped: Account is disabled
+#
+# Rules Requirement:
+#   - prop_firm and personal accounts MUST specify either prop_firm or rules_file
+#   - demo accounts don't require rules (for testing without restrictions)
+#   - personal accounts with rules_file bypass prop_firm preset validation

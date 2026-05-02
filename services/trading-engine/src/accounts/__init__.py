@@ -1,0 +1,72 @@
+"""Accounts module - Multi-account management.
+
+This module handles:
+- Account lifecycle management
+- Signal routing per account
+- Account state persistence
+- Per-account risk isolation
+- Per-account equity and balance tracking
+- Real-time P&L tracking (Story 4.7)
+
+Exports:
+- AccountConfig: Single trading account configuration
+- AccountsConfig: Collection of account configurations
+- AccountType: Account type enumeration (prop_firm, personal, demo)
+- MT5Config: MT5 connection configuration
+- SignalFilter: Signal filtering configuration
+- AccountState: Account lifecycle state enumeration
+- AccountManager: Account lifecycle manager
+- SignalRouter: Routes signals to accounts based on symbol filters
+- RiskState: Per-account risk metrics state
+- AccountRiskManager: Per-account risk state manager
+- RiskStateRegistry: Registry for per-account risk managers
+- RiskIsolationService: Integration point for risk isolation
+- RuleConfig: Configuration for a single risk rule
+- AccountMetrics: Per-account financial metrics for display (Story 3.6)
+- AccountMetricsService: Service for retrieving account metrics (Story 3.6)
+- PnLTracker: Per-account P&L tracker for real-time position monitoring (Story 4.7)
+- PnLTrackerRegistry: Registry for per-account P&L trackers (Story 4.7)
+- Position: Open position dataclass (Story 4.7)
+- PnLMetrics: P&L metrics snapshot dataclass (Story 4.7)
+"""
+
+from .account_manager import AccountManager
+from .metrics import AccountMetrics
+from .metrics_service import AccountMetricsService
+from .models import (
+    AccountConfig,
+    AccountsConfig,
+    AccountType,
+    MT5Config,
+    SignalFilter,
+)
+from .pnl_registry import PnLTrackerRegistry
+from .pnl_tracker import PnLMetrics, PnLTracker, Position
+from .risk_isolation import RiskIsolationService, RuleConfig
+from .risk_manager import AccountRiskManager
+from .risk_registry import RiskStateRegistry
+from .risk_state import RiskState
+from .signal_router import SignalRouter
+from .state import AccountState
+
+__all__ = [
+    "AccountConfig",
+    "AccountsConfig",
+    "AccountManager",
+    "AccountMetrics",
+    "AccountMetricsService",
+    "AccountRiskManager",
+    "AccountState",
+    "AccountType",
+    "MT5Config",
+    "PnLMetrics",
+    "PnLTracker",
+    "PnLTrackerRegistry",
+    "Position",
+    "RiskIsolationService",
+    "RiskState",
+    "RiskStateRegistry",
+    "RuleConfig",
+    "SignalFilter",
+    "SignalRouter",
+]

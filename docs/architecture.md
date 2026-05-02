@@ -2,32 +2,125 @@
 
 ## Executive Summary
 
-Event-driven automated trading system for FTMO prop firm challenges, architected as a **monorepo with independent microservices**. The system leverages a polyglot tech stack optimized for each service's requirements: Go for I/O-bound services, Rust for latency-critical messaging, and Python for trading logic with Nautilus Trader.
+Event-driven automated trading system for **multi-account, multi-prop-firm trading**, architected as a **monorepo with independent microservices**. The system leverages a polyglot tech stack optimized for each service's requirements: Go for I/O-bound services, Rust for latency-critical messaging, and Python for trading logic with Nautilus Trader.
 
-**Version:** 2.0 - Monorepo Architecture
-**Last Updated:** 2025-12-03
+**Version:** 3.2 — Post Epic 11 (Market Regime Classifier)
+**Last Updated:** 2026-05-02
 
 ## Project Context
 
-**Project:** FTMO Trading System
+**Project:** Multi-Account Trading System
 **Domain:** Fintech (High Complexity)
 **Type:** Developer Tool
 **Architecture:** Monorepo with Independent Microservices
+
+**Supported Account Types:**
+| Type | Examples | Rules |
+|------|----------|-------|
+| Prop Firm | FTMO, The5ers, WeMasterTrade | Built-in presets |
+| Personal | Own capital accounts | Custom rules |
+| Demo/Test | Paper trading, backtesting | Optional rules |
 
 **Core Services:**
 | Service | Language | Purpose |
 |---------|----------|---------|
 | tv-api | Go | TradingView WebSocket data collector |
 | mt5-bridge | Rust | MT5 ZeroMQ bridge (latency-critical) |
-| trading-engine | Python | Nautilus Trader core, strategies, compliance |
+| trading-engine | Python | Nautilus Trader core, strategies, multi-account management |
 | notification | Go | Telegram alerts and notifications |
 
 **What Makes This Special:**
+- **Multi-Account Support**: Run multiple accounts simultaneously with independent strategies
+- **Pluggable Rule Engine**: Built-in prop firm presets + fully customizable YAML rules
 - **Polyglot Optimization**: Right language for each service's requirements
 - **Service Independence**: No shared code, independent deployment
-- **Compliance-First Architecture**: FTMO rules as first-class architectural concern
+- **Risk Isolation**: Account-level risk management, failures don't cascade
 - **Backtest-Reality Alignment**: Same codebase for backtest and live trading
 - **Docker-Managed Infrastructure**: Reproducible, portable deployment
+
+---
+
+## Architecture at a Glance — Snapshot 2026-05-02
+
+> Top-down view của trạng thái hệ thống sau Epic 11 (HEAD `f019861`, 2026-05-02). Mục này tóm tắt để onboarding nhanh; chi tiết kỹ thuật đầy đủ vẫn ở các section bên dưới và phần [Epic 10 Additions](#epic-10-additions--operational-hardening-2026-05-01) + [Epic 11 Additions](#epic-11-additions--market-regime-classifier-2026-05-02) ở cuối doc.
+
+### Service status
+
+| Service | Lang | Vai trò | Trạng thái |
+|---|---|---|---|
+| `services/tv-api/` | Go 1.21+ | TradingView WS → Redis/TimescaleDB; binaries `tv-chart`, `tv-quote`, `tv-cli` | operational |
+| `services/mt5-bridge/` | Rust 1.75+ | ZMQ bridge MT5 ↔ engine; tokio + tracing JSON | operational (single-port; D4 multi-port deferred) |
+| `services/trading-engine/` | Python 3.11+ / Nautilus 1.x | Core trading + multi-firm + rule engine | refactored ở Epic 10 |
+| `services/notification/` | Go 1.21+ | Telegram bot, Redis SUB | operational |
+
+Bound bởi `.claude/rules/common/sandboxed-domain.md`: trading-engine ↔ tv-api **không import lẫn nhau**; chỉ qua ZMQ + Redis. Không shared library cross-language.
+
+### Multi-firm coverage
+
+- **`configs/firms/ftmo.yaml`** — 1 product (`challenge`) × 3 phase (evaluation 10% → verification 5% → funded). Session CET, commission $7/lot.
+- **`configs/firms/the5ers.yaml`** — 3 product:
+  - `bootstrap` (balance_based DD 4%, weekly_target 1.25%)
+  - `high_stakes` (equity_peak DD 4%, consistency rule 50%)
+  - `hyper_growth` (balance_based DD 5%, scaling_policy YAML-only)
+
+`AccountConfig` post-10.12 chỉ chấp nhận **firm-bound** (`firm_id + product_id + phase`) hoặc **personal_rules_file**; legacy `prop_firm` field + `VALID_PROP_FIRMS` frozenset + `validate_prop_firm_preset` validator **đã drop**. Mở rộng firm thứ 3 chỉ cần thêm YAML — không code change ở engine core.
+
+Phase transition manual-only qua CLI `accounts promote --phase <p>`; CLI publish Redis `account:phase-changed:{id}` (Epic 10.5e3) → `LiveOrchestrator` psubscribe reload state.
+
+### Epic 10 phase closure (15/15 DONE)
+
+| Phase | Stories | Highlights |
+|---|---|---|
+| 1 — Foundation | 10.1, 10.2 | TradingEngine god-object split → 3 component (Recovery / Live / Lifecycle); EngineConfig DI replace 9 optional deps |
+| 2 — Audit + race | 10.3, 10.4 | `AuditWriter` sync DB before mutation + bounded async queue; atomic Lua reserve / release |
+| 3 — Live P0 blockers | 10.5a-f, 10.6, 10.7, 10.8 | LiveOrchestrator full với TradingNode per account; kill-switch flat positions + sync audit; news blackout rule; strategy validation gate (0 bypass) |
+| 4 — Backtest + infra | 10.9, 10.10 | SpreadAwareFeeModel; Alembic bootstrap + 6 ported revisions |
+| 5 — Legacy cleanup | 10.11-15 | Migration audit CLI gate; drop `prop_firm` field / preset YAML / `prop_firm_id` schema; .gitignore compliance reports |
+
+**Follow-up duy nhất**: 10.9b swap accrual via Nautilus `SimulationModule` + epic-10-retrospective (optional).
+
+### Production-readiness delta
+
+| Dimension | Trước Epic 10 | Sau Epic 10 |
+|---|---|---|
+| Live orchestrator | scaffold (D5 CRITICAL) | **full** — TradingNode per account, attach actor, wire clients |
+| Audit double-entry | fire-and-forget (D3 HIGH) | **sync DB before mutation** + bounded async queue |
+| Race validate↔send | in-memory snapshot (D6 MEDIUM) | **atomic Lua compare-and-set** |
+| Kill-switch | pause only (D7#4 CRITICAL) | **flat positions + sync audit** |
+| News blackout | absent (D7#5 CRITICAL) | **NewsBlackoutRule + ForexFactory feed** |
+| Strategy validation | partial (D7#2 HIGH) | **0 bypass — single seam audited** |
+| Backtest spread parity | absent (D8 MEDIUM) | **SpreadAwareFeeModel ship** (swap 10.9b deferred) |
+| Schema versioning | raw SQL | **Alembic 7 revisions** |
+| Coexistence rule source | 2 paths (D2 MEDIUM) | **firm-bound only** — preset YAML + PresetLoader dropped |
+| Schema double-source | `prop_firm_id` ↔ `firm_id` (D10) | **`prop_firm_id` dropped** ở revision 011 |
+
+**Estimate**: ~55-65% trước Epic 10 → **~80-85% production-ready** sau Epic 10. Engine có thể khởi chạy live capital thật mà không vi phạm 5 success criterion (audit, race, emergency, news, live orchestrator).
+
+### Còn lại trước "100% ready"
+
+- Observability surface (Prometheus + OpenTelemetry) — Epic 11+
+- Partial fill / order modify-cancel / FX conversion / swap-commission realized PnL — Epic 11+
+- Multi-port mt5-bridge (D4) — YAGNI cho tới khi cần broker thứ 2
+- Indicator warmup persist qua restart
+- Operational runbooks (deploy / restore / incident response)
+- 10.9b swap accrual rollover
+
+### Navigation map — entry points
+
+| Mục đích | Path |
+|---|---|
+| Epic 10 plan + ADR | `docs/epic-10-context.md` |
+| Sprint status | `docs/sprint-artifacts/sprint-status.yaml` |
+| Engine entry | `services/trading-engine/src/engine/lifecycle.py` |
+| DI container | `services/trading-engine/src/engine/config.py` |
+| Live orchestrator | `services/trading-engine/src/engine/live_orchestrator.py` |
+| Audit writer | `services/trading-engine/src/audit/audit_writer.py` |
+| Atomic Lua | `services/trading-engine/src/execution/lua_scripts/` |
+| Firm configs | `configs/firms/{ftmo,the5ers}.yaml` |
+| Alembic | `services/trading-engine/alembic/versions/` |
+| Docker stack | `infra/docker/docker-compose.yml` |
+| DB init | `infra/timescaledb/init.sql` |
+| Backtest runbook | `docs/runbooks/backtesting.md` |
 
 ---
 
@@ -44,8 +137,16 @@ Event-driven automated trading system for FTMO prop firm challenges, architected
 │  │   tv-api     │   │  mt5-bridge  │   │      trading-engine        │  │
 │  │    (Go)      │   │    (Rust)    │   │    (Python/Nautilus)       │  │
 │  │              │   │              │   │                            │  │
-│  │ TradingView  │   │  MT5 ↔ ZMQ  │   │  Strategies, Risk,         │  │
-│  │  WebSocket   │   │    Bridge    │   │  FTMO Compliance           │  │
+│  │ TradingView  │   │  MT5 ↔ ZMQ  │   │  ┌────────────────────┐    │  │
+│  │  WebSocket   │   │    Bridge    │   │  │  Account Manager   │    │  │
+│  │              │   │  (per acct)  │   │  ├────────────────────┤    │  │
+│  │              │   │              │   │  │ Acc1 │ Acc2 │ Acc3 │    │  │
+│  │              │   │              │   │  │ FTMO │5ers │Custom│    │  │
+│  │              │   │              │   │  └────────────────────┘    │  │
+│  │              │   │              │   │  ┌────────────────────┐    │  │
+│  │              │   │              │   │  │   Rule Engine      │    │  │
+│  │              │   │              │   │  │  (pluggable)       │    │  │
+│  │              │   │              │   │  └────────────────────┘    │  │
 │  └──────┬───────┘   └──────┬───────┘   └─────────────┬──────────────┘  │
 │         │                  │                         │                  │
 │         │    ┌─────────────┴─────────────────────────┘                  │
@@ -179,7 +280,8 @@ Sandboxed/
 │   │   │       └── execution_model.py
 │   │   ├── tests/
 │   │   ├── Dockerfile
-│   │   ├── pyproject.toml
+│   │   ├── pyproject.toml          # Project config (uv compatible)
+│   │   ├── uv.lock                 # Lock file (uv)
 │   │   └── README.md
 │   │
 │   └── notification/               # Telegram Bot (Go)
@@ -196,9 +298,9 @@ Sandboxed/
 │
 ├── infra/                          # 🔥 Infrastructure configs
 │   ├── docker/
-│   │   ├── docker-compose.yml      # Development stack
-│   │   ├── docker-compose.dev.yml  # Dev overrides
-│   │   └── docker-compose.prod.yml # Production overrides
+│   │   ├── docker-compose.yml      # Base stack (shared)
+│   │   ├── docker-compose.dev.yml  # Dev overrides (optional)
+│   │   └── docker-compose.prod.yml # Production overrides (create when needed)
 │   ├── redis/
 │   │   └── redis.conf
 │   ├── timescaledb/
@@ -260,15 +362,33 @@ Sandboxed/
 ```
 services/tv-api/
 ├── cmd/
-│   └── server/
-│       └── main.go              # Entry point
+│   ├── tv-chart/                # Chart data collector
+│   │   ├── main.go
+│   │   └── main_storage.go
+│   ├── tv-quote/                # Quote data collector
+│   │   └── main.go
+│   ├── tv-cli/                  # CLI utility
+│   │   └── main.go
+│   ├── benchmark/               # Performance benchmark
+│   │   └── main.go
+│   └── storage-test/            # Storage testing
+│       └── main.go
 ├── internal/
-│   ├── handlers/                # HTTP/WebSocket handlers
-│   ├── models/                  # Data models
-│   ├── storage/                 # Redis/TimescaleDB clients
-│   ├── websocket/               # TradingView WS client
-│   └── config/                  # Configuration loading
-├── pkg/                         # Public packages (if needed)
+│   ├── auth/                    # Authentication (credentials, user)
+│   ├── config/                  # Configuration loading & validation
+│   ├── display/                 # Display manager
+│   ├── logging/                 # Logging utilities
+│   ├── protocol/                # TradingView protocol (parser, compression)
+│   ├── session/                 # Session management (chart, quote, reconnection)
+│   ├── store/                   # Storage (Redis, TimescaleDB)
+│   └── transport/               # WebSocket transport, heartbeat
+├── pkg/
+│   └── tradingview/             # Public TradingView client library
+│       ├── client.go
+│       ├── chart.go
+│       ├── quote.go
+│       └── types.go
+├── bin/                         # Compiled binaries
 ├── Dockerfile
 ├── go.mod
 ├── go.sum
@@ -276,25 +396,32 @@ services/tv-api/
 └── README.md
 ```
 
+**Components:**
+| Binary | Purpose |
+|--------|---------|
+| `tv-chart` | Collects OHLCV chart data from TradingView |
+| `tv-quote` | Collects real-time quote/tick data |
+| `tv-cli` | CLI utility for testing and debugging |
+
 **Responsibilities:**
 - Connect to TradingView WebSocket API
-- Collect OHLCV candles (1m/5m timeframes)
+- Collect OHLCV candles (1m/5m timeframes) via `tv-chart`
+- Collect real-time quotes via `tv-quote`
 - Store data in Redis (hot cache) and TimescaleDB (historical)
-- Provide REST API for historical data queries
+- Automatic reconnection with exponential backoff
 
 **Technology:**
 - Language: Go 1.21+
 - WebSocket: gorilla/websocket
-- Storage: go-redis/redis, pgx
-- Config: viper
+- Storage: go-redis/redis, TimescaleDB (pgx)
+- Config: YAML-based configuration
 
 **Interfaces:**
 | Direction | Protocol | Port | Data |
 |-----------|----------|------|------|
 | Inbound | WebSocket | - | TradingView stream |
-| Outbound | Redis | 6379 | OHLCV candles |
+| Outbound | Redis | 6379 | OHLCV candles, quotes |
 | Outbound | PostgreSQL | 5432 | Historical data |
-| Outbound | HTTP | 8080 | REST API |
 
 **Status:** Existing, operational
 
@@ -394,7 +521,7 @@ services/mt5-bridge/
 
 ### 3. Trading-Engine Service (Python)
 
-**Purpose:** Core trading logic with Nautilus Trader framework
+**Purpose:** Core trading logic with Nautilus Trader framework, multi-account management, and pluggable rule engine
 
 **Directory Structure:**
 ```
@@ -404,22 +531,38 @@ services/trading-engine/
 │   ├── __main__.py              # CLI entry point
 │   ├── engine.py                # Main engine orchestration
 │   │
+│   ├── accounts/                # 🔥 NEW: Multi-account management
+│   │   ├── __init__.py
+│   │   ├── account_manager.py   # Account lifecycle management
+│   │   ├── account.py           # Account model
+│   │   └── signal_router.py     # Route signals to accounts
+│   │
 │   ├── strategies/              # Trading strategies
 │   │   ├── __init__.py
 │   │   ├── base_strategy.py     # Base class with compliance
 │   │   ├── ma_crossover.py      # Example strategy
-│   │   └── position_sizer.py    # FTMO-aware sizing
+│   │   └── position_sizer.py    # Account-aware sizing
 │   │
 │   ├── adapters/                # External integrations
 │   │   ├── __init__.py
 │   │   ├── redis_adapter.py     # Redis data adapter
-│   │   └── zmq_adapter.py       # ZeroMQ execution adapter
+│   │   └── zmq_adapter.py       # ZeroMQ execution adapter (per account)
 │   │
-│   ├── risk/                    # Risk & compliance
+│   ├── rules/                   # 🔥 NEW: Pluggable Rule Engine
 │   │   ├── __init__.py
-│   │   ├── ftmo_rules.py        # FTMO rule engine
+│   │   ├── engine.py            # Rule engine core
+│   │   ├── base_rule.py         # Abstract rule interface
 │   │   ├── validators.py        # Rule validators
-│   │   └── audit_logger.py      # Compliance audit trail
+│   │   ├── audit_logger.py      # Compliance audit trail
+│   │   ├── presets/             # Built-in prop firm presets
+│   │   │   ├── __init__.py
+│   │   │   ├── ftmo.yaml        # FTMO rules
+│   │   │   ├── the5ers.yaml     # The5ers rules
+│   │   │   └── wmt.yaml         # WeMasterTrade rules
+│   │   └── types/               # Rule type implementations
+│   │       ├── __init__.py
+│   │       ├── drawdown.py      # Drawdown rules (daily, max, trailing)
+│   │       └── time_based.py    # Trading hours, sessions
 │   │
 │   ├── backtesting/             # Backtest framework
 │   │   ├── __init__.py
@@ -429,13 +572,13 @@ services/trading-engine/
 │   │
 │   ├── state/                   # State management
 │   │   ├── __init__.py
-│   │   ├── redis_snapshots.py   # State persistence
+│   │   ├── redis_snapshots.py   # State persistence (per account)
 │   │   └── crash_recovery.py    # Recovery logic
 │   │
 │   └── config/                  # Configuration
 │       ├── __init__.py
 │       ├── loader.py
-│       ├── ftmo_rules.yaml
+│       ├── accounts.yaml        # 🔥 NEW: Account configurations
 │       └── symbols.yaml
 │
 ├── tests/
@@ -443,19 +586,23 @@ services/trading-engine/
 │   ├── integration/
 │   └── fixtures/
 ├── Dockerfile
-├── pyproject.toml
+├── pyproject.toml              # Project config (uv compatible)
+├── uv.lock                     # Lock file (uv)
 └── README.md
 ```
 
 **Responsibilities:**
-- Strategy execution (event-driven signal generation)
-- FTMO rule engine (real-time compliance validation)
-- Risk management (position sizing, drawdown limits)
-- Backtesting with realistic execution model
-- Portfolio state management
+- **Multi-Account Management**: Run multiple accounts simultaneously
+- **Strategy Execution**: Event-driven signal generation (per account)
+- **Pluggable Rule Engine**: Built-in presets + custom YAML rules
+- **Risk Isolation**: Account-level risk, failures don't cascade
+- **Signal Routing**: Each account filters signals independently
+- **Backtesting**: Realistic execution model with account context
+- **State Management**: Per-account state persistence
 
 **Technology:**
 - Language: Python 3.11+
+- Package Manager: uv (fast Python package installer)
 - Framework: Nautilus Trader 1.x
 - Async: asyncio
 - Storage: redis-py, psycopg2
@@ -465,20 +612,89 @@ services/trading-engine/
 
 | Component | Purpose |
 |-----------|---------|
+| `accounts/` | Multi-account lifecycle, signal routing |
 | `strategies/` | Nautilus Strategy implementations |
-| `adapters/` | Redis (data) + ZeroMQ (execution) adapters |
-| `risk/` | FTMO rule engine, position sizing |
+| `adapters/` | Redis (data) + ZeroMQ (execution per account) |
+| `rules/` | Pluggable rule engine with presets + custom rules |
 | `backtesting/` | Realistic execution model |
-| `state/` | Redis snapshots, crash recovery |
+| `state/` | Per-account Redis snapshots, crash recovery |
 
 **Interfaces:**
 | Direction | Protocol | Port | Data |
 |-----------|----------|------|------|
 | Inbound | Redis SUB | 6379 | OHLCV candles |
 | Inbound | ZeroMQ SUB | 5556 | Tick data |
-| Outbound | ZeroMQ PUB | 5557 | Order commands |
+| Outbound | ZeroMQ PUB | 5557 | Order commands (per account) |
 | Outbound | Redis PUB | 6379 | Alerts to notification |
-| Outbound | PostgreSQL | 5432 | Trade history, audit |
+| Outbound | PostgreSQL | 5432 | Trade history, audit (per account) |
+
+---
+
+### Backtest Framework (trading-engine sub-system)
+
+The backtest framework lives under `services/trading-engine/src/backtesting/`
+and replays historical bars through **the same rule engine** used in live
+trading, so FTMO breaches surface before any live account hits them.
+
+**Layering (top-down call order):**
+
+```
+typer CLI  →  ParameterSweep / WalkForward  →  run_backtest(job)  →  BacktestRunner  →  Nautilus BacktestEngine
+   │                │                               │                      │
+   │                │                               │                      └─ FtmoComplianceActor (Nautilus Actor)
+   │                │                               │                                │
+   │                │                               │                                └─ RuleEngine (Epic 4, unchanged)
+   │                │                               │
+   │                │                               └─ BacktestJobConfig (Pydantic) → instrument / data / strategy / FTMO
+   │                │
+   │                └─ grid + random search,
+   │                  ProcessPoolExecutor fan-out,
+   │                  early-stop skip-record
+   │
+   └─ `backtest run | sweep | walkforward`
+```
+
+**Key design decisions:**
+
+1. **Indicators subclass `nautilus_trader.indicators.base.Indicator`** so the
+   same code path updates during live and backtest runs. Custom Supertrend,
+   ADX, and session-anchored VWAP live alongside re-exports of Nautilus
+   built-ins (ATR, RSI, Bollinger, Donchian).
+2. **FTMO rules inject via a Nautilus `Actor`**, not a Strategy hook. The
+   `FtmoComplianceActor` subscribes to order/position events, builds
+   `AccountState` from Portfolio + Cache each bar, and calls the existing
+   `RuleEngine`. Breaches are deduplicated by `(date, rule_name)`.
+3. **`BacktestJobConfig` is the single serializable job description** — a
+   Pydantic-frozen model with a discriminated-union `data` field
+   (synthetic / TimescaleDB / Parquet). It crosses `ProcessPoolExecutor`
+   boundaries as JSON; workers reconstruct the `BacktestRunner` in-process
+   because Nautilus engines are not pickle-safe.
+4. **Parameter sweep is skip-record on early-stop**: combos that breach a
+   drawdown threshold are retained in the result set with
+   `status="early_stop"` so the user still sees the full parameter map.
+   Aborting the whole sweep would hide mostly-good regions.
+5. **Walk-forward derives per-fold seeds** (`seed + fold_idx`) so random
+   search draws different combos on each fold, avoiding correlated
+   in-sample selection.
+6. **Cache-aside Parquet layer** for backtest data: `CachedBarLoader`
+   composes `TimescaleBarLoader` + `ParquetBarLoader`. Cache key includes
+   a SHA-256 fingerprint of min/max/count from a TimescaleDB metadata
+   query, so late-arriving bar corrections invalidate the cache
+   automatically.
+7. **`BracketStrategyMixin`** (added in 8.9) collapses the bracket-order
+   boilerplate shared by Supertrend, Donchian, RSI MR, Bollinger MR, and
+   ORB. Signal generation + reversal policy stay in subclasses; last-bar
+   reads, balance reads, and SL/TP/qty math live in the mixin.
+
+**Runbook:** `docs/runbooks/backtesting.md` — CLI walkthroughs, job YAML
+schema, common errors.
+
+**Test surface:**
+
+- Unit: 50+ tests covering facade, sweep, walk-forward, metrics, CLI.
+- Integration smoke: 1 test per strategy on 500 synthetic bars
+  (MACrossover, Supertrend, Donchian, RSI MR, Bollinger MR, ORB) plus
+  sweep + walk-forward smokes (<3 s total).
 
 ---
 
@@ -817,6 +1033,255 @@ LOG_FORMAT=json
 
 ---
 
+## Multi-Account Architecture
+
+### Account Manager
+
+The Account Manager is responsible for managing multiple trading accounts simultaneously, each with its own strategy and rule configuration.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Account Manager                                  │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐        │
+│  │    Account 1    │  │    Account 2    │  │    Account 3    │  ...   │
+│  │                 │  │                 │  │                 │        │
+│  │  Type: FTMO    │  │  Type: The5ers │  │  Type: Custom   │        │
+│  │  Strategy: A   │  │  Strategy: B   │  │  Strategy: C   │        │
+│  │  Rules: Preset │  │  Rules: Preset │  │  Rules: YAML   │        │
+│  │  Status: Active│  │  Status: Active│  │  Status: Paused│        │
+│  │                 │  │                 │  │                 │        │
+│  │  ┌───────────┐ │  │  ┌───────────┐ │  │  ┌───────────┐ │        │
+│  │  │MT5 Conn   │ │  │  │MT5 Conn   │ │  │  │MT5 Conn   │ │        │
+│  │  │Server: A  │ │  │  │Server: B  │ │  │  │Server: C  │ │        │
+│  │  └───────────┘ │  │  └───────────┘ │  │  └───────────┘ │        │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘        │
+│           │                    │                    │                  │
+│           └────────────────────┼────────────────────┘                  │
+│                                ▼                                       │
+│                    ┌───────────────────────┐                          │
+│                    │    Signal Router      │                          │
+│                    │  (filter per account) │                          │
+│                    └───────────────────────┘                          │
+│                                ▲                                       │
+│                                │                                       │
+│                    ┌───────────────────────┐                          │
+│                    │   Market Data Feed    │                          │
+│                    │    (shared source)    │                          │
+│                    └───────────────────────┘                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Account Configuration
+
+```yaml
+# accounts.yaml
+accounts:
+  - id: "ftmo-gold-001"
+    name: "FTMO Gold Challenge"
+    type: "prop_firm"
+    prop_firm: "ftmo"           # Uses preset rules
+    mt5:
+      server: "FTMO-Server"
+      login: 12345678
+      password_env: "FTMO_PASS_001"
+    strategy: "ma_crossover"
+    strategy_params:
+      fast_period: 20
+      slow_period: 50
+    signal_filter:
+      symbols: ["XAUUSD"]
+      sessions: ["london", "new_york"]
+    status: "active"
+
+  - id: "5ers-btc-001"
+    name: "The5ers BTC Account"
+    type: "prop_firm"
+    prop_firm: "the5ers"        # Uses preset rules
+    mt5:
+      server: "The5ers-Server"
+      login: 87654321
+      password_env: "5ERS_PASS_001"
+    strategy: "breakout"
+    strategy_params:
+      lookback: 20
+    signal_filter:
+      symbols: ["BTCUSD"]
+    status: "active"
+
+  - id: "personal-001"
+    name: "Personal Account"
+    type: "custom"
+    rules_file: "my_rules.yaml"  # Custom rules
+    mt5:
+      server: "ICMarkets-MT5"
+      login: 11111111
+      password_env: "PERSONAL_PASS"
+    strategy: "scalper"
+    signal_filter:
+      symbols: ["EURUSD", "GBPUSD"]
+      max_spread_pips: 1.5
+    status: "active"
+```
+
+---
+
+## Pluggable Rule Engine
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Rule Engine                                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                        Rule Loader                               │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │   │
+│  │  │  Preset Loader  │  │  YAML Loader    │  │  DB Loader      │  │   │
+│  │  │  (prop firms)   │  │  (custom files) │  │  (future)       │  │   │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                    │                                    │
+│                                    ▼                                    │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                      Rule Registry                               │   │
+│  │                                                                  │   │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐│   │
+│  │  │Drawdown  │ │Time-based│ │Position  │ │Symbol    │ │Frequency││   │
+│  │  │Rules     │ │Rules     │ │Rules     │ │Rules     │ │Rules   ││   │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └────────┘│   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                    │                                    │
+│                                    ▼                                    │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                      Rule Validator                              │   │
+│  │  - Pre-trade validation (before order)                          │   │
+│  │  - Post-trade monitoring (after fill)                           │   │
+│  │  - Continuous monitoring (every bar)                            │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                    │                                    │
+│                                    ▼                                    │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                      Audit Logger                                │   │
+│  │  - All rule checks logged                                       │   │
+│  │  - Violation history                                            │   │
+│  │  - Compliance reports                                           │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Rule Types
+
+| Category | Rule Type | Description | Example |
+|----------|-----------|-------------|---------|
+| **Drawdown** | `daily_loss_limit` | Max loss per day | 5% of balance |
+| | `max_drawdown` | Max total drawdown | 10% from peak |
+| | `trailing_drawdown` | Trailing stop on equity | 5% from high water mark |
+| **Time-based** | `trading_hours` | Allowed trading hours | 08:00-17:00 UTC |
+| | `trading_sessions` | Allowed sessions | London, New York |
+| | `trading_days` | Allowed days | Mon-Fri |
+| | `news_blackout` | Pause around news | ±30 min from high-impact |
+| **Position** | `max_position_size` | Max lots per trade | 1.0 lots |
+| | `max_open_positions` | Max concurrent trades | 3 positions |
+| | `max_per_symbol` | Max per symbol | 1 position |
+| | `max_total_exposure` | Total exposure limit | 5% of balance |
+| **Symbol** | `allowed_symbols` | Whitelist symbols | ["XAUUSD", "EURUSD"] |
+| | `blocked_symbols` | Blacklist symbols | ["USDJPY"] |
+| **Frequency** | `max_trades_per_day` | Daily trade limit | 10 trades |
+| | `min_trade_interval` | Cooldown between trades | 5 minutes |
+| | `max_trades_per_hour` | Hourly limit | 3 trades |
+
+### Preset Example: FTMO
+
+```yaml
+# presets/ftmo.yaml
+name: "FTMO Challenge"
+version: "2024.1"
+description: "FTMO prop firm challenge rules"
+
+rules:
+  # Drawdown Rules
+  - type: daily_loss_limit
+    threshold_percent: 5.0
+    reset_time: "00:00"
+    timezone: "UTC"
+    action: "block_trading"
+    warning_at: [70, 80, 90]  # Warn at 70%, 80%, 90% of limit
+
+  - type: max_drawdown
+    threshold_percent: 10.0
+    reference: "initial_balance"
+    action: "block_trading"
+    warning_at: [50, 70, 85]
+
+  # Position Rules
+  - type: max_position_size
+    max_lots: 100.0  # Depends on account size
+    scaling: "per_10k_balance"  # 1 lot per $10k
+
+  # Monitoring
+  - type: profit_target
+    target_percent: 10.0
+    action: "notify"
+
+  - type: min_trading_days
+    min_days: 4
+    action: "notify"
+```
+
+### Custom Rule Example
+
+```yaml
+# my_rules.yaml
+name: "BMad Personal Rules"
+version: "1.0"
+description: "Custom trading rules for personal account"
+
+rules:
+  # Conservative drawdown
+  - type: daily_loss_limit
+    threshold_percent: 2.0
+    action: "block_trading"
+
+  - type: max_drawdown
+    threshold_percent: 5.0
+    action: "block_trading"
+
+  # Time restrictions
+  - type: trading_sessions
+    allowed: ["london", "new_york"]
+    action: "block_trading"
+
+  - type: trading_hours
+    start: "08:00"
+    end: "20:00"
+    timezone: "UTC"
+    action: "block_trading"
+
+  # Position limits
+  - type: max_open_positions
+    limit: 2
+    action: "block_trading"
+
+  - type: max_trades_per_day
+    limit: 5
+    action: "block_trading"
+
+  # Symbol restrictions
+  - type: allowed_symbols
+    symbols: ["EURUSD", "GBPUSD", "XAUUSD"]
+    action: "block_trading"
+
+  # Custom: Max spread filter
+  - type: max_spread
+    max_pips: 2.0
+    action: "skip_signal"
+```
+
+---
+
 ## Data Architecture
 
 ### Database Schema (TimescaleDB)
@@ -826,6 +1291,66 @@ LOG_FORMAT=json
 
 -- Enable TimescaleDB extension
 CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+-- ==================== MULTI-ACCOUNT TABLES ====================
+
+-- Prop Firms (presets reference)
+CREATE TABLE prop_firms (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    rules_preset VARCHAR(50) NOT NULL,  -- References YAML preset
+    description TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Insert default prop firms
+INSERT INTO prop_firms (id, name, rules_preset) VALUES
+    ('ftmo', 'FTMO', 'ftmo'),
+    ('the5ers', 'The5ers', 'the5ers'),
+    ('wmt', 'WeMasterTrade', 'wmt');
+
+-- Trading Accounts
+CREATE TABLE accounts (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    account_type VARCHAR(20) NOT NULL,  -- 'prop_firm', 'personal', 'demo'
+    prop_firm_id VARCHAR(50) REFERENCES prop_firms(id),
+    custom_rules_file VARCHAR(255),      -- For custom accounts
+    mt5_server VARCHAR(100) NOT NULL,
+    mt5_login BIGINT NOT NULL,
+    strategy_name VARCHAR(100) NOT NULL,
+    strategy_params JSONB,
+    signal_filter JSONB,                 -- Symbols, sessions, etc.
+    status VARCHAR(20) DEFAULT 'active', -- 'active', 'paused', 'stopped'
+    initial_balance DECIMAL(18, 2),
+    current_balance DECIMAL(18, 2),
+    peak_balance DECIMAL(18, 2),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_accounts_status ON accounts (status);
+CREATE INDEX idx_accounts_type ON accounts (account_type);
+
+-- Account Daily Snapshots (for compliance tracking)
+CREATE TABLE account_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id VARCHAR(50) REFERENCES accounts(id),
+    snapshot_date DATE NOT NULL,
+    opening_balance DECIMAL(18, 2),
+    closing_balance DECIMAL(18, 2),
+    daily_pnl DECIMAL(18, 2),
+    daily_pnl_percent DECIMAL(8, 4),
+    peak_balance DECIMAL(18, 2),
+    drawdown_percent DECIMAL(8, 4),
+    trades_count INTEGER,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(account_id, snapshot_date)
+);
+
+CREATE INDEX idx_snapshots_account_date ON account_snapshots (account_id, snapshot_date DESC);
+
+-- ==================== MARKET DATA TABLES ====================
 
 -- OHLCV Candles (hypertable for time-series)
 CREATE TABLE candles (
@@ -842,9 +1367,12 @@ CREATE TABLE candles (
 SELECT create_hypertable('candles', 'time');
 CREATE INDEX idx_candles_symbol_time ON candles (symbol, time DESC);
 
--- Trades
+-- ==================== TRADING TABLES ====================
+
+-- Trades (per account)
 CREATE TABLE trades (
     trade_id UUID PRIMARY KEY,
+    account_id VARCHAR(50) REFERENCES accounts(id),  -- 🔥 NEW
     strategy_name VARCHAR(100) NOT NULL,
     symbol VARCHAR(20) NOT NULL,
     side VARCHAR(4) NOT NULL,
@@ -862,11 +1390,34 @@ CREATE TABLE trades (
 );
 
 CREATE INDEX idx_trades_time ON trades (entry_time DESC);
+CREATE INDEX idx_trades_account ON trades (account_id, entry_time DESC);  -- 🔥 NEW
 CREATE INDEX idx_trades_strategy ON trades (strategy_name, entry_time DESC);
 
--- Audit Logs
+-- ==================== COMPLIANCE TABLES ====================
+
+-- Rule Violations (per account)
+CREATE TABLE rule_violations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id VARCHAR(50) REFERENCES accounts(id),
+    timestamp TIMESTAMPTZ NOT NULL,
+    rule_type VARCHAR(50) NOT NULL,
+    rule_name VARCHAR(100) NOT NULL,
+    current_value DECIMAL(18, 4),
+    threshold_value DECIMAL(18, 4),
+    action_taken VARCHAR(50),  -- 'blocked', 'warned', 'notified'
+    order_id UUID,
+    context JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+SELECT create_hypertable('rule_violations', 'timestamp');
+CREATE INDEX idx_violations_account ON rule_violations (account_id, timestamp DESC);
+CREATE INDEX idx_violations_rule ON rule_violations (rule_type, timestamp DESC);
+
+-- Audit Logs (per account)
 CREATE TABLE audit_logs (
     log_id UUID PRIMARY KEY,
+    account_id VARCHAR(50) REFERENCES accounts(id),  -- 🔥 NEW
     timestamp TIMESTAMPTZ NOT NULL,
     event_type VARCHAR(50) NOT NULL,
     rule_name VARCHAR(100),
@@ -879,11 +1430,15 @@ CREATE TABLE audit_logs (
 );
 
 SELECT create_hypertable('audit_logs', 'timestamp');
+CREATE INDEX idx_audit_account ON audit_logs (account_id, timestamp DESC);  -- 🔥 NEW
 CREATE INDEX idx_audit_rule ON audit_logs (rule_name, timestamp DESC);
 
--- Performance Metrics (daily)
+-- ==================== PERFORMANCE TABLES ====================
+
+-- Performance Metrics (daily, per account)
 CREATE TABLE performance_metrics (
     date DATE NOT NULL,
+    account_id VARCHAR(50) REFERENCES accounts(id),  -- 🔥 NEW
     strategy_name VARCHAR(100) NOT NULL,
     total_trades INTEGER,
     winning_trades INTEGER,
@@ -893,42 +1448,110 @@ CREATE TABLE performance_metrics (
     max_drawdown_percent DECIMAL(8, 4),
     sharpe_ratio DECIMAL(8, 4),
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (date, strategy_name)
+    PRIMARY KEY (date, account_id, strategy_name)  -- 🔥 UPDATED
 );
+
+CREATE INDEX idx_metrics_account ON performance_metrics (account_id, date DESC);
 ```
 
 ### Redis Data Structures
 
 ```
-# State Snapshots (Hash)
-Key: snapshot:latest
+# ==================== PER-ACCOUNT STATE ====================
+
+# Account State Snapshots (Hash) - per account
+Key: snapshot:{account_id}:latest
+Example: snapshot:ftmo-gold-001:latest
 Fields:
   timestamp: "2025-12-03T14:32:15.123456Z"
-  positions: JSON array
-  orders: JSON array
+  positions: JSON array of open positions
+  pending_orders: JSON array
   account_balance: 100000.00
+  equity: 99850.00
   peak_balance: 102500.00
+  daily_starting_balance: 100500.00
   checksum: SHA256 hash
-TTL: 24 hours
+TTL: 1 hour
 
-# Candle Cache (Sorted Set)
-Key: candles:GOLD:1m
-Score: timestamp (unix)
-Value: JSON {open, high, low, close, volume}
-TTL: 24 hours
-
-# Compliance Metrics (Hash)
-Key: compliance:daily:2025-12-03
+# Account Compliance Metrics (Hash) - per account, per day
+Key: compliance:{account_id}:daily:{YYYY-MM-DD}
+Example: compliance:ftmo-gold-001:daily:2025-12-03
 Fields:
   daily_pnl: -350.00
-  daily_loss_percent: 0.35
+  daily_pnl_percent: -0.35
   peak_balance_today: 101200.00
+  trades_count: 5
+  max_drawdown_today: 1.2
+  rule_violations: 0
+  last_trade_time: "2025-12-03T14:32:15Z"
 TTL: 7 days
 
-# Connection Health (String)
-Key: health:tv-api, health:mt5-bridge, health:trading-engine
-Value: "connected" | "disconnected"
-TTL: 60 seconds (heartbeat)
+# Account Status (String) - per account
+Key: account:{account_id}:status
+Example: account:ftmo-gold-001:status
+Value: "active" | "paused" | "stopped" | "error"
+TTL: None (persistent)
+
+# Account Connection Health (Hash) - per account
+Key: account:{account_id}:health
+Example: account:ftmo-gold-001:health
+Fields:
+  mt5_connected: true
+  last_tick_time: "2025-12-03T14:32:15.123Z"
+  last_heartbeat: "2025-12-03T14:32:10.000Z"
+  error_count: 0
+  last_error: null
+TTL: 60 seconds (heartbeat refresh)
+
+# ==================== SHARED DATA ====================
+
+# Candle Cache (Sorted Set) - shared across accounts
+Key: candles:{symbol}:{timeframe}
+Example: candles:XAUUSD:1m
+Score: timestamp (unix milliseconds)
+Value: JSON {open, high, low, close, volume, time}
+TTL: 24 hours
+Note: Use ZRANGEBYSCORE for time-range queries
+
+# Latest Tick (Hash) - shared, per symbol
+Key: tick:{symbol}:latest
+Example: tick:XAUUSD:latest
+Fields:
+  bid: 1850.25
+  ask: 1850.45
+  spread: 0.20
+  time: "2025-12-03T14:32:15.123Z"
+TTL: 60 seconds
+
+# ==================== MESSAGING ====================
+
+# Alert Channels (Pub/Sub)
+Channel: alerts:trade:{account_id}     # Trade notifications per account
+Channel: alerts:risk:{account_id}      # Risk warnings per account
+Channel: alerts:system                 # System-wide alerts
+Channel: emergency:stop                # Emergency stop signal
+
+# Bar Events (Pub/Sub)
+Channel: bars:{symbol}:{timeframe}     # New bar events
+Example: bars:XAUUSD:1m
+
+# ==================== SERVICE HEALTH ====================
+
+# Service Health (String) - per service
+Key: health:{service_name}
+Example: health:tv-api, health:mt5-bridge, health:trading-engine
+Value: "healthy" | "degraded" | "unhealthy"
+TTL: 30 seconds (heartbeat refresh)
+
+# Service Metadata (Hash) - per service
+Key: service:{service_name}:info
+Example: service:trading-engine:info
+Fields:
+  version: "1.0.0"
+  started_at: "2025-12-03T08:00:00Z"
+  accounts_active: 3
+  last_heartbeat: "2025-12-03T14:32:15Z"
+TTL: None (persistent, updated on heartbeat)
 ```
 
 ---
@@ -949,7 +1572,7 @@ cp configs/.env.example configs/dev/.env
 # Edit configs/dev/.env with your credentials
 
 # Start infrastructure
-make infra-up  # or: docker-compose -f infra/docker/docker-compose.yml up -d redis timescaledb
+make infra-up  # or: docker compose -f infra/docker/docker-compose.yml up -d redis timescaledb
 
 # Build and start services
 make build     # Build all service images
@@ -974,65 +1597,83 @@ cd /opt/sandboxed
 cp configs/.env.example configs/prod/.env
 # Configure production credentials
 
-# Start with production overrides
-docker-compose -f infra/docker/docker-compose.yml \
-               -f infra/docker/docker-compose.prod.yml \
-               up -d
+# Start with base compose (production settings via .env)
+docker compose -f infra/docker/docker-compose.yml up -d
+
+# Or with production overrides (when docker-compose.prod.yml exists)
+# docker compose -f infra/docker/docker-compose.yml \
+#                -f infra/docker/docker-compose.prod.yml \
+#                up -d
 ```
+
+**Note:** `docker-compose.prod.yml` should be created when specific production overrides are needed (e.g., resource limits, replicas, external networks). For MVP, the base `docker-compose.yml` with production `.env` is sufficient.
 
 ### Makefile Commands
 
 ```makefile
 # Makefile (root level)
 
-.PHONY: all build up down logs test lint
+.PHONY: all build up down logs test lint clean help \
+        infra-up infra-down infra-logs infra-status \
+        build-tv-api build-mt5-bridge build-trading-engine build-notification \
+        test-tv-api test-mt5-bridge test-trading-engine test-notification \
+        lint-tv-api lint-mt5-bridge lint-trading-engine lint-notification \
+        restart
+
+# Variables
+COMPOSE_FILE := infra/docker/docker-compose.yml
+DOCKER_COMPOSE := docker compose -f $(COMPOSE_FILE)
 
 # Infrastructure
 infra-up:
-	docker-compose -f infra/docker/docker-compose.yml up -d redis timescaledb
+	$(DOCKER_COMPOSE) up -d redis timescaledb
 
 infra-down:
-	docker-compose -f infra/docker/docker-compose.yml down
+	$(DOCKER_COMPOSE) down
 
 # Build all services
 build:
-	docker-compose -f infra/docker/docker-compose.yml build
+	$(DOCKER_COMPOSE) build
 
 # Start all services
 up:
-	docker-compose -f infra/docker/docker-compose.yml up -d
+	$(DOCKER_COMPOSE) up -d
 
 # Stop all services
 down:
-	docker-compose -f infra/docker/docker-compose.yml down
+	$(DOCKER_COMPOSE) down
 
 # View logs
 logs:
-	docker-compose -f infra/docker/docker-compose.yml logs -f
+	$(DOCKER_COMPOSE) logs -f
+
+# Restart all services
+restart: down up
 
 # Individual service commands
 build-tv-api:
-	cd services/tv-api && go build -o bin/server ./cmd/server
+	cd services/tv-api && go build -o bin/tv-chart ./cmd/tv-chart
+	cd services/tv-api && go build -o bin/tv-quote ./cmd/tv-quote
 
 build-mt5-bridge:
 	cd services/mt5-bridge && cargo build --release
 
 build-trading-engine:
-	cd services/trading-engine && poetry build
+	cd services/trading-engine && uv build
 
 build-notification:
 	cd services/notification && go build -o bin/bot ./cmd/bot
 
 # Testing
 test:
-	cd services/trading-engine && poetry run pytest
+	cd services/trading-engine && uv run pytest
 	cd services/tv-api && go test ./...
 	cd services/mt5-bridge && cargo test
 	cd services/notification && go test ./...
 
 # Linting
 lint:
-	cd services/trading-engine && poetry run ruff check .
+	cd services/trading-engine && uv run ruff check .
 	cd services/tv-api && golangci-lint run
 	cd services/mt5-bridge && cargo clippy
 	cd services/notification && golangci-lint run
@@ -1062,6 +1703,446 @@ lint:
 - Redis password authentication
 - Audit logs append-only
 - Trade data encrypted at rest (filesystem level)
+
+---
+
+## Error Handling Strategy
+
+### Error Categories
+
+| Category | Examples | Handling |
+|----------|----------|----------|
+| **Transient** | Network timeout, Redis connection lost | Retry with exponential backoff |
+| **Recoverable** | MT5 disconnection, WebSocket drop | Reconnect, restore state |
+| **Fatal** | Invalid config, DB corruption | Log, alert, shutdown gracefully |
+| **Business** | Rule violation, insufficient margin | Block action, notify user |
+
+### Per-Service Error Handling
+
+#### tv-api (Go)
+```go
+// Retry policy for TradingView WebSocket
+type RetryConfig struct {
+    MaxAttempts     int           // 5
+    InitialBackoff  time.Duration // 1s
+    MaxBackoff      time.Duration // 30s
+    BackoffFactor   float64       // 2.0
+}
+
+// On disconnect:
+// 1. Log warning
+// 2. Retry with backoff
+// 3. After max attempts: alert via Redis, pause data collection
+// 4. Continue retrying in background
+```
+
+#### mt5-bridge (Rust)
+```rust
+// ZeroMQ error handling
+enum BridgeError {
+    ConnectionLost,      // Reconnect, buffer messages
+    MessageTimeout,      // Retry, log latency
+    InvalidMessage,      // Log, skip, continue
+    AccountDisconnected, // Notify engine, pause account
+}
+
+// Critical: Never lose order confirmations
+// - Buffer unconfirmed orders in memory
+// - Persist to Redis on graceful shutdown
+// - Replay on restart
+```
+
+#### trading-engine (Python)
+```python
+# Hierarchical error handling
+class ErrorHandler:
+    def handle(self, error: Exception, context: dict):
+        if isinstance(error, TransientError):
+            return self.retry_with_backoff(context)
+        elif isinstance(error, AccountError):
+            return self.pause_account(context["account_id"])
+        elif isinstance(error, RuleViolation):
+            return self.block_and_notify(context)
+        else:
+            return self.fatal_shutdown(error)
+```
+
+#### notification (Go)
+```go
+// Telegram API error handling
+// - Rate limiting: queue messages, batch send
+// - API errors: retry with backoff
+// - Never block trading operations
+// - Fall back to logging if Telegram unavailable
+```
+
+### Circuit Breaker Pattern
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Circuit Breaker States                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌─────────┐         failures > threshold         ┌─────────┐         │
+│   │ CLOSED  │ ──────────────────────────────────▶ │  OPEN   │         │
+│   │ (normal)│                                      │ (fail)  │         │
+│   └────┬────┘                                      └────┬────┘         │
+│        │                                                │              │
+│        │ success                          timeout       │              │
+│        │                                                ▼              │
+│        │                                         ┌───────────┐         │
+│        └──────────────────────────────────────── │HALF-OPEN │         │
+│                                                  │  (test)   │         │
+│                                                  └───────────┘         │
+│                                                                         │
+│   Applied to: MT5 connections, Redis, TimescaleDB                      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Recovery & Failover
+
+### State Persistence
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         State Persistence Flow                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   Runtime State (Memory)                                                │
+│   ┌──────────────────────────────────────────────────────────────┐     │
+│   │ - Open positions per account                                  │     │
+│   │ - Pending orders per account                                  │     │
+│   │ - Daily P&L per account                                       │     │
+│   │ - Rule engine state                                           │     │
+│   └──────────────────────────────────────────────────────────────┘     │
+│                              │                                          │
+│                              │ Every 5 seconds                          │
+│                              ▼                                          │
+│   Redis Snapshots (Hot)                                                 │
+│   ┌──────────────────────────────────────────────────────────────┐     │
+│   │ Key: snapshot:{account_id}:latest                            │     │
+│   │ TTL: 1 hour                                                   │     │
+│   └──────────────────────────────────────────────────────────────┘     │
+│                              │                                          │
+│                              │ Every 1 minute                           │
+│                              ▼                                          │
+│   TimescaleDB (Cold)                                                    │
+│   ┌──────────────────────────────────────────────────────────────┐     │
+│   │ Table: state_snapshots (per account, timestamped)            │     │
+│   │ Retention: 7 days                                             │     │
+│   └──────────────────────────────────────────────────────────────┘     │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Crash Recovery Sequence
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      Crash Recovery Sequence                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   1. Engine Startup                                                     │
+│      │                                                                  │
+│      ▼                                                                  │
+│   2. Load account configurations from YAML                              │
+│      │                                                                  │
+│      ▼                                                                  │
+│   3. For each account:                                                  │
+│      ├── Check Redis snapshot exists?                                   │
+│      │   ├── YES: Load snapshot, validate checksum                     │
+│      │   └── NO: Query TimescaleDB for latest state                    │
+│      │                                                                  │
+│      ▼                                                                  │
+│   4. Connect to MT5 (per account)                                       │
+│      │                                                                  │
+│      ▼                                                                  │
+│   5. Reconcile positions:                                               │
+│      ├── Compare snapshot positions vs MT5 actual                      │
+│      ├── Log discrepancies                                             │
+│      └── Use MT5 as source of truth                                    │
+│      │                                                                  │
+│      ▼                                                                  │
+│   6. Recalculate daily P&L from trade history                          │
+│      │                                                                  │
+│      ▼                                                                  │
+│   7. Resume normal operation                                            │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Failover Scenarios
+
+| Scenario | Detection | Recovery |
+|----------|-----------|----------|
+| **Engine crash** | Process exit | Systemd restart, state recovery from Redis |
+| **Redis failure** | Connection error | Fallback to TimescaleDB, degraded mode |
+| **TimescaleDB failure** | Connection error | Continue with Redis only, queue writes |
+| **MT5 disconnect (single)** | ZeroMQ timeout | Pause account, reconnect, resume |
+| **MT5 disconnect (all)** | Multiple timeouts | Alert, wait for reconnect, no new trades |
+| **Network partition** | Multiple failures | Graceful degradation, preserve positions |
+
+### Position Safety
+
+```python
+# CRITICAL: Position safety during recovery
+class PositionRecovery:
+    """
+    Golden Rule: When in doubt, trust MT5 positions over local state.
+
+    Recovery priorities:
+    1. Never duplicate orders (check MT5 first)
+    2. Never miss exits (sync positions immediately)
+    3. Always know current exposure (calculate from MT5)
+    """
+
+    def reconcile(self, account_id: str):
+        local_positions = self.load_snapshot(account_id)
+        mt5_positions = self.query_mt5(account_id)
+
+        for mt5_pos in mt5_positions:
+            if mt5_pos not in local_positions:
+                self.log_warning(f"Unknown position found: {mt5_pos}")
+                self.add_to_local(mt5_pos)
+
+        for local_pos in local_positions:
+            if local_pos not in mt5_positions:
+                self.log_warning(f"Orphan position in snapshot: {local_pos}")
+                self.remove_from_local(local_pos)
+```
+
+---
+
+## Graceful Shutdown
+
+### Shutdown Sequence
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      Graceful Shutdown Sequence                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   Signal Received (SIGTERM/SIGINT)                                      │
+│      │                                                                  │
+│      ▼                                                                  │
+│   1. Set shutdown flag (atomic)                                         │
+│      │                                                                  │
+│      ▼                                                                  │
+│   2. Stop accepting new signals                                         │
+│      ├── Unsubscribe from Redis channels                               │
+│      └── Stop processing new bars                                       │
+│      │                                                                  │
+│      ▼                                                                  │
+│   3. Wait for in-flight orders (timeout: 30s)                          │
+│      ├── Pending orders: wait for confirmation                         │
+│      └── Timeout: log warning, continue shutdown                       │
+│      │                                                                  │
+│      ▼                                                                  │
+│   4. Persist final state                                                │
+│      ├── Snapshot all accounts to Redis                                │
+│      └── Flush to TimescaleDB                                          │
+│      │                                                                  │
+│      ▼                                                                  │
+│   5. Close connections                                                  │
+│      ├── ZeroMQ sockets                                                │
+│      ├── Redis connection                                              │
+│      └── TimescaleDB connection                                        │
+│      │                                                                  │
+│      ▼                                                                  │
+│   6. Exit with code 0                                                   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Signal Handling
+
+```python
+# trading-engine signal handling
+import signal
+import asyncio
+
+class GracefulShutdown:
+    def __init__(self):
+        self.shutdown_event = asyncio.Event()
+        signal.signal(signal.SIGTERM, self._handle_signal)
+        signal.signal(signal.SIGINT, self._handle_signal)
+
+    def _handle_signal(self, signum, frame):
+        logger.info(f"Received signal {signum}, initiating graceful shutdown")
+        self.shutdown_event.set()
+
+    async def wait_for_shutdown(self):
+        await self.shutdown_event.wait()
+        await self._shutdown_sequence()
+
+    async def _shutdown_sequence(self):
+        # 1. Stop new signal processing
+        await self.signal_router.stop()
+
+        # 2. Wait for in-flight orders (per account)
+        for account in self.accounts:
+            await account.wait_pending_orders(timeout=30)
+
+        # 3. Persist state
+        for account in self.accounts:
+            await self.state_manager.snapshot(account.id)
+
+        # 4. Close connections
+        await self.close_all_connections()
+```
+
+### Emergency Stop
+
+```
+Telegram Command: /stop_all
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Emergency Stop Flow                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   /stop_all received                                                    │
+│      │                                                                  │
+│      ▼                                                                  │
+│   1. Publish to Redis: "emergency:stop"                                 │
+│      │                                                                  │
+│      ▼                                                                  │
+│   2. Trading Engine receives:                                           │
+│      ├── Immediately stop all signal processing                        │
+│      ├── Cancel all pending orders (per account)                       │
+│      └── Set all accounts to "paused" state                            │
+│      │                                                                  │
+│      ▼                                                                  │
+│   3. Notify user:                                                       │
+│      "🔴 EMERGENCY STOP: All accounts paused, X pending orders cancelled"│
+│      │                                                                  │
+│      ▼                                                                  │
+│   4. Positions remain open (manual close if needed)                     │
+│                                                                         │
+│   Resume: /resume_all (requires confirmation)                           │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## MT5 EA Architecture
+
+### EA Component Design
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     MT5 Expert Advisor (EA)                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   Location: MT5 Terminal (Windows/Wine)                                 │
+│   Language: MQL5                                                        │
+│   Purpose: Bridge between MT5 and trading system via ZeroMQ             │
+│                                                                         │
+│   ┌───────────────────────────────────────────────────────────────┐    │
+│   │                     ZMQ_Bridge_EA.mq5                          │    │
+│   ├───────────────────────────────────────────────────────────────┤    │
+│   │                                                                │    │
+│   │   OnInit()                                                     │    │
+│   │   ├── Initialize ZeroMQ context                               │    │
+│   │   ├── Connect REQ socket to mt5-bridge:5555                   │    │
+│   │   ├── Subscribe PUB socket to mt5-bridge:5557                 │    │
+│   │   └── Start tick forwarding                                    │    │
+│   │                                                                │    │
+│   │   OnTick()                                                     │    │
+│   │   ├── Pack tick data (bid, ask, time)                         │    │
+│   │   ├── Send via REQ socket                                     │    │
+│   │   └── Wait for ACK (non-blocking)                             │    │
+│   │                                                                │    │
+│   │   OnTimer() [100ms]                                            │    │
+│   │   ├── Check for incoming orders (SUB socket)                  │    │
+│   │   ├── Execute order via OrderSend()                           │    │
+│   │   └── Send execution result back                               │    │
+│   │                                                                │    │
+│   │   OnDeinit()                                                   │    │
+│   │   ├── Close all ZeroMQ sockets                                │    │
+│   │   └── Cleanup context                                          │    │
+│   │                                                                │    │
+│   └───────────────────────────────────────────────────────────────┘    │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Multi-Account MT5 Setup
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   Multi-Account MT5 Deployment                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   Option 1: Multiple MT5 Instances (Recommended for < 5 accounts)       │
+│   ┌─────────────────────────────────────────────────────────────────┐  │
+│   │                                                                  │  │
+│   │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │  │
+│   │   │ MT5 Instance │  │ MT5 Instance │  │ MT5 Instance │         │  │
+│   │   │   (FTMO)     │  │  (The5ers)   │  │  (Personal)  │         │  │
+│   │   │ Port: 5555   │  │ Port: 5565   │  │ Port: 5575   │         │  │
+│   │   └──────┬───────┘  └──────┬───────┘  └──────┬───────┘         │  │
+│   │          │                 │                 │                  │  │
+│   │          └─────────────────┼─────────────────┘                  │  │
+│   │                            │                                    │  │
+│   │                            ▼                                    │  │
+│   │               ┌────────────────────────┐                        │  │
+│   │               │      mt5-bridge        │                        │  │
+│   │               │  (multi-port support)  │                        │  │
+│   │               └────────────────────────┘                        │  │
+│   │                                                                  │  │
+│   └─────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│   Option 2: Single MT5 with Multi-Symbol EA                             │
+│   ┌─────────────────────────────────────────────────────────────────┐  │
+│   │   - One MT5 instance, one broker                                │  │
+│   │   - EA runs on multiple charts                                  │  │
+│   │   - Limited to single broker/prop firm                          │  │
+│   └─────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│   Recommendation: Option 1 for multi-prop-firm trading                  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### EA Configuration
+
+```mql5
+// ZMQ_Bridge_EA.mq5 - Input parameters
+input string   BridgeHost = "localhost";     // mt5-bridge host
+input int      ReqPort = 5555;               // REQ/REP port
+input int      SubPort = 5557;               // SUB port for orders
+input string   AccountID = "ftmo-gold-001";  // Account identifier
+input int      TickBufferSize = 100;         // Buffer size for tick batching
+input int      HeartbeatMs = 1000;           // Heartbeat interval
+```
+
+### Message Flow
+
+```
+┌───────────────┐         ┌───────────────┐         ┌───────────────┐
+│    MT5 EA     │         │  mt5-bridge   │         │trading-engine │
+│   (MQL5)      │         │    (Rust)     │         │   (Python)    │
+└───────┬───────┘         └───────┬───────┘         └───────┬───────┘
+        │                         │                         │
+        │ ──── Tick Data ───────▶ │                         │
+        │ {"symbol":"XAUUSD",     │                         │
+        │  "bid":1850.25,         │ ──── PUB Tick ────────▶ │
+        │  "ask":1850.45}         │                         │
+        │                         │                         │
+        │ ◀──── ACK ──────────── │                         │
+        │                         │                         │
+        │                         │ ◀──── Order Request ─── │
+        │                         │ {"action":"BUY",        │
+        │ ◀──── Order Command ─── │  "symbol":"XAUUSD",     │
+        │                         │  "volume":0.1}          │
+        │                         │                         │
+        │ ──── Execution Result ─▶│                         │
+        │ {"status":"filled",     │ ──── Order Result ────▶ │
+        │  "fill_price":1850.47}  │                         │
+        │                         │                         │
+```
 
 ---
 
@@ -1197,7 +2278,464 @@ Each service implements `/health` endpoint or equivalent:
 
 ---
 
-_This Architecture Document v2.0 reflects the monorepo structure with independent microservices._
+## Testing Strategy
 
-_Last Updated: 2025-12-03_
+### Testing Pyramid
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Testing Pyramid                                  │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│                            ┌─────────┐                                  │
+│                            │  E2E    │  ← Few, slow, high confidence    │
+│                            │ Tests   │    (Full system validation)      │
+│                          ┌─┴─────────┴─┐                                │
+│                          │ Integration │  ← Medium count, service        │
+│                          │   Tests     │    boundaries                   │
+│                        ┌─┴─────────────┴─┐                              │
+│                        │   Unit Tests    │  ← Many, fast, isolated       │
+│                        │                 │    (Business logic)           │
+│                        └─────────────────┘                              │
+│                                                                         │
+│   Ratio Target: 70% Unit / 20% Integration / 10% E2E                   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Per-Service Testing
+
+#### trading-engine (Python)
+
+```python
+# Test structure
+services/trading-engine/
+├── tests/
+│   ├── unit/
+│   │   ├── test_account_manager.py    # Account lifecycle
+│   │   ├── test_rule_engine.py        # Rule validation logic
+│   │   ├── test_signal_router.py      # Signal filtering
+│   │   ├── test_position_sizer.py     # Position calculations
+│   │   └── test_strategies/           # Strategy logic
+│   ├── integration/
+│   │   ├── test_redis_adapter.py      # Redis operations
+│   │   ├── test_zmq_adapter.py        # ZeroMQ messaging
+│   │   ├── test_db_operations.py      # TimescaleDB queries
+│   │   └── test_rule_presets.py       # Preset loading
+│   ├── e2e/
+│   │   └── test_full_trade_flow.py    # Signal → Order → Fill
+│   ├── fixtures/
+│   │   ├── accounts.yaml              # Test account configs
+│   │   ├── rules/                     # Test rule files
+│   │   └── market_data/               # Sample OHLCV data
+│   └── conftest.py                    # Pytest fixtures
+
+# Key test commands
+pytest tests/unit -v                   # Unit tests only
+pytest tests/integration -v            # Requires Redis/DB
+pytest tests/e2e -v                    # Requires full stack
+pytest --cov=src --cov-report=html     # Coverage report
+```
+
+#### mt5-bridge (Rust)
+
+```rust
+// Test structure
+services/mt5-bridge/
+├── tests/
+│   ├── unit_tests.rs              // Protocol parsing, message handling
+│   ├── integration_tests.rs       // ZeroMQ socket operations
+│   └── mock_mt5.rs                // Mock MT5 EA for testing
+
+// Key test commands
+cargo test                         // All tests
+cargo test --lib                   // Unit tests only
+cargo test -- --ignored            // Integration tests
+cargo llvm-cov                     // Coverage report
+```
+
+#### tv-api & notification (Go)
+
+```go
+// Test structure
+services/tv-api/
+├── internal/
+│   ├── handlers/
+│   │   └── handlers_test.go       // HTTP handlers
+│   ├── websocket/
+│   │   └── client_test.go         // WebSocket client
+│   └── storage/
+│       └── redis_test.go          // Redis operations
+
+// Key test commands
+go test ./...                      // All tests
+go test -race ./...                // With race detector
+go test -cover ./...               // Coverage
+go test -v -run TestSpecific       // Single test
+```
+
+### Critical Test Scenarios
+
+| Category | Scenario | Expected Behavior |
+|----------|----------|-------------------|
+| **Rule Engine** | Daily loss limit at 4.9% | Allow trade |
+| **Rule Engine** | Daily loss limit at 5.1% | Block trade, notify |
+| **Rule Engine** | Max drawdown at 9.9% | Allow trade |
+| **Rule Engine** | Max drawdown at 10.1% | Block all trading |
+| **Multi-Account** | Account A breaches rule | Only Account A paused |
+| **Multi-Account** | Account B continues | Unaffected by A |
+| **Recovery** | Engine crash with positions | Recover from Redis |
+| **Recovery** | Redis unavailable | Fallback to TimescaleDB |
+| **Signal Routing** | Signal for XAUUSD | Only XAUUSD accounts receive |
+| **Emergency** | /stop_all command | All accounts paused immediately |
+
+### Mocking Strategy
+
+```python
+# Mock external dependencies for unit tests
+class MockMT5Connection:
+    """Mock MT5 for testing without real broker connection"""
+    def __init__(self):
+        self.positions = []
+        self.orders = []
+
+    def get_positions(self) -> List[Position]:
+        return self.positions
+
+    def send_order(self, order: Order) -> OrderResult:
+        # Simulate fill with configurable slippage
+        return OrderResult(
+            status="filled",
+            fill_price=order.price + random.uniform(-0.5, 0.5),
+            slippage=0.02
+        )
+
+class MockRedis:
+    """In-memory Redis mock for unit tests"""
+    def __init__(self):
+        self._data = {}
+        self._pubsub = defaultdict(list)
+
+    def get(self, key: str) -> Optional[str]:
+        return self._data.get(key)
+
+    def publish(self, channel: str, message: str):
+        for callback in self._pubsub[channel]:
+            callback(message)
+```
+
+### CI/CD Testing
+
+```yaml
+# .github/workflows/test.yml
+name: Test Suite
+
+on: [push, pull_request]
+
+jobs:
+  test-trading-engine:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+      timescaledb:
+        image: timescale/timescaledb:latest-pg16
+        ports: ["5432:5432"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - run: |
+          cd services/trading-engine
+          uv sync
+          uv run pytest --cov=src
+
+  test-mt5-bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: |
+          cd services/mt5-bridge
+          cargo test
+
+  test-go-services:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+      - run: |
+          cd services/tv-api && go test -race ./...
+          cd ../notification && go test -race ./...
+```
+
+### Performance Testing
+
+```python
+# Benchmark critical paths
+import pytest
+
+@pytest.mark.benchmark
+def test_rule_validation_performance(benchmark):
+    """Rule validation must complete in < 50ms"""
+    engine = RuleEngine()
+    engine.load_preset("ftmo")
+
+    result = benchmark(
+        engine.validate_trade,
+        account_id="test-001",
+        trade=sample_trade
+    )
+
+    assert result.duration_ms < 50
+
+@pytest.mark.benchmark
+def test_signal_routing_performance(benchmark):
+    """Signal routing for 5 accounts must complete in < 10ms"""
+    router = SignalRouter(accounts=create_test_accounts(5))
+
+    result = benchmark(
+        router.route_signal,
+        signal=sample_signal
+    )
+
+    assert result.duration_ms < 10
+```
+
+---
+
+## Architecture Decision Records (Continued)
+
+### ADR-006: MT5 Multi-Instance Deployment
+
+**Status:** Accepted
+
+**Context:** Need to support multiple prop firm accounts with different brokers.
+
+**Decision:** Deploy separate MT5 instances per account (Option 1 in MT5 EA Architecture).
+
+**Rationale:**
+- Each prop firm requires its own MT5 server connection
+- Isolation prevents cross-account issues
+- Port-based routing is simple and reliable
+- Resource overhead acceptable for < 5 accounts
+
+**Consequences:**
+- Positive: Complete isolation, simple debugging
+- Negative: Higher resource usage, multiple MT5 installations
+
+---
+
+### ADR-007: State Recovery Priority
+
+**Status:** Accepted
+
+**Context:** Need to recover state after crashes without duplicating orders or missing exits.
+
+**Decision:** Use Redis as primary recovery source, TimescaleDB as fallback, MT5 as source of truth for positions.
+
+**Rationale:**
+- Redis: Fast, recent state (5-second snapshots)
+- TimescaleDB: Durable, 1-minute snapshots
+- MT5: Actual positions (authoritative)
+
+**Consequences:**
+- Positive: Fast recovery, guaranteed position accuracy
+- Negative: Slight complexity in reconciliation logic
+
+---
+
+### ADR-008: Per-Account Redis Keys
+
+**Status:** Accepted
+
+**Context:** Multi-account support requires isolated state in Redis.
+
+**Decision:** Use `{category}:{account_id}:{key}` pattern for all per-account data.
+
+**Rationale:**
+- Clear namespace separation
+- Easy to query by account
+- Supports Redis key pattern matching
+- Consistent across all state types
+
+**Consequences:**
+- Positive: Clean isolation, easy debugging
+- Negative: Slightly longer key names
+
+---
+
+---
+
+## Epic 10 Additions — Operational Hardening (2026-05-01)
+
+The following modules were introduced in Epic 10 and are not reflected in the original directory tree above. All live under `services/trading-engine/`.
+
+### Engine refactor — god-object split (10.1 + 10.2)
+
+`src/engine/` now contains:
+
+| File | Purpose |
+|------|---------|
+| `config.py` | `EngineConfig` frozen dataclass — DI container replacing 9 optional deps |
+| `collaborators.py` | Typed collaborator bundles passed into lifecycle components |
+| `lifecycle.py` | `EngineLifecycle` — top-level coordinator: recovery → live → graceful shutdown |
+| `recovery_orchestrator.py` | `RecoveryOrchestrator` — cold-start: snapshot load, reconcile, rearm |
+| `live_orchestrator.py` | `LiveOrchestrator` — per-account `LiveAccountSession` management |
+| `account_session.py` | `LiveAccountSession` state machine (start/stop/add/remove/reload/crash) |
+| `actors.py` | Shared `build_compliance_actor` factory used by live + backtest |
+| `lock_lost.py` | `LockLostMediator` — Redis lock-lost event propagation |
+| `clients/bar_translator.py` | Timeframe parse + Pydantic Bar → Nautilus Bar conversion |
+| `clients/order_translator.py` | Nautilus Order → internal `Order`; MARKET only |
+| `clients/submit_dispatcher.py` | validate/send/translate → Nautilus filled/rejected/denied/timeout events |
+| `clients/redis_data_client.py` | `RedisDataClient` Nautilus `LiveDataClient` subclass; pubsub drain |
+| `clients/zmq_execution_client.py` | `ZmqExecutionClient` Nautilus `LiveExecutionClient` subclass |
+
+Original `engine.py` reduced to thin wrapper (~200 LOC); logic split into components above.
+
+### Audit double-entry (10.3)
+
+`src/audit/audit_writer.py` — `AuditWriter` replaces the fire-and-forget `asyncio.create_task(audit.log_*(...))` pattern:
+
+- `log_sync()` — blocks caller until DB commit; required on all `account.*` write paths.
+- `log_async()` — enqueues to bounded `asyncio.Queue(10_000)`; back-pressure if full.
+- `worker()` — drain loop; batch INSERT every 100 entries or 0.5s.
+- `drain()` — called by `GracefulShutdown._persist_final_state()` before DB close.
+
+### Atomic exposure gate (10.4)
+
+`src/execution/exposure_reservation.py` + `src/execution/lua_scripts/`:
+
+- `atomic_reserve.lua` — compare-and-set: read snapshot, check `used + required ≤ max`, write atomically.
+- `atomic_release.lua` — rollback reservation on MT5 timeout/reject.
+- `ExposureReservation` Python wrapper integrated into `ValidatedZmqAdapter` via opt-in `max_lots_provider`.
+
+### Kill-switch flat positions (10.7)
+
+`src/state/emergency_stop_handler.py` — `EmergencyStopHandler`:
+
+- Subscribes to `emergency:stop` Redis channel.
+- For each active account: `query_positions` → opposite-side MARKET close per position → `pause_account`.
+- Writes sync audit rows: `EMERGENCY_STOP_TRIGGERED` + `EMERGENCY_STOP_COMPLETE`.
+- Wired into `EngineConfig.feature_flags.emergency_stop` + `EngineLifecycle.start/stop`.
+
+### Orders package
+
+`src/orders/close_order_builder.py` — builds opposite-side MARKET close orders for flat-positions flow.
+
+### News blackout rule (10.8)
+
+`src/calendar/` — new package:
+
+| File | Purpose |
+|------|---------|
+| `calendar_models.py` | `CalendarEvent` + `EventIndex` (bisect-based `active_events_at`) |
+| `forex_factory_parser.py` | Tolerant ForexFactory weekly XML parser |
+| `economic_calendar_service.py` | Background fetch (1×/day) + Redis 26h TTL cache + static fallback + refresh loop |
+
+`src/rules/types/news_blackout.py` — `NewsBlackoutRule(BaseRule)`:
+
+- Registered in rule parser; late-binds `snapshot_provider`.
+- Fail-open WARN when calendar unavailable (never hard-blocks on feed failure).
+- Configurable `blackout_minutes_before/after`, `impact_levels`, `symbols_filter`.
+
+### Backtest spread parity (10.9)
+
+`src/backtesting/spread_fee_model.py` — `SpreadAwareFeeModel(FeeModel)` Nautilus subclass:
+
+- Charges `per_lot_usd + spread_pips × pip_value × fill_qty` per fill.
+- `commission_profile_to_fee_model` dispatches to `SpreadAwareFeeModel` when `spread_pips` is non-empty; falls back to legacy `PerContractFeeModel`.
+- Per-symbol `pip_value` mapping with default 10 USD/pip/lot.
+- Swap accrual (`swap_long`/`swap_short`) deferred to 10.9b — requires Nautilus `SimulationModule` for rollover-time accrual.
+
+### Alembic bootstrap (10.10)
+
+`services/trading-engine/alembic/` — replaces raw SQL migration workflow:
+
+| Path | Purpose |
+|------|---------|
+| `alembic.ini` | Points `sqlalchemy.url` to `DATABASE_URL` env; `postgres+asyncpg→postgres` coercion in `env.py` |
+| `alembic/env.py` | Manual revisions only (autogenerate disabled) |
+| `alembic/versions/005_state_snapshots.py` … `010_rename_ftmo_audit_events.py` | 6 ported revisions; `upgrade()` executes original SQL; `downgrade()` raises `NotImplementedError` for hypertable-destructive paths |
+
+Run `alembic stamp 010` on an existing DB (already manually migrated) to mark head without re-running. Fresh DB: `alembic upgrade head` runs all 6 revisions.
+
+---
+
+---
+
+## Epic 11 Additions — Market Regime Classifier (2026-05-02)
+
+New package `services/trading-engine/src/regime/` ships a rule-based market regime classifier sitting between the bar feed and strategy routing. All detail is in `docs/epic-11-context.md`; see `docs/research/regime-classifier-architecture.md` for the design rationale.
+
+### New package: `src/regime/`
+
+| File | Purpose |
+|------|---------|
+| `states.py` | `RegimeState` enum: `TRENDING_UP`, `TRENDING_DOWN`, `RANGING`, `HIGH_VOLATILITY`, `UNKNOWN` |
+| `features.py` | `RegimeFeatures` (9 fields) + `FeatureExtractor` rolling 200-bar window per `BarType` |
+| `classifier.py` | `RuleBasedRegimeClassifier.decide(features)` — pure function, thresholds from YAML |
+| `decision.py` | `RegimeDecision` frozen dataclass (state, confidence, timestamp, bar_type) |
+| `hysteresis.py` | `HysteresisFilter` — 2-bar confirmation per `BarType`; flicker prevention |
+| `audit.py` | `RegimeAuditAdapter` — `RegimeDecision → AuditEntry` via `AuditWriter.log_async` |
+| `factory.py` | `build_regime_aware_router` — constructs `RegimeAwareRouter` from `EngineConfig` |
+
+### New indicators: `src/indicators/`
+
+Three new indicators registered alongside existing Nautilus-subclass indicators:
+
+- `bb_width.py` — Bollinger Band width % (normalised)
+- `ema_slope.py` — EMA slope (normalised by price)
+- `realized_vol.py` — Realised volatility (rolling window)
+
+### Bar pipeline change
+
+The bar path from `RedisAdapter` to strategies now routes through `RegimeAwareRouter` when `regime_classifier.enabled: true` in the firm YAML:
+
+```
+redis_adapter.set_bar_callback
+  → RegimeAwareRouter.on_bar
+      → FeatureExtractor (rolling 200 bars)
+      → RuleBasedRegimeClassifier.decide
+      → HysteresisFilter (2-bar confirmation)
+      → AuditWriter.log_async          ← audit-before-routing invariant
+      → if HIGH_VOLATILITY: drop bar   ← global kill-switch
+        elif regime in strategy.allowed_regimes: route
+        else: drop
+```
+
+`RegimeAwareRouter` wraps `StrategyDataRouter` as a drop-in. When the flag is `false` the factory returns the unwrapped `StrategyDataRouter`, so no warm-path code runs.
+
+### Strategy regime declarations
+
+Six strategies updated with `@register_strategy(..., regimes=[...])`:
+
+| Strategy | Allowed regimes |
+|---|---|
+| supertrend, donchian_breakout, ma_crossover | `TRENDING_UP`, `TRENDING_DOWN` |
+| rsi_mean_reversion, bollinger_mean_reversion | `RANGING` |
+| orb | `[]` (explicit Phase 1 opt-out; wires to `HIGH_VOLATILITY` in Phase 2) |
+
+Strategies without a `regimes=` kwarg continue to receive all bars (backwards compat).
+
+### Feature flag and rollout
+
+- Default: `regime_classifier.enabled: false` in `configs/firms/ftmo.yaml`. The5ers does not declare the block.
+- Rollout: YAML flip + restart — no DB migration, no state migration. Hysteresis state is process-local; first 2 bars post-restart may flicker (documented, accepted for Phase 1).
+- Rollback: `enabled: false` + restart.
+
+### What remains deferred (Phase 2+)
+
+HMM classifier, Hurst exponent feature, Redis hysteresis persistence, multi-instrument beyond XAUUSD, and XGBoost refinement. See `docs/epic-11-context.md` §Phase 2 Roadmap.
+
+---
+
+_This Architecture Document v3.2 reflects the complete multi-account / multi-firm trading system design after Epic 11 (Market Regime Classifier)._
+_Epic 10 additions appended 2026-05-01; Epic 11 additions appended 2026-05-02._
+
+_Last Updated: 2026-05-02_
 _Author: Winston (Architect Agent)_
