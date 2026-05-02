@@ -2,11 +2,11 @@
 
 import pytest
 from decimal import Decimal
-from unittest.mock import Mock
 
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.data import BarType
 
+from src.regime.states import RegimeState
 from src.strategies.registry import StrategyRegistry, register_strategy
 from src.strategies.base_strategy import BaseStrategy
 from src.strategies.config import BaseStrategyConfig
@@ -218,3 +218,123 @@ class TestStrategyInstantiation:
 
         assert isinstance(strategy, MockStrategy)
         assert strategy.config.account_id == "ftmo-main"
+
+
+# ---------------------------------------------------------------------------
+# Regime mapping (Epic 11 story 11.6)
+# ---------------------------------------------------------------------------
+
+
+class TestStrategyRegimeRegistration:
+    """Tests for regime-aware registration extensions (story 11.6)."""
+
+    def test_register_without_regimes_kwarg_defaults_to_none(self):
+        # Backwards compat: every call site shipped before story 11.6
+        # passed only (name, cls). Those entries must keep working and
+        # land in the regime map as None (always-allow).
+        StrategyRegistry.register("legacy", MockStrategy)
+        assert StrategyRegistry.get_regimes("legacy") is None
+
+    def test_register_with_regimes_kwarg_stores_frozenset(self):
+        StrategyRegistry.register(
+            "trender",
+            MockStrategy,
+            regimes=[RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN],
+        )
+        regs = StrategyRegistry.get_regimes("trender")
+        assert isinstance(regs, frozenset)
+        assert regs == frozenset(
+            {RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN}
+        )
+
+    def test_empty_regimes_list_means_never_route(self):
+        # ORB Phase 1 ships with `regimes=[]` — explicit opt-out: the
+        # router must distinguish this from "missing kwarg" (None).
+        StrategyRegistry.register("orb", MockStrategy, regimes=[])
+        regs = StrategyRegistry.get_regimes("orb")
+        assert regs == frozenset()
+        assert regs is not None
+
+    def test_unknown_state_in_regimes_rejected(self):
+        # UNKNOWN is the warmup-only sentinel; declaring a strategy as
+        # "trades during UNKNOWN" would let it run on undefined indicator
+        # state. Reject at registration time so the failure surfaces at
+        # import.
+        with pytest.raises(ValueError, match="UNKNOWN"):
+            StrategyRegistry.register(
+                "broken",
+                MockStrategy,
+                regimes=[RegimeState.TRENDING_UP, RegimeState.UNKNOWN],
+            )
+
+    def test_get_regimes_for_unknown_strategy_raises(self):
+        with pytest.raises(ValueError, match="not registered"):
+            StrategyRegistry.get_regimes("never_registered")
+
+    def test_decorator_with_regimes_kwarg(self):
+        @register_strategy(
+            "decorated_trender",
+            regimes=[RegimeState.TRENDING_UP],
+        )
+        class DecoratedStrategy(BaseStrategy):
+            def generate_signal(self, bar) -> SignalType:
+                return SignalType.NONE
+
+        assert StrategyRegistry.is_registered("decorated_trender")
+        assert StrategyRegistry.get_regimes("decorated_trender") == frozenset(
+            {RegimeState.TRENDING_UP}
+        )
+
+    def test_decorator_without_regimes_kwarg_is_always_allow(self):
+        # Backwards compat at the decorator surface.
+        @register_strategy("decorated_legacy")
+        class DecoratedLegacy(BaseStrategy):
+            def generate_signal(self, bar) -> SignalType:
+                return SignalType.NONE
+
+        assert StrategyRegistry.get_regimes("decorated_legacy") is None
+
+    def test_get_all_regime_maps_returns_immutable_view(self):
+        StrategyRegistry.register(
+            "t",
+            MockStrategy,
+            regimes=[RegimeState.TRENDING_UP],
+        )
+        StrategyRegistry.register("legacy2", AnotherMockStrategy)
+        m = StrategyRegistry.get_all_regime_maps()
+        assert m["t"] == frozenset({RegimeState.TRENDING_UP})
+        assert m["legacy2"] is None
+        # Caller mutating the returned mapping must not corrupt registry.
+        with pytest.raises(TypeError):
+            m["hacked"] = frozenset()  # type: ignore[index]
+
+    def test_unregister_clears_regime_entry(self):
+        StrategyRegistry.register(
+            "to_remove",
+            MockStrategy,
+            regimes=[RegimeState.RANGING],
+        )
+        assert StrategyRegistry.unregister("to_remove") is True
+        with pytest.raises(ValueError, match="not registered"):
+            StrategyRegistry.get_regimes("to_remove")
+
+    def test_clear_clears_regime_map(self):
+        StrategyRegistry.register(
+            "x",
+            MockStrategy,
+            regimes=[RegimeState.RANGING],
+        )
+        StrategyRegistry.clear()
+        assert StrategyRegistry.get_all_regime_maps() == {}
+
+    def test_iterable_regimes_dedupes(self):
+        # The decorator accepts list/tuple/set; duplicates collapse via
+        # frozenset, no error.
+        StrategyRegistry.register(
+            "dedup",
+            MockStrategy,
+            regimes=[RegimeState.RANGING, RegimeState.RANGING],
+        )
+        assert StrategyRegistry.get_regimes("dedup") == frozenset(
+            {RegimeState.RANGING}
+        )
