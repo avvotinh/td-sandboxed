@@ -16,6 +16,7 @@ from __future__ import annotations
 from src.regime.audit import RegimeAuditAdapter
 from src.regime.classifier import RuleBasedRegimeClassifier
 from src.regime.decision import RegimeDecision
+from src.regime.factory import build_regime_aware_router
 from src.regime.features import FeatureExtractor, RegimeFeatures
 from src.regime.hysteresis import HysteresisFilter
 from src.regime.states import RegimeState
@@ -28,4 +29,5 @@ __all__ = [
     "RegimeFeatures",
     "RegimeState",
     "RuleBasedRegimeClassifier",
+    "build_regime_aware_router",
 ]

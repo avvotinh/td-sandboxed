@@ -27,6 +27,7 @@ from src.strategies.bracket_strategy import (
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
+from src.regime.states import RegimeState
 from src.strategies.registry import register_strategy
 from src.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
@@ -49,7 +50,10 @@ class DonchianBreakoutConfig(BracketStrategyConfig, frozen=True, kw_only=True):
             raise ValueError("ATR multipliers must be positive")
 
 
-@register_strategy("donchian_breakout")
+@register_strategy(
+    "donchian_breakout",
+    regimes=[RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN],
+)
 class DonchianBreakoutStrategy(
     BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin
 ):

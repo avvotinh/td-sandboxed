@@ -15,6 +15,7 @@ from nautilus_trader.model.enums import OrderSide
 from src.orders.signal import SignalType
 from src.strategies.base_strategy import BaseStrategy
 from src.strategies.config import BaseStrategyConfig
+from src.regime.states import RegimeState
 from src.strategies.registry import register_strategy
 
 
@@ -41,7 +42,10 @@ class MACrossoverConfig(BaseStrategyConfig, frozen=True, kw_only=True):
             )
 
 
-@register_strategy("ma_crossover")
+@register_strategy(
+    "ma_crossover",
+    regimes=[RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN],
+)
 class MACrossoverStrategy(BaseStrategy):
     """Moving Average Crossover strategy.
 

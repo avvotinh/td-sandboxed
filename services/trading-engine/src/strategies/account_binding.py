@@ -13,7 +13,7 @@ name. This module bridges the gap by:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.strategies.registry import StrategyRegistry

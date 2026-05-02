@@ -23,6 +23,7 @@ from src.strategies.bracket_strategy import (
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
+from src.regime.states import RegimeState
 from src.strategies.registry import register_strategy
 from src.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
@@ -43,7 +44,10 @@ class BollingerMeanReversionConfig(BracketStrategyConfig, frozen=True, kw_only=T
             raise ValueError(f"num_std must be positive, got {self.num_std}")
 
 
-@register_strategy("bollinger_mean_reversion")
+@register_strategy(
+    "bollinger_mean_reversion",
+    regimes=[RegimeState.RANGING],
+)
 class BollingerMeanReversionStrategy(
     BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin
 ):

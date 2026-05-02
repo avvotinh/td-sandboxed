@@ -75,6 +75,16 @@ class StrategyDataRouter:
         """
         self._accounts = accounts
 
+    @property
+    def bound_accounts(self) -> list[HasStrategy]:
+        """Read-only snapshot of the bound accounts.
+
+        Exposed for :class:`RegimeAwareRouter` (story 11.7) which iterates
+        the same account list to apply regime filtering before delegating
+        per-account dispatch back to :meth:`_route_bar_to_account`.
+        """
+        return list(self._accounts)
+
     def route_bar(self, bar: Bar) -> None:
         """Route bar data to matching account strategies.
 
@@ -85,21 +95,31 @@ class StrategyDataRouter:
             bar: Bar data to route
         """
         for account in self._accounts:
-            if not self._should_route_to_account(account, bar.symbol):
-                continue
+            self._route_bar_to_account(account, bar)
 
-            strategy = getattr(account, 'strategy_instance', None)
-            if strategy is None:
-                continue
+    def _route_bar_to_account(self, account: HasStrategy, bar: Bar) -> None:
+        """Dispatch one bar to a single account's strategy.
 
-            try:
-                strategy.on_bar(bar)
-            except Exception as e:
-                logger.error(
-                    "Error routing bar to strategy %s: %s",
-                    account.strategy,
-                    e,
-                )
+        Stable contract for :class:`RegimeAwareRouter` (story 11.7): the
+        wrapper applies regime filtering across accounts and calls this
+        method for each account that should receive the bar, leaving
+        symbol-filter, strategy-instance, and exception handling here.
+        """
+        if not self._should_route_to_account(account, bar.symbol):
+            return
+
+        strategy = getattr(account, 'strategy_instance', None)
+        if strategy is None:
+            return
+
+        try:
+            strategy.on_bar(bar)
+        except Exception as e:
+            logger.error(
+                "Error routing bar to strategy %s: %s",
+                account.strategy,
+                e,
+            )
 
     async def route_bar_async(self, bar: Bar) -> None:
         """Async version of bar routing.

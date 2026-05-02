@@ -24,6 +24,7 @@ from src.strategies.bracket_strategy import (
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
+from src.regime.states import RegimeState
 from src.strategies.registry import register_strategy
 from src.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
@@ -49,7 +50,7 @@ class RSIMeanReversionConfig(BracketStrategyConfig, frozen=True, kw_only=True):
             )
 
 
-@register_strategy("rsi_mean_reversion")
+@register_strategy("rsi_mean_reversion", regimes=[RegimeState.RANGING])
 class RSIMeanReversionStrategy(
     BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin
 ):

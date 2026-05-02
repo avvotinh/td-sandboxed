@@ -27,6 +27,7 @@ from src.strategies.bracket_strategy import (
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
+from src.regime.states import RegimeState
 from src.strategies.registry import register_strategy
 from src.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
@@ -56,7 +57,10 @@ class SupertrendConfig(BracketStrategyConfig, frozen=True, kw_only=True):
             raise ValueError(f"tp_atr_mult must be positive, got {self.tp_atr_mult}")
 
 
-@register_strategy("supertrend")
+@register_strategy(
+    "supertrend",
+    regimes=[RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN],
+)
 class SupertrendStrategy(
     BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin
 ):

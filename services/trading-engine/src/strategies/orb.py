@@ -58,7 +58,10 @@ class ORBConfig(BracketStrategyConfig, frozen=True, kw_only=True):
             raise ValueError("opening_range_minutes must be positive")
 
 
-@register_strategy("orb")
+# Phase 1: ORB opts out of regime routing (regimes=[]). Phase 2 will
+# wire it to HIGH_VOLATILITY once a volatility-targeted strategy clears
+# validation.
+@register_strategy("orb", regimes=[])
 class ORBStrategy(
     BaseStrategy,
     ATRStopMixin,
