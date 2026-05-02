@@ -16,10 +16,12 @@ from __future__ import annotations
 from src.regime.classifier import RuleBasedRegimeClassifier
 from src.regime.decision import RegimeDecision
 from src.regime.features import FeatureExtractor, RegimeFeatures
+from src.regime.hysteresis import HysteresisFilter
 from src.regime.states import RegimeState
 
 __all__ = [
     "FeatureExtractor",
+    "HysteresisFilter",
     "RegimeDecision",
     "RegimeFeatures",
     "RegimeState",
