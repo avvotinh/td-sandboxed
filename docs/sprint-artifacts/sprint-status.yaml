@@ -202,7 +202,7 @@ development_status:
   11-3-rule-based-classifier: done              # M  — RuleBasedRegimeClassifier.decide() pure + RegimeDecision dataclass; priority HIGH_VOL → trending → ranging → UNKNOWN
   11-4-hysteresis-filter: done                  # M  — HysteresisFilter 2-bar confirmation per-BarType state; flicker prevention
   # Phase 11.C — Audit + routing primitives
-  11-5-regime-audit-adapter: backlog            # M  — RegimeAuditAdapter → AuditEntry via existing AuditLogger (event_type=regime_decision); security-reviewer gate
+  11-5-regime-audit-adapter: done               # M  — RegimeAuditAdapter → AuditEntry via existing AuditLogger (event_type=regime_decision); security-reviewer gate
   11-6-strategy-regime-registration: backlog    # S  — register_strategy(regimes=) decorator + StrategyRegistry._strategy_regimes; backwards compat (missing kwarg = always-allow)
   # Phase 11.D — Integration
   11-7-regime-aware-router-integration: backlog # XL — RegimeAwareRouter wraps StrategyDataRouter + factory + wire account_binding.py:40,136 behind feature flag + add regimes=[...] to 6 strategies + E2E CSV fixtures
