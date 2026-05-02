@@ -207,3 +207,25 @@ development_status:
   # Phase 11.D — Integration
   11-7-regime-aware-router-integration: done    # XL — RegimeAwareRouter wraps StrategyDataRouter + factory + wire account_binding.py:40,136 behind feature flag + add regimes=[...] to 6 strategies + E2E CSV fixtures
   epic-11-retrospective: optional
+
+  # Epic 12: Backtest Validation + Parameter Optimization (Shape B) (12 stories — 3 phases)
+  # Source: docs/strategy-review-2026-05-02.md (Land during/after backtest epic items)
+  # Context: docs/epic-12-context.md
+  # Goal: validate 6 shipped strategies on real XAUUSD data; walk-forward + parameter sweep top 2-3; close strategy-review carryover
+  epic-12: contexted
+  # Phase 12.A — In-sample validation
+  12-1-dataset-pipeline-xauusd: backlog                    # M  — XAUUSD M5+M15 2y IS + 1y OOS reserve, Parquet cached, fingerprint stamped via ContentHashFingerprint
+  12-2-in-sample-baseline-harness: backlog                 # M  — single runner wraps run_backtest for 6 strategies; identical venue/fee/seed; reuses BacktestJobConfig
+  12-3-comparison-report-writer: backlog                   # S  — markdown rollup table (Sharpe/Sortino/MaxDD/PF/WinRate/Trades/Breaches) side-by-side
+  12-4-ftmo-compliance-verification: backlog               # M  — PropFirmComplianceActor attached; daily-loss/max-DD/consistency rule simulated; breach assertions
+  # Phase 12.B — Walk-forward + parameter sweep
+  12-5-walk-forward-harness: backlog                       # M  — 6m rolling (train 6m/test 1m/step 1m); OOS metrics aggregation; ratio threshold (mean OOS ≥ 0.7×IS, std/mean ≤ 0.5)
+  12-6-parameter-sweep-harness: backlog                    # L  — Optuna TPE adapter (fallback random with seed=42); search space cap ≤ 200 trials; early-stop on max_overall_dd_pct > 10%
+  12-7-parameter-sweep-experiment: backlog                 # XL — actual experiment on top 2-3 strategies passing 12.A filter; produces docs/sprint-artifacts/epic-12-validation-report.md; spec doc at 12-7-parameter-sweep-experiment.md
+  # Phase 12.C — Strategy review carryover + runbook
+  12-8-bracket-execution-coverage-tests: backlog           # M  — tick-rounding, ATR-zero, position-reversal across 5 bracket strategies (strategy review §"Land during" #4)
+  12-9-router-e2e-integration-tests: backlog               # M  — regime rejection actually filters bars; 1-2 strategies + 4 CSV fixtures; ablation harness path (strategy review §"Land during" #5)
+  12-10-post-init-regression-tests: backlog                # S  — one deliberately-invalid config per strategy, asserts ValueError (strategy review §"Land during" #6)
+  12-11-runbook-update: backlog                            # S  — docs/runbooks/backtesting.md adds harness wrapper pointers + dataset fingerprint reference
+  12-12-strategy-roster-memo: backlog                      # S  — (optional) go/no-go memo per strategy with evidence; deliverable doc consolidates 12.3 + 12.7 outputs
+  epic-12-retrospective: optional
