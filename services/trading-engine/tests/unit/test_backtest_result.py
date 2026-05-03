@@ -104,3 +104,22 @@ class TestBacktestResult:
     def test_metrics_optional(self) -> None:
         r = self._minimal()
         assert r.metrics is None
+
+    def test_config_snapshot_defaults_to_none(self) -> None:
+        r = self._minimal()
+        assert r.config_snapshot is None
+
+    def test_config_snapshot_carries_arbitrary_dict(self) -> None:
+        snapshot = {
+            "dataset": {"spec_name": "xauusd-validation", "fingerprint": "abc123"},
+            "strategy_params": {"fast_period": 5, "slow_period": 20},
+        }
+        r = BacktestResult(
+            strategy_name="ma_crossover",
+            start=datetime(2026, 1, 1, tzinfo=UTC),
+            end=datetime(2026, 4, 1, tzinfo=UTC),
+            initial_balance=Decimal("100000"),
+            final_balance=Decimal("105000"),
+            config_snapshot=snapshot,
+        )
+        assert r.config_snapshot == snapshot

@@ -214,7 +214,7 @@ development_status:
   # Goal: validate 6 shipped strategies on real XAUUSD data; walk-forward + parameter sweep top 2-3; close strategy-review carryover
   epic-12: contexted
   # Phase 12.A — In-sample validation
-  12-1-dataset-pipeline-xauusd: backlog                    # M  — XAUUSD M5+M15 2y IS + 1y OOS reserve, Parquet cached, fingerprint stamped via ContentHashFingerprint
+  12-1-dataset-pipeline-xauusd: done                       # M  — DatasetSpec/Pipeline + manifest + configs/datasets/xauusd-validation.yaml; BacktestResult.config_snapshot field; 62 new unit tests
   12-2-in-sample-baseline-harness: backlog                 # M  — single runner wraps run_backtest for 6 strategies; identical venue/fee/seed; reuses BacktestJobConfig
   12-3-comparison-report-writer: backlog                   # S  — markdown rollup table (Sharpe/Sortino/MaxDD/PF/WinRate/Trades/Breaches) side-by-side
   12-4-ftmo-compliance-verification: backlog               # M  — PropFirmComplianceActor attached; daily-loss/max-DD/consistency rule simulated; breach assertions

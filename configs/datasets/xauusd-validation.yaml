@@ -1,0 +1,37 @@
+# Pinned XAUUSD validation dataset for Epic 12 (Backtest Validation +
+# Parameter Optimization). Loaded by src.backtesting.dataset.spec.DatasetSpec.from_yaml
+# and consumed by DatasetPipeline (12.1) → in-sample harness (12.2) →
+# walk-forward + parameter sweep (12.5–12.7).
+#
+# Window choices (Decision §1 in docs/epic-12-context.md):
+#   * in_sample 2y — large enough for stable Sharpe/MaxDD; recent regime.
+#   * oos_reserve 4mo — held out from Phase 12.A/B; touched only at the
+#     final sanity check on picked params.
+#
+# Bumping `dataset_version` (or any window boundary) invalidates every
+# downstream comparison report. Do it deliberately.
+
+name: xauusd-validation
+description: >-
+  Pinned XAUUSD M5+M15 validation dataset for Epic 12 (in-sample
+  validation + walk-forward + parameter sweep).
+dataset_version: "1.0.0"
+
+symbol: XAUUSD
+timeframes:
+  - M5
+  - M15
+
+# Weekend gap = Fri 21:00 → Sun 22:00 ≈ 49h. Threshold of 48h flags
+# anything longer (broker outage, holiday, server downtime).
+max_gap_hours: 48.0
+
+windows:
+  - name: in_sample
+    kind: in_sample
+    start: 2024-01-01T00:00:00Z
+    end: 2026-01-01T00:00:00Z
+  - name: oos_reserve
+    kind: oos_reserve
+    start: 2026-01-01T00:00:00Z
+    end: 2026-05-01T00:00:00Z
