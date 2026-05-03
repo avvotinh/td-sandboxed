@@ -187,11 +187,19 @@ def run_backtest(
         if job.prop_firm is not None:
             preset = load_prop_firm_preset(job.prop_firm.preset_path)
             rule_engine = _build_prop_firm_rule_engine(
-                account_id=job.prop_firm.account_id, preset=preset
+                account_id=job.prop_firm.account_id,
+                preset=preset,
+                session_timezone=job.prop_firm.session_timezone,
+                consistency_block_at=job.prop_firm.consistency_block_at,
+                max_drawdown_method=job.prop_firm.max_drawdown_method,
             )
             runner.attach_prop_firm_compliance(
                 rule_engine=rule_engine,
                 account_id=job.prop_firm.account_id,
+                # Epic 12 12.4 — keep actor's daily-session boundary in
+                # sync with the rule's reset timezone so breach dedup
+                # keys match the trading day the rule sees.
+                daily_session_tz=job.prop_firm.session_timezone,
                 bar_type=bar_type,
                 venue=instrument.id.venue,
                 currency=currency,
@@ -265,20 +273,35 @@ def _read_final_balance(
         return fallback
 
 
-def _build_prop_firm_rule_engine(*, account_id: str, preset: Any) -> Any:
-    """Construct the minimum prop-firm rule set for backtest compliance.
+def _build_prop_firm_rule_engine(
+    *,
+    account_id: str,
+    preset: Any,
+    session_timezone: str = "UTC",
+    consistency_block_at: float | None = None,
+    max_drawdown_method: str = "equity_peak",
+) -> Any:
+    """Construct the prop-firm rule set for backtest compliance.
 
-    Kept small + importable inside the function so unit tests that do
-    not touch the prop-firm path never pay the import cost.
+    Delegates to :func:`build_compliance_rule_engine` (Epic 12 12.4)
+    via :meth:`ComplianceProfile.from_preset` so backtest wires the
+    same rule set as live (Epic 9.5 timezone-aware reset, Epic 9.6
+    DD method choice, Epic 9.7 consistency rule).
+
+    ``max_drawdown_method`` defaults to ``"equity_peak"`` to preserve
+    pre-12.4 behaviour for legacy callers; FTMO jobs MUST override to
+    ``"balance_based"`` (configured per-job via
+    :class:`PropFirmSpec.max_drawdown_method`).
     """
-    from src.rules.engine import RuleEngine
-    from src.rules.types.drawdown import DailyLossLimitRule, MaxDrawdownRule
-
-    return RuleEngine(
-        account_id=account_id,
-        rules=[
-            DailyLossLimitRule(threshold_percent=preset.daily_loss_pct),
-            MaxDrawdownRule(threshold_percent=preset.max_drawdown_pct),
-        ],
-        strict_mode=True,
+    from src.backtesting.dataset.compliance import (
+        ComplianceProfile,
+        build_compliance_rule_engine,
     )
+
+    profile = ComplianceProfile.from_preset(
+        preset,
+        session_timezone=session_timezone,
+        consistency_block_at=consistency_block_at,
+        max_drawdown_method=max_drawdown_method,
+    )
+    return build_compliance_rule_engine(profile, account_id=account_id)

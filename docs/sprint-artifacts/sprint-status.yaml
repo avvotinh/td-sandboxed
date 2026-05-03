@@ -217,7 +217,7 @@ development_status:
   12-1-dataset-pipeline-xauusd: done                       # M  — DatasetSpec/Pipeline + manifest + configs/datasets/xauusd-validation.yaml; BacktestResult.config_snapshot field; 62 new unit tests
   12-2-in-sample-baseline-harness: done                    # M  — StrategySpec/BaselineConfig + run_baseline() dispatch; routes per-strategy timeframe → manifest entry → ParquetDataSpec; stamps config_snapshot per Decision §5/§7; 30 unit tests
   12-3-comparison-report-writer: done                      # S  — render_comparison_report() markdown writer + BaselineFilter (Decision §2 thresholds, configurable max_dd_breach gate) + FilterVerdict + fingerprint/run_label consistency guards + table-cell sanitiser (pipe/newline injection); 27 unit tests
-  12-4-ftmo-compliance-verification: backlog               # M  — PropFirmComplianceActor attached; daily-loss/max-DD/consistency rule simulated; breach assertions
+  12-4-ftmo-compliance-verification: done                  # M  — ComplianceProfile + build_compliance_rule_engine (timezone-aware Daily/Max-DD/Consistency rules; Epic 9.5/9.6/9.7 parity); BreachSummary + assert_no_breaches (Exception base, NaN/inf guards); PropFirmSpec gains session_timezone + consistency_block_at + max_drawdown_method; runner_facade threads tz to actor; 33 new unit tests
   # Phase 12.B — Walk-forward + parameter sweep
   12-5-walk-forward-harness: backlog                       # M  — 6m rolling (train 6m/test 1m/step 1m); OOS metrics aggregation; ratio threshold (mean OOS ≥ 0.7×IS, std/mean ≤ 0.5)
   12-6-parameter-sweep-harness: backlog                    # L  — Optuna TPE adapter (fallback random with seed=42); search space cap ≤ 200 trials; early-stop on max_overall_dd_pct > 10%

@@ -22,6 +22,14 @@ from src.backtesting.dataset.comparison_report import (
     evaluate_filter,
     render_comparison_report,
 )
+from src.backtesting.dataset.compliance import (
+    BreachSummary,
+    ComplianceBreachError,
+    ComplianceProfile,
+    assert_no_breaches,
+    build_compliance_rule_engine,
+    summarize_breaches,
+)
 from src.backtesting.dataset.manifest import (
     BarGap,
     DatasetEntry,
@@ -45,6 +53,9 @@ __all__ = [
     "BarSourceProtocol",
     "BaselineConfig",
     "BaselineFilter",
+    "BreachSummary",
+    "ComplianceBreachError",
+    "ComplianceProfile",
     "DatasetEntry",
     "DatasetManifest",
     "DatasetPipeline",
@@ -55,10 +66,13 @@ __all__ = [
     "UnknownDatasetEntryError",
     "WindowKind",
     "WindowSpec",
+    "assert_no_breaches",
+    "build_compliance_rule_engine",
     "detect_gaps",
     "evaluate_filter",
     "render_comparison_report",
     "run_baseline",
+    "summarize_breaches",
     "timeframe_to_bar_suffix",
     "timeframe_to_seconds",
 ]

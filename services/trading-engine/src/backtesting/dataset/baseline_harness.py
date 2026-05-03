@@ -317,6 +317,9 @@ def _build_config_snapshot(
             else {
                 "preset_path": str(config.prop_firm.preset_path),
                 "account_id": config.prop_firm.account_id,
+                "session_timezone": config.prop_firm.session_timezone,
+                "consistency_block_at": config.prop_firm.consistency_block_at,
+                "max_drawdown_method": config.prop_firm.max_drawdown_method,
             }
         ),
         "regime_classifier_enabled": False,

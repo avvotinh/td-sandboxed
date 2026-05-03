@@ -132,10 +132,25 @@ class VenueSpec(_Frozen):
 
 
 class PropFirmSpec(_Frozen):
-    """Optional prop-firm compliance wiring."""
+    """Optional prop-firm compliance wiring.
+
+    ``session_timezone`` and ``consistency_block_at`` are Epic 12 12.4
+    additions. ``session_timezone`` flows into both the
+    :class:`DailyLossLimitRule` reset (Epic 9.5) and the
+    :class:`PropFirmComplianceActor`'s daily-session boundary so dedup
+    keys match the configured trading day. ``consistency_block_at``
+    enables Epic 9.7 :class:`ConsistencyRule` when set; ``None`` keeps
+    backward compatibility with pre-12.4 jobs (rule omitted).
+    """
 
     preset_path: Path
     account_id: str
+    session_timezone: str = "UTC"
+    consistency_block_at: float | None = None
+    # FTMO Challenge requires ``"balance_based"`` (Epic 9.6 — DD from
+    # static initial balance, not running peak). Default
+    # ``"equity_peak"`` is the conservative no-op for non-FTMO callers.
+    max_drawdown_method: str = "equity_peak"
 
     @field_validator("preset_path")
     @classmethod
@@ -143,6 +158,25 @@ class PropFirmSpec(_Frozen):
         if ".." in v.parts:
             raise ValueError(
                 f"Path traversal via '..' not allowed in PropFirmSpec.preset_path: {v}"
+            )
+        return v
+
+    @field_validator("consistency_block_at")
+    @classmethod
+    def _check_consistency_block(cls, v: float | None) -> float | None:
+        if v is not None and not 0 < v <= 100:
+            raise ValueError(
+                f"consistency_block_at must be in (0, 100], got {v}"
+            )
+        return v
+
+    @field_validator("max_drawdown_method")
+    @classmethod
+    def _check_dd_method(cls, v: str) -> str:
+        valid = {"equity_peak", "balance_based"}
+        if v not in valid:
+            raise ValueError(
+                f"max_drawdown_method must be one of {sorted(valid)}, got {v!r}"
             )
         return v
 
