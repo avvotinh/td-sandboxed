@@ -1,6 +1,10 @@
 package tradingview
 
 import (
+	"context"
+	"fmt"
+	"time"
+
 	"github.com/avvotinh/tv-api/internal/session"
 )
 
@@ -83,6 +87,11 @@ func NewChartSession(client *Client, symbol, timeframe string) (session.Session,
 // SetMarket sets the market symbol for the chart and begins loading historical data.
 // The symbol should be in the format "EXCHANGE:SYMBOL" (e.g., "BINANCE:BTCUSDT").
 // Use the OnUpdate callback to receive chart data updates.
+//
+// FakeReplay anchored fetch (free-tier historical bulk download): set
+// options.To to a non-zero Unix-second timestamp — SetMarket will issue
+// the bar_count anchor packet and remember the reference for reconnection.
+// Pair with FetchUntil / FetchRange to walk backward through history.
 func (cs *ChartSession) SetMarket(symbol string, options *ChartSessionOptions) error {
 	cs.symbol = symbol
 
@@ -94,11 +103,14 @@ func (cs *ChartSession) SetMarket(symbol string, options *ChartSessionOptions) e
 	if cs.options.Timeframe == "" {
 		cs.options.Timeframe = "1D"
 	}
-	if cs.options.Range == 0 {
-		cs.options.Range = 300
-	}
 	if cs.options.Adjustment == "" {
 		cs.options.Adjustment = "splits"
+	}
+	// Default range only for live (non-anchored) queries. FakeReplay accepts
+	// negative ranges (walk-backward), so leaving Range == 0 here lets us
+	// pick a sensible initial batch below.
+	if cs.options.Range == 0 && cs.options.To == 0 {
+		cs.options.Range = 300
 	}
 
 	// Resolve symbol
@@ -106,7 +118,18 @@ func (cs *ChartSession) SetMarket(symbol string, options *ChartSessionOptions) e
 		return NewSessionError("failed to resolve symbol", err)
 	}
 
-	// Create series
+	if cs.options.To > 0 {
+		rangeCount := cs.options.Range
+		if rangeCount == 0 {
+			rangeCount = -1000 // walk-backward initial batch
+		}
+		cs.session.SetSubscriptionWithReference(symbol, cs.options.Timeframe, cs.options.To)
+		if err := cs.session.CreateSeriesWithReference(cs.options.Timeframe, rangeCount, cs.options.To); err != nil {
+			return NewSessionError("failed to create series with reference", err)
+		}
+		return nil
+	}
+
 	if err := cs.session.CreateSeries(cs.options.Timeframe, cs.options.Range); err != nil {
 		return NewSessionError("failed to create series", err)
 	}
@@ -222,6 +245,140 @@ func (cs *ChartSession) OnEvent(callback func(eventType string, data interface{}
 			}
 		}
 	})
+}
+
+// fetchSession is the small interface FetchUntil needs from the underlying
+// session.ChartSession. Defined here to enable mock-based unit tests of the
+// loop logic without spinning up a live WebSocket bridge.
+type fetchSession interface {
+	MinPeriodTime() int64
+	RequestMoreData(seriesID string, count int) error
+	SubscribeUpdate(buf int) (<-chan struct{}, func())
+}
+
+// FetchUntil walks backward through history one batch at a time until the
+// session's smallest period timestamp is at-or-before untilTs. The caller
+// must have invoked SetMarket with options.To set first; without an anchor
+// the server interprets the request as a live tail and the walk never
+// terminates.
+//
+// Stop conditions:
+//   - min(period.Time) <= untilTs              ⇒ success.
+//   - two consecutive batches with no new bars ⇒ terminal (server out of data).
+//   - maxBatches reached                       ⇒ error (safety cap).
+//   - ctx cancelled                            ⇒ error (wraps ctx.Err()).
+func (cs *ChartSession) FetchUntil(ctx context.Context, untilTs int64, opts ...FetchOption) error {
+	return fetchUntil(ctx, cs.session, untilTs, opts...)
+}
+
+// fetchUntil is the testable core of FetchUntil. It accepts the small
+// fetchSession interface so unit tests can drive the loop with a stub.
+func fetchUntil(ctx context.Context, sess fetchSession, untilTs int64, opts ...FetchOption) error {
+	cfg := defaultFetchConfig()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	updates, release := sess.SubscribeUpdate(16)
+	defer release()
+
+	waitForUpdate := func(d time.Duration) bool {
+		select {
+		case <-updates:
+			return true
+		case <-time.After(d):
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	}
+
+	// Wait for the initial create_series batch to land before pumping
+	// request_more_data — otherwise the server may drop subsequent calls
+	// while still resolving the symbol.
+	if sess.MinPeriodTime() == 0 {
+		if !waitForUpdate(cfg.responseTimeout) {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("fetch_until cancelled before initial batch: %w", err)
+			}
+			return fmt.Errorf("fetch_until: no initial batch within %s", cfg.responseTimeout)
+		}
+	}
+
+	var prevMin int64
+	sameStreak := 0
+
+	for batch := 0; batch < cfg.maxBatches; batch++ {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("fetch_until cancelled: %w", err)
+		}
+
+		minTs := sess.MinPeriodTime()
+		if minTs > 0 && minTs <= untilTs {
+			return nil
+		}
+
+		if err := sess.RequestMoreData("s1", -cfg.batchSize); err != nil {
+			return fmt.Errorf("fetch_until request batch=%d at min_ts=%d: %w", batch, minTs, err)
+		}
+
+		// Wait for a new update event, falling through on timeout so the
+		// no-progress streak can detect a quiet server.
+		_ = waitForUpdate(cfg.responseTimeout)
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("fetch_until cancelled: %w", err)
+		}
+
+		select {
+		case <-time.After(cfg.throttle):
+		case <-ctx.Done():
+			return fmt.Errorf("fetch_until cancelled: %w", ctx.Err())
+		}
+
+		newMin := sess.MinPeriodTime()
+		if newMin == prevMin && newMin > 0 {
+			sameStreak++
+			if sameStreak >= 2 {
+				// Two consecutive no-progress batches — server has no
+				// older bars. Treat as terminal-success; caller decides
+				// whether the current min meets their needs.
+				return nil
+			}
+		} else {
+			sameStreak = 0
+		}
+		prevMin = newMin
+	}
+
+	return fmt.Errorf("fetch_until exceeded max_batches=%d (min_ts=%d, target=%d)", cfg.maxBatches, prevMin, untilTs)
+}
+
+// FetchRange fetches every bar in [fromTs, toTs] (Unix seconds, inclusive).
+// Caller must have invoked SetMarket(symbol, &ChartSessionOptions{To: toTs, ...})
+// beforehand so the FakeReplay anchor is in place. The returned slice is
+// sorted ascending by Time (oldest first) for direct consumption by the
+// Parquet writer.
+func (cs *ChartSession) FetchRange(ctx context.Context, fromTs, toTs int64, opts ...FetchOption) ([]*Period, error) {
+	if cs.symbol == "" {
+		return nil, fmt.Errorf("FetchRange: SetMarket must be called before FetchRange")
+	}
+	if fromTs >= toTs {
+		return nil, fmt.Errorf("FetchRange: fromTs (%d) must be strictly less than toTs (%d)", fromTs, toTs)
+	}
+
+	if err := cs.FetchUntil(ctx, fromTs, opts...); err != nil {
+		return nil, err
+	}
+
+	all := cs.Periods() // newest-first
+	out := make([]*Period, 0, len(all))
+	for i := len(all) - 1; i >= 0; i-- {
+		p := all[i]
+		if p.Time >= fromTs && p.Time <= toTs {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 // Delete deletes the chart session and cleans up resources.

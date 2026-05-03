@@ -23,6 +23,8 @@ type ChartSession struct {
 	symbolID          string
 	symbol            string // Store symbol for reconnection
 	timeframe         string // Store timeframe for reconnection
+	referenceToTs     int64  // FakeReplay anchor; 0 means no reference (live)
+	referenceRange    int    // FakeReplay initial range; 0 means use default 300
 	studyListeners    map[string][]func(interface{})
 	callbacks         map[string][]func(...interface{})
 	mu                sync.RWMutex
@@ -239,6 +241,39 @@ func (cs *ChartSession) ModifySeries(seriesID string, timeframe string, rangeCou
 	return cs.client.Send(packet)
 }
 
+// CreateSeriesWithReference sends create_series with the FakeReplay anchor
+// encoding from JS session.js:310:
+//
+//	calcRange = ["bar_count", reference, range]
+//
+// When toTs > 0, the server walks backward from that timestamp returning the
+// most recent rangeCount bars at-or-before it. A negative rangeCount asks the
+// server for that many older bars from the reference. When toTs == 0, the
+// payload falls back to a plain integer range (matches CreateSeries).
+//
+// Free-tier TradingView accounts can issue this packet without an auth token
+// because no replay_create_session is involved (only premium ReplayMode needs
+// that). See examples/FakeReplayMode.js for the upstream pattern.
+func (cs *ChartSession) CreateSeriesWithReference(timeframe string, rangeCount int, toTs int64) error {
+	cs.mu.Lock()
+	cs.currentSeries++
+	seriesID := fmt.Sprintf("s%d", cs.currentSeries)
+	cs.mu.Unlock()
+
+	var rangeData interface{}
+	if toTs > 0 {
+		rangeData = []interface{}{"bar_count", toTs, rangeCount}
+	} else {
+		rangeData = rangeCount
+	}
+
+	packet := protocol.Packet{
+		Type: "create_series",
+		Data: []interface{}{cs.id, "$prices", seriesID, cs.symbolID, timeframe, rangeData, ""},
+	}
+	return cs.client.Send(packet)
+}
+
 // RequestMoreData sends the request_more_data packet.
 func (cs *ChartSession) RequestMoreData(seriesID string, count int) error {
 	packet := protocol.Packet{
@@ -288,6 +323,58 @@ func (cs *ChartSession) GetMarketInfo() *MarketInfo {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 	return cs.infos
+}
+
+// MinPeriodTime returns the smallest period timestamp seen by the session.
+// Returns 0 when no periods have been received yet. Used by FetchUntil to
+// detect when the walk-backward batch has reached the requested floor.
+func (cs *ChartSession) MinPeriodTime() int64 {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	var min int64
+	for ts := range cs.periods {
+		if min == 0 || ts < min {
+			min = ts
+		}
+	}
+	return min
+}
+
+// EmitForTest exposes the internal emit() helper for unit tests that need
+// to drive callbacks directly without going through OnDataBatch. It is a
+// test-only seam — production code paths must not call this.
+func (cs *ChartSession) EmitForTest(event string, args ...interface{}) {
+	cs.emit(event, args...)
+}
+
+// SetPeriodsForTest replaces the periods map atomically; used in tests that
+// need a known cursor without round-tripping packets.
+func (cs *ChartSession) SetPeriodsForTest(periods map[int64]*Period) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.periods = periods
+}
+
+// SubscribeUpdate returns a buffered signal channel that receives a value
+// each time the session emits an "update" event (one batch of confirmed bars).
+// The buffer prevents slow consumers from blocking the WebSocket reader; once
+// full, additional signals are dropped — callers should treat the channel as
+// "at least one update arrived since last drain". The returned release fn is
+// retained for future symmetry with deregistration; today it is a no-op
+// because On() is append-only and the listener closure is GC'd with the
+// session.
+func (cs *ChartSession) SubscribeUpdate(buf int) (<-chan struct{}, func()) {
+	if buf <= 0 {
+		buf = 1
+	}
+	ch := make(chan struct{}, buf)
+	cs.On("update", func(_ ...interface{}) {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	})
+	return ch, func() {}
 }
 
 // On registers an event callback.
@@ -620,6 +707,10 @@ func (cs *ChartSession) GetRetryCount() int {
 }
 
 // connect establishes connection for this session (used by reconnection logic).
+// FakeReplay sessions (referenceToTs > 0) restore the bar_count anchor so a
+// long backtest fetch survives WebSocket flaps without losing the cursor;
+// already-buffered cs.periods de-duplicate naturally on rejoin because the
+// map is keyed by timestamp.
 func (cs *ChartSession) connect(ctx context.Context) error {
 	// Create the session
 	if err := cs.createSession(); err != nil {
@@ -635,7 +726,19 @@ func (cs *ChartSession) connect(ctx context.Context) error {
 
 	// Create series if we have timeframe stored
 	if cs.timeframe != "" {
-		if err := cs.CreateSeries(cs.timeframe, 300); err != nil {
+		cs.mu.RLock()
+		toTs := cs.referenceToTs
+		refRange := cs.referenceRange
+		cs.mu.RUnlock()
+
+		if toTs > 0 {
+			if refRange == 0 {
+				refRange = -300
+			}
+			if err := cs.CreateSeriesWithReference(cs.timeframe, refRange, toTs); err != nil {
+				return fmt.Errorf("failed to create series with reference: %w", err)
+			}
+		} else if err := cs.CreateSeries(cs.timeframe, 300); err != nil {
 			return fmt.Errorf("failed to create series: %w", err)
 		}
 	}
@@ -664,4 +767,21 @@ func (cs *ChartSession) SetSubscription(symbol, timeframe string) {
 	defer cs.mu.Unlock()
 	cs.symbol = symbol
 	cs.timeframe = timeframe
+	cs.referenceToTs = 0
+	cs.referenceRange = 0
+}
+
+// SetSubscriptionWithReference is the FakeReplay variant of SetSubscription.
+// The reconnection path (see connect) uses the stored toTs/range to restore
+// the bar_count anchor instead of falling back to a live range=300 query.
+// referenceRange is reset to 0 here (so connect picks the default -300
+// initial batch) — callers who need a different initial range should set it
+// directly on the session, not via this helper.
+func (cs *ChartSession) SetSubscriptionWithReference(symbol, timeframe string, toTs int64) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.symbol = symbol
+	cs.timeframe = timeframe
+	cs.referenceToTs = toTs
+	cs.referenceRange = 0
 }
