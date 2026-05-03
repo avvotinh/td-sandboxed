@@ -25,7 +25,25 @@ import (
 type backtestFetchSession interface {
 	SetMarket(symbol string, options *tradingview.ChartSessionOptions) error
 	FetchRange(ctx context.Context, fromTs, toTs int64, opts ...tradingview.FetchOption) ([]*tradingview.Period, error)
+	FetchHistoricalReplay(ctx context.Context, fromTs, toTs int64, opts ...tradingview.FetchOption) ([]*tradingview.Period, error)
 	Delete() error
+}
+
+// requiresReplayMode returns true for timeframes the free-tier
+// FakeReplay path cannot serve — daily, weekly, monthly. Premium
+// ReplayMode (story 12.7.0e) is the only way to bulk-fetch these.
+//
+// TradingView accepts both "D" and "1D" (and the lower-case variants)
+// for the same daily timeframe; the switch enumerates each form
+// explicitly rather than normalising so the table stays self-documenting.
+func requiresReplayMode(timeframe string) bool {
+	switch timeframe {
+	case "D", "1D", "d", "1d",
+		"W", "1W", "w", "1w",
+		"M", "1M", "m", "1m":
+		return true
+	}
+	return false
 }
 
 // barWriter mirrors the methods runBacktestFetch needs from
@@ -153,23 +171,50 @@ func fetchAndWrite(ctx context.Context, cfg backtestFetchConfig, deps backtestFe
 	sess := deps.NewSession()
 	defer func() { _ = sess.Delete() }()
 
-	if err := sess.SetMarket(cfg.Symbol, &tradingview.ChartSessionOptions{
-		Timeframe: cfg.Timeframe,
-		To:        cfg.To.Unix(),
-	}); err != nil {
+	useReplay := requiresReplayMode(cfg.Timeframe)
+
+	var setMarketOpts *tradingview.ChartSessionOptions
+	if useReplay {
+		setMarketOpts = &tradingview.ChartSessionOptions{
+			Timeframe:       cfg.Timeframe,
+			ReplayStartFrom: cfg.To.Unix(),
+		}
+	} else {
+		setMarketOpts = &tradingview.ChartSessionOptions{
+			Timeframe: cfg.Timeframe,
+			To:        cfg.To.Unix(),
+		}
+	}
+
+	if err := sess.SetMarket(cfg.Symbol, setMarketOpts); err != nil {
 		return fmt.Errorf("backtest-fetch: SetMarket: %w", err)
 	}
 
-	periods, err := sess.FetchRange(ctx, cfg.From.Unix(), cfg.To.Unix(),
+	fetchOpts := []tradingview.FetchOption{
 		tradingview.WithBatchSize(cfg.BatchSize),
 		tradingview.WithThrottle(cfg.Throttle),
 		tradingview.WithMaxBatches(cfg.MaxBatches),
-	)
-	if err != nil {
-		return fmt.Errorf("backtest-fetch: FetchRange: %w", err)
+	}
+
+	var periods []*tradingview.Period
+	var err error
+	if useReplay {
+		periods, err = sess.FetchHistoricalReplay(ctx, cfg.From.Unix(), cfg.To.Unix(), fetchOpts...)
+		if err != nil {
+			return fmt.Errorf("backtest-fetch: FetchHistoricalReplay: %w", err)
+		}
+	} else {
+		periods, err = sess.FetchRange(ctx, cfg.From.Unix(), cfg.To.Unix(), fetchOpts...)
+		if err != nil {
+			return fmt.Errorf("backtest-fetch: FetchRange: %w", err)
+		}
 	}
 	if len(periods) == 0 {
-		return fmt.Errorf("backtest-fetch: zero bars in [%s, %s] — likely symbol-feed mismatch or non-intraday timeframe", cfg.From, cfg.To)
+		mode := "FakeReplay"
+		if useReplay {
+			mode = "ReplayMode"
+		}
+		return fmt.Errorf("backtest-fetch (%s): zero bars in [%s, %s] — likely symbol-feed mismatch or premium-account entitlement missing", mode, cfg.From, cfg.To)
 	}
 
 	rows := convertPeriodsToBarRows(periods)

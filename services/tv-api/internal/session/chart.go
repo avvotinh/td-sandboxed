@@ -25,6 +25,16 @@ type ChartSession struct {
 	timeframe         string // Store timeframe for reconnection
 	referenceToTs     int64  // FakeReplay anchor; 0 means no reference (live)
 	referenceRange    int    // FakeReplay initial range; 0 means use default 300
+	// Replay-mode fields (premium ReplayMode, story 12.7.0e). All zero/nil
+	// when running in live or FakeReplay mode. Snapshotted under cs.mu so
+	// the reconnection path can restore the full replay handshake without
+	// racing fresh SetMarket calls.
+	replay            *ReplaySession // nil unless SetMarketWithReplay was called
+	replayStartFromTs int64          // last replay_reset target (Unix seconds)
+	replayAdjustment  string         // adjustment param for replay_add_series + resolve_symbol
+	replaySessionStr  string         // session param (regular/extended) for resolve_symbol
+	replayCurrency    string         // currency param for resolve_symbol
+	replayInitRange   int            // create_series range to issue post-replay_reset
 	studyListeners    map[string][]func(interface{})
 	callbacks         map[string][]func(...interface{})
 	mu                sync.RWMutex
@@ -241,6 +251,153 @@ func (cs *ChartSession) ModifySeries(seriesID string, timeframe string, rangeCou
 	return cs.client.Send(packet)
 }
 
+// ResolveSymbolWithReplay sends resolve_symbol with the chartInit envelope
+// the upstream JS port uses for premium ReplayMode (session.js:378-394):
+//
+//	{ "replay": "<rs_id>", "symbol": { "symbol": "...", "adjustment": "..." } }
+//
+// Pre-condition: a ReplaySession with id == replaySessionID must already be
+// registered with the manager and a replay_create_session packet sent —
+// otherwise the server reports "unknown replay session". The
+// `currentSeries` counter is *not* bumped here, mirroring the non-replay
+// ResolveSymbol — the bump happens once in CreateSeries so both modes
+// keep the same monotonic counter behaviour and the symbolID stays
+// bound to the most recent resolve.
+func (cs *ChartSession) ResolveSymbolWithReplay(symbol, adjustment, sessionStr, currency, replaySessionID string) error {
+	cs.mu.Lock()
+	cs.symbolID = fmt.Sprintf("symbol_%d", cs.currentSeries)
+	cs.mu.Unlock()
+
+	symbolJSON := map[string]interface{}{
+		"symbol":     symbol,
+		"adjustment": adjustment,
+	}
+	if sessionStr != "" {
+		symbolJSON["session"] = sessionStr
+	}
+	if currency != "" {
+		symbolJSON["currency"] = currency
+	}
+
+	chartInit := map[string]interface{}{
+		"replay": replaySessionID,
+		"symbol": symbolJSON,
+	}
+
+	jsonStr, err := json.Marshal(chartInit)
+	if err != nil {
+		return fmt.Errorf("ResolveSymbolWithReplay: marshal chartInit: %w", err)
+	}
+
+	packet := protocol.Packet{
+		Type: "resolve_symbol",
+		Data: []interface{}{cs.id, cs.symbolID, "=" + string(jsonStr)},
+	}
+	return cs.client.Send(packet)
+}
+
+// AttachReplay binds a ReplaySession to this chart so the lifecycle helpers
+// (Delete, reconnect) can drive replay_create_session / replay_delete_session
+// without the public-API package mediating each call. The replay session
+// must already be registered with the same Client.Manager.
+func (cs *ChartSession) AttachReplay(rs *ReplaySession) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.replay = rs
+}
+
+// Replay returns the attached ReplaySession, or nil when this chart is
+// running in live / FakeReplay mode. Public so the tradingview package
+// can wire OnReplayLoaded / Step / Start / Stop / replay_point listeners.
+func (cs *ChartSession) Replay() *ReplaySession {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return cs.replay
+}
+
+// SetMarketWithReplay performs the full premium ReplayMode handshake in
+// the order JS session.js:341-397 dictates. Mutates cs state so a
+// subsequent reconnect can restore the cursor.
+//
+//	1. replay_create_session   (control plane: anchor)
+//	2. replay_add_series       (server-side cursor track)
+//	3. replay_reset(startFrom) (server-side cursor seek)
+//	4. resolve_symbol          (chart side, complex chartInit with replay field)
+//	5. create_series           (chart side, plain integer range)
+//
+// The caller must have wired a ReplaySession via AttachReplay first; we
+// don't auto-create here because the ReplaySession also needs to be
+// registered with the client's session manager so its rs_* packets route
+// correctly — that registration lives in the public API package.
+//
+// startFromTs is interpreted in Unix seconds. rangeBars is the initial
+// create_series range; pass a positive number (the server interprets the
+// integer as the number of *most recent* bars relative to the cursor).
+func (cs *ChartSession) SetMarketWithReplay(symbol, timeframe string, rangeBars int, startFromTs int64, adjustment, sessionStr, currency string) error {
+	if startFromTs <= 0 {
+		return fmt.Errorf("SetMarketWithReplay: startFromTs must be > 0 (got %d)", startFromTs)
+	}
+	if rangeBars <= 0 {
+		rangeBars = 300
+	}
+	if adjustment == "" {
+		adjustment = "splits"
+	}
+
+	cs.mu.RLock()
+	rs := cs.replay
+	cs.mu.RUnlock()
+	if rs == nil {
+		return fmt.Errorf("SetMarketWithReplay: AttachReplay must be called before SetMarketWithReplay")
+	}
+
+	cs.SetSubscriptionForReplay(symbol, timeframe, startFromTs, adjustment, sessionStr, currency, rangeBars)
+
+	if err := rs.Create(); err != nil {
+		return fmt.Errorf("SetMarketWithReplay: replay_create_session: %w", err)
+	}
+
+	symbolJSON, err := BuildSymbolJSON(symbol, adjustment, sessionStr, currency)
+	if err != nil {
+		return fmt.Errorf("SetMarketWithReplay: build symbol JSON: %w", err)
+	}
+	if err := rs.AddSeries(symbolJSON, timeframe); err != nil {
+		return fmt.Errorf("SetMarketWithReplay: replay_add_series: %w", err)
+	}
+	if err := rs.Reset(startFromTs); err != nil {
+		return fmt.Errorf("SetMarketWithReplay: replay_reset: %w", err)
+	}
+
+	if err := cs.ResolveSymbolWithReplay(symbol, adjustment, sessionStr, currency, rs.ID()); err != nil {
+		return fmt.Errorf("SetMarketWithReplay: resolve_symbol: %w", err)
+	}
+
+	if err := cs.CreateSeries(timeframe, rangeBars); err != nil {
+		return fmt.Errorf("SetMarketWithReplay: create_series: %w", err)
+	}
+
+	return nil
+}
+
+// SetSubscriptionForReplay caches the parameters needed to redo the full
+// replay handshake on reconnection. Mirrors SetSubscriptionWithReference
+// but for the replay path. Clears FakeReplay state to make the modes
+// mutually exclusive (the JS port treats them the same way: setMarket
+// resets #periods and either #replayMode or the bar_count anchor).
+func (cs *ChartSession) SetSubscriptionForReplay(symbol, timeframe string, startFromTs int64, adjustment, sessionStr, currency string, rangeBars int) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.symbol = symbol
+	cs.timeframe = timeframe
+	cs.referenceToTs = 0
+	cs.referenceRange = 0
+	cs.replayStartFromTs = startFromTs
+	cs.replayAdjustment = adjustment
+	cs.replaySessionStr = sessionStr
+	cs.replayCurrency = currency
+	cs.replayInitRange = rangeBars
+}
+
 // CreateSeriesWithReference sends create_series with the FakeReplay anchor
 // encoding from JS session.js:310:
 //
@@ -292,8 +449,26 @@ func (cs *ChartSession) SwitchTimezone(timezone string) error {
 	return cs.client.Send(packet)
 }
 
-// Delete deletes the session.
+// Delete deletes the session. Mirrors JS session.js:546-552: when a replay
+// handshake was performed (replayStartFromTs > 0) the rs_* session is
+// torn down first so the server releases the cursor slot before the
+// chart_delete_session removes the chart series. The gate on
+// replayStartFromTs avoids emitting a delete for an rs ID the server
+// never saw — replay sessions are attached eagerly at construction time
+// so AttachReplay alone is not a sufficient signal that a control-plane
+// session exists server-side.
 func (cs *ChartSession) Delete() error {
+	cs.mu.RLock()
+	rs := cs.replay
+	replayActive := cs.replayStartFromTs > 0
+	cs.mu.RUnlock()
+
+	if rs != nil && replayActive {
+		if err := rs.Delete(); err != nil {
+			return fmt.Errorf("chart Delete: replay_delete_session: %w", err)
+		}
+	}
+
 	packet := protocol.Packet{
 		Type: "chart_delete_session",
 		Data: []interface{}{cs.id},
@@ -384,10 +559,16 @@ func (cs *ChartSession) On(event string, callback func(...interface{})) {
 	cs.callbacks[event] = append(cs.callbacks[event], callback)
 }
 
-// emit triggers event callbacks.
+// emit triggers event callbacks. The slice is *deep-copied* under the
+// lock before iteration: a bare `cs.callbacks[event]` only copies the
+// slice header, leaving the iterator on the same backing array that a
+// concurrent On() may grow via append. The reconnect path emits "error"
+// from background goroutines while the WebSocket reader registers more
+// callbacks, so the race is reachable in production even if test
+// suites drive emit synchronously.
 func (cs *ChartSession) emit(event string, args ...interface{}) {
 	cs.mu.RLock()
-	callbacks := cs.callbacks[event]
+	callbacks := append([]func(...interface{}){}, cs.callbacks[event]...)
 	cs.mu.RUnlock()
 
 	for _, callback := range callbacks {
@@ -707,42 +888,87 @@ func (cs *ChartSession) GetRetryCount() int {
 }
 
 // connect establishes connection for this session (used by reconnection logic).
-// FakeReplay sessions (referenceToTs > 0) restore the bar_count anchor so a
-// long backtest fetch survives WebSocket flaps without losing the cursor;
-// already-buffered cs.periods de-duplicate naturally on rejoin because the
-// map is keyed by timestamp.
+// Three modes are restored here, in priority order:
+//
+//  1. Replay mode (replayStartFromTs > 0): re-issue the full premium
+//     ReplayMode handshake — replay_create_session → replay_add_series →
+//     replay_reset → resolve_symbol(complex) → create_series. The chart
+//     periods buffer is preserved across the flap because the map is
+//     keyed by timestamp and bars dedupe on rejoin.
+//  2. FakeReplay mode (referenceToTs > 0): restore the bar_count anchor
+//     so a long backtest fetch survives WebSocket flaps.
+//  3. Live mode: plain ResolveSymbol + CreateSeries.
 func (cs *ChartSession) connect(ctx context.Context) error {
 	// Create the session
 	if err := cs.createSession(); err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// Resolve symbol if we have it stored
-	if cs.symbol != "" {
-		if err := cs.ResolveSymbol(cs.symbol, "splits", "", ""); err != nil {
-			return fmt.Errorf("failed to resolve symbol: %w", err)
-		}
+	cs.mu.RLock()
+	symbol := cs.symbol
+	timeframe := cs.timeframe
+	toTs := cs.referenceToTs
+	refRange := cs.referenceRange
+	replay := cs.replay
+	replayStartFrom := cs.replayStartFromTs
+	replayAdjustment := cs.replayAdjustment
+	replaySessionStr := cs.replaySessionStr
+	replayCurrency := cs.replayCurrency
+	replayRange := cs.replayInitRange
+	cs.mu.RUnlock()
+
+	if symbol == "" {
+		return nil
 	}
 
-	// Create series if we have timeframe stored
-	if cs.timeframe != "" {
-		cs.mu.RLock()
-		toTs := cs.referenceToTs
-		refRange := cs.referenceRange
-		cs.mu.RUnlock()
-
-		if toTs > 0 {
-			if refRange == 0 {
-				refRange = -300
-			}
-			if err := cs.CreateSeriesWithReference(cs.timeframe, refRange, toTs); err != nil {
-				return fmt.Errorf("failed to create series with reference: %w", err)
-			}
-		} else if err := cs.CreateSeries(cs.timeframe, 300); err != nil {
-			return fmt.Errorf("failed to create series: %w", err)
+	// Replay mode — full handshake.
+	if replay != nil && replayStartFrom > 0 {
+		if err := replay.Create(); err != nil {
+			return fmt.Errorf("replay reconnect: replay_create_session: %w", err)
 		}
+		symbolJSON, err := BuildSymbolJSON(symbol, replayAdjustment, replaySessionStr, replayCurrency)
+		if err != nil {
+			return fmt.Errorf("replay reconnect: build symbol JSON: %w", err)
+		}
+		if err := replay.AddSeries(symbolJSON, timeframe); err != nil {
+			return fmt.Errorf("replay reconnect: replay_add_series: %w", err)
+		}
+		if err := replay.Reset(replayStartFrom); err != nil {
+			return fmt.Errorf("replay reconnect: replay_reset: %w", err)
+		}
+		if err := cs.ResolveSymbolWithReplay(symbol, replayAdjustment, replaySessionStr, replayCurrency, replay.ID()); err != nil {
+			return fmt.Errorf("replay reconnect: resolve_symbol: %w", err)
+		}
+		if replayRange <= 0 {
+			replayRange = 300
+		}
+		if err := cs.CreateSeries(timeframe, replayRange); err != nil {
+			return fmt.Errorf("replay reconnect: create_series: %w", err)
+		}
+		return nil
 	}
 
+	// Resolve symbol if we have it stored (FakeReplay or live).
+	if err := cs.ResolveSymbol(symbol, "splits", "", ""); err != nil {
+		return fmt.Errorf("failed to resolve symbol: %w", err)
+	}
+
+	// Create series if we have timeframe stored.
+	if timeframe == "" {
+		return nil
+	}
+	if toTs > 0 {
+		if refRange == 0 {
+			refRange = -300
+		}
+		if err := cs.CreateSeriesWithReference(timeframe, refRange, toTs); err != nil {
+			return fmt.Errorf("failed to create series with reference: %w", err)
+		}
+		return nil
+	}
+	if err := cs.CreateSeries(timeframe, 300); err != nil {
+		return fmt.Errorf("failed to create series: %w", err)
+	}
 	return nil
 }
 

@@ -1,6 +1,8 @@
 package session
 
 import (
+	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 
@@ -185,4 +187,264 @@ func TestRequestMoreData_NegativeBatchSize(t *testing.T) {
 	require.Len(t, pkts, 1)
 	assert.Equal(t, "s1", pkts[0].Data[1])
 	assert.Equal(t, -1000, pkts[0].Data[2])
+}
+
+// ----------------------------------------------------------------------
+// Premium ReplayMode tests (story 12.7.0e)
+// ----------------------------------------------------------------------
+
+// chartReplayFixture builds a chart session paired with a replay session,
+// both bound to the same fakeClientBridge so packet order across the two
+// can be asserted.
+func chartReplayFixture(t *testing.T) (*fakeClientBridge, *ChartSession) {
+	t.Helper()
+	bridge := &fakeClientBridge{}
+	cs := NewChartSession(bridge)
+	rs := NewReplaySession(bridge)
+	cs.AttachReplay(rs)
+	return bridge, cs
+}
+
+// TestSetMarketWithReplay_FullPacketOrder pins the wire-order JS upstream
+// emits in setMarket when options.replay is set (session.js:341-397):
+//
+//	1. chart_create_session   (NewChartSession constructor)
+//	2. replay_create_session
+//	3. replay_add_series
+//	4. replay_reset
+//	5. resolve_symbol         (with chartInit.replay = rsID)
+//	6. create_series          (plain integer range, NO bar_count tuple)
+func TestSetMarketWithReplay_FullPacketOrder(t *testing.T) {
+	bridge, cs := chartReplayFixture(t)
+
+	require.NoError(t, cs.SetMarketWithReplay(
+		"OANDA:XAUUSD", "1D", 300, 1_700_000_000, "splits", "", "",
+	))
+
+	bridge.mu.Lock()
+	defer bridge.mu.Unlock()
+
+	types := make([]string, len(bridge.packets))
+	for i, p := range bridge.packets {
+		types[i] = p.Type
+	}
+
+	expected := []string{
+		"chart_create_session",
+		"replay_create_session",
+		"replay_add_series",
+		"replay_reset",
+		"resolve_symbol",
+		"create_series",
+	}
+	require.Equal(t, expected, types,
+		"replay handshake must emit packets in JS upstream order")
+}
+
+// TestSetMarketWithReplay_ResolveSymbolContainsReplayField verifies the
+// resolve_symbol payload's chartInit envelope carries the `replay` and
+// `symbol` keys (JS session.js:381-385). Without this the server runs
+// the chart series in live mode and ignores the replay cursor.
+func TestSetMarketWithReplay_ResolveSymbolContainsReplayField(t *testing.T) {
+	bridge, cs := chartReplayFixture(t)
+
+	require.NoError(t, cs.SetMarketWithReplay(
+		"OANDA:XAUUSD", "1D", 300, 1_700_000_000, "splits", "regular", "USD",
+	))
+
+	pkts := bridge.byType("resolve_symbol")
+	require.Len(t, pkts, 1)
+	require.Len(t, pkts[0].Data, 3)
+
+	payload, ok := pkts[0].Data[2].(string)
+	require.True(t, ok)
+	require.True(t, strings.HasPrefix(payload, "="))
+
+	var chartInit map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(payload, "=")), &chartInit))
+
+	rsID, ok := chartInit["replay"].(string)
+	require.True(t, ok, "chartInit.replay must be a string")
+	assert.True(t, strings.HasPrefix(rsID, "rs_"), "chartInit.replay must reference an rs_ ID")
+
+	symBlob, ok := chartInit["symbol"].(map[string]interface{})
+	require.True(t, ok, "chartInit.symbol must be an object")
+	assert.Equal(t, "OANDA:XAUUSD", symBlob["symbol"])
+	assert.Equal(t, "splits", symBlob["adjustment"])
+	assert.Equal(t, "regular", symBlob["session"])
+	assert.Equal(t, "USD", symBlob["currency"])
+}
+
+// TestSetMarketWithReplay_CreateSeriesUsesPlainInteger documents that
+// premium ReplayMode does NOT use the bar_count tuple — the server uses
+// the replay cursor as the anchor, so create_series's range field is a
+// plain int (JS session.js:396 → setSeries(timeframe, range) with no
+// reference). Regression guard against confusing the two anchored modes.
+func TestSetMarketWithReplay_CreateSeriesUsesPlainInteger(t *testing.T) {
+	bridge, cs := chartReplayFixture(t)
+
+	require.NoError(t, cs.SetMarketWithReplay(
+		"OANDA:XAUUSD", "1D", 500, 1_700_000_000, "splits", "", "",
+	))
+
+	pkts := bridge.byType("create_series")
+	require.Len(t, pkts, 1)
+	require.Len(t, pkts[0].Data, 7)
+	assert.Equal(t, "1D", pkts[0].Data[4])
+	assert.Equal(t, 500, pkts[0].Data[5], "Replay create_series must use plain integer, not bar_count tuple")
+}
+
+// TestSetMarketWithReplay_RequiresAttachedReplay rejects calls that skip
+// AttachReplay — otherwise SetMarketWithReplay would silently drop the
+// control packets and the chart would resolve to live mode.
+func TestSetMarketWithReplay_RequiresAttachedReplay(t *testing.T) {
+	bridge := &fakeClientBridge{}
+	cs := NewChartSession(bridge)
+
+	err := cs.SetMarketWithReplay("OANDA:XAUUSD", "1D", 300, 1_700_000_000, "splits", "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AttachReplay")
+}
+
+// TestSetMarketWithReplay_RejectsNonPositiveStartFrom guards the
+// pre-condition that the replay cursor needs an actual timestamp.
+func TestSetMarketWithReplay_RejectsNonPositiveStartFrom(t *testing.T) {
+	_, cs := chartReplayFixture(t)
+	err := cs.SetMarketWithReplay("OANDA:XAUUSD", "1D", 300, 0, "splits", "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "startFromTs")
+}
+
+// TestSetMarketWithReplay_StoresReconnectState exercises the cache that
+// the reconnection path depends on (replayStartFromTs, replayAdjustment,
+// etc.). Without the cache, a WebSocket flap would re-resolve to live
+// mode and the running fetch would silently change semantics.
+func TestSetMarketWithReplay_StoresReconnectState(t *testing.T) {
+	_, cs := chartReplayFixture(t)
+
+	require.NoError(t, cs.SetMarketWithReplay(
+		"OANDA:XAUUSD", "1D", 250, 1_700_000_000, "splits", "regular", "USD",
+	))
+
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	assert.Equal(t, "OANDA:XAUUSD", cs.symbol)
+	assert.Equal(t, "1D", cs.timeframe)
+	assert.Equal(t, int64(1_700_000_000), cs.replayStartFromTs)
+	assert.Equal(t, "splits", cs.replayAdjustment)
+	assert.Equal(t, "regular", cs.replaySessionStr)
+	assert.Equal(t, "USD", cs.replayCurrency)
+	assert.Equal(t, 250, cs.replayInitRange)
+
+	// Replay mode must clear FakeReplay state — the two anchors are
+	// mutually exclusive at the protocol level (replay cursor vs.
+	// bar_count tuple).
+	assert.Zero(t, cs.referenceToTs)
+	assert.Zero(t, cs.referenceRange)
+}
+
+// TestChartSession_Delete_WithActiveReplay_SendsBothPackets verifies the
+// JS contract: replay_delete_session emitted before chart_delete_session.
+// Order matters because the server frees the cursor slot before the
+// chart series is torn down — reverse order would leave the cursor
+// dangling for a tick.
+func TestChartSession_Delete_WithActiveReplay_SendsBothPackets(t *testing.T) {
+	bridge, cs := chartReplayFixture(t)
+
+	require.NoError(t, cs.SetMarketWithReplay(
+		"OANDA:XAUUSD", "1D", 300, 1_700_000_000, "splits", "", "",
+	))
+
+	bridge.mu.Lock()
+	startLen := len(bridge.packets)
+	bridge.mu.Unlock()
+
+	require.NoError(t, cs.Delete())
+
+	bridge.mu.Lock()
+	defer bridge.mu.Unlock()
+	tail := bridge.packets[startLen:]
+	require.Len(t, tail, 2)
+	assert.Equal(t, "replay_delete_session", tail[0].Type)
+	assert.Equal(t, "chart_delete_session", tail[1].Type)
+}
+
+// TestChartSession_Delete_WithoutReplayHandshake_OnlyChart documents the
+// gate on replayStartFromTs > 0: a chart with an attached-but-never-used
+// replay session must NOT emit replay_delete_session. The server has no
+// rs_* registration to clean up.
+func TestChartSession_Delete_WithoutReplayHandshake_OnlyChart(t *testing.T) {
+	bridge, cs := chartReplayFixture(t)
+
+	require.NoError(t, cs.Delete())
+
+	pkts := bridge.byType("replay_delete_session")
+	assert.Len(t, pkts, 0, "replay_delete_session must not fire without a prior handshake")
+
+	chartDeletes := bridge.byType("chart_delete_session")
+	require.Len(t, chartDeletes, 1)
+}
+
+// TestChartSession_Reconnect_RestoresReplayHandshake exercises the
+// connect() path's replay branch: cache the SetMarketWithReplay state,
+// invoke connect() (simulating a reconnection), assert the full
+// handshake re-runs in order. The chart_create_session counter goes up
+// because a new session is created on rejoin (matches client.connect()).
+func TestChartSession_Reconnect_RestoresReplayHandshake(t *testing.T) {
+	bridge, cs := chartReplayFixture(t)
+
+	require.NoError(t, cs.SetMarketWithReplay(
+		"OANDA:XAUUSD", "1D", 300, 1_700_000_000, "splits", "", "",
+	))
+
+	bridge.mu.Lock()
+	startLen := len(bridge.packets)
+	bridge.mu.Unlock()
+
+	require.NoError(t, cs.connect(t.Context()))
+
+	bridge.mu.Lock()
+	defer bridge.mu.Unlock()
+	tail := bridge.packets[startLen:]
+	types := make([]string, len(tail))
+	for i, p := range tail {
+		types[i] = p.Type
+	}
+	expected := []string{
+		"chart_create_session",
+		"replay_create_session",
+		"replay_add_series",
+		"replay_reset",
+		"resolve_symbol",
+		"create_series",
+	}
+	assert.Equal(t, expected, types)
+}
+
+// TestReplay_AddSeries_UsesAttachedSymbolJSON pins that the symbol JSON
+// the chart session wires through SetMarketWithReplay matches the JSON
+// emitted by replay_add_series — they must agree, otherwise the server
+// would resolve two different symbol envelopes.
+func TestReplay_AddSeries_UsesAttachedSymbolJSON(t *testing.T) {
+	bridge, cs := chartReplayFixture(t)
+
+	require.NoError(t, cs.SetMarketWithReplay(
+		"BINANCE:BTCUSDT", "60", 300, 1_700_000_000, "splits", "", "",
+	))
+
+	addPkts := bridge.byType("replay_add_series")
+	resolvePkts := bridge.byType("resolve_symbol")
+	require.Len(t, addPkts, 1)
+	require.Len(t, resolvePkts, 1)
+
+	addPayload := strings.TrimPrefix(addPkts[0].Data[2].(string), "=")
+	var addJSON map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(addPayload), &addJSON))
+	assert.Equal(t, "BINANCE:BTCUSDT", addJSON["symbol"])
+
+	resolvePayload := strings.TrimPrefix(resolvePkts[0].Data[2].(string), "=")
+	var chartInit map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(resolvePayload), &chartInit))
+	symBlob := chartInit["symbol"].(map[string]interface{})
+	assert.Equal(t, "BINANCE:BTCUSDT", symBlob["symbol"])
 }

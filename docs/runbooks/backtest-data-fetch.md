@@ -2,16 +2,21 @@
 
 **Audience:** Operator running Epic 12 validation campaign.
 
-**Goal:** populate `data/historical/<symbol>/<tf>/<window>.parquet` shards for the trading-engine backtest dataset pipeline using the TradingView free-tier FakeReplay API ported into `services/tv-api/`.
+**Goal:** populate `data/historical/<symbol>/<tf>/<window>.parquet` shards for the trading-engine backtest dataset pipeline using the TradingView API ported into `services/tv-api/`.
 
-This runbook covers the four-shard XAUUSD M5+M15 × in_sample+oos_reserve campaign that Epic 12 needs. The same procedure scales to other intraday timeframes and symbols by swapping the flags.
+The CLI auto-routes between two API surfaces based on the timeframe:
+
+- **Intraday timeframes** (`1`, `3`, `5`, `15`, `30`, `60`, `120`, `240`) — free-tier FakeReplay path. No premium subscription required (story 12.7.0a–d).
+- **Daily / weekly / monthly** (`D`/`1D`, `W`/`1W`, `M`/`1M`) — premium ReplayMode (story 12.7.0e). Requires a TradingView account with replay entitlement; the CLI fetches `SESSION_ID` and `SESSION_SIGN` cookies from environment exactly like the intraday path.
+
+This runbook covers the four-shard XAUUSD M5+M15 × in_sample+oos_reserve campaign that Epic 12 needs. The same procedure scales to other timeframes and symbols by swapping the flags — the auto-route picks FakeReplay or ReplayMode without operator input.
 
 ---
 
 ## Prerequisites
 
 - Go toolchain installed (`go.mod` is pinned to 1.24.9).
-- TradingView free account (no auth needed for FakeReplay; premium ReplayMode is deferred to story 12.7.0e).
+- TradingView account credentials: `SESSION_ID` + `SESSION_SIGN` env vars (or `.env` file). The same credentials power both modes; ReplayMode additionally requires the account to have premium replay entitlement.
 - Network access to `wss://data.tradingview.com/socket.io/websocket?type=chart`.
 - ~10–20 GB free disk for full XAUUSD M5+M15 2024-01 → 2026-04 (≈300K Parquet rows total, Snappy-compressed << 100 MB).
 
@@ -60,6 +65,22 @@ go build -o bin/tv-cli ./cmd/tv-cli
 ```
 
 Each invocation produces a Parquet shard plus a JSON sidecar at `<out>.manifest.json`.
+
+## ReplayMode example (premium account, daily / weekly / monthly)
+
+The CLI auto-detects daily / weekly / monthly timeframes (`D`, `1D`, `W`, `1W`, `M`, `1M`) and routes through premium ReplayMode. Same flag surface, same output shape — only the underlying API call changes.
+
+```bash
+# Daily XAUUSD, 5 years of in-sample data
+./bin/tv-cli -command backtest-fetch \
+  -symbol OANDA:XAUUSD -timeframe 1D \
+  -from 2021-01-01T00:00:00Z -to 2026-01-01T00:00:00Z \
+  -spec-name xauusd-daily -dataset-version v1 \
+  -window-name in_sample -window-kind in_sample \
+  -out ../../data/historical/XAUUSD/D1/in_sample.parquet
+```
+
+If the account lacks replay entitlement the server silently returns no bars; the CLI surfaces this as `zero bars in […] — likely symbol-feed mismatch or premium-account entitlement missing` rather than hanging.
 
 ## Merge sidecars into the canonical manifest
 
@@ -120,7 +141,7 @@ If TradingView reports a `series_error` containing "no more bars" or similar ter
 
 - **ToS:** the TradingView API used here is reverse-engineered. There is no SLA, and rate-limit responses are silent. Use modest concurrency (one fetch at a time per IP).
 - **Data provenance:** OANDA:XAUUSD on TradingView reflects OANDA retail spreads; FTMO MT5 spreads differ. Per Decision §1 in `docs/epic-12-context.md`, spread for the backtest comes from `configs/firms/ftmo.yaml` via `SpreadAwareFeeModel`, not from the bars file — so this provenance gap does not block the validation campaign.
-- **Intraday-only:** FakeReplay free-tier supports timeframes `1, 3, 5, 15, 30, 60, 120, 240`. Daily/weekly/monthly require premium ReplayMode (story 12.7.0e, deferred).
+- **Timeframe split:** intraday timeframes (`1, 3, 5, 15, 30, 60, 120, 240`) work on any account. Daily / weekly / monthly require a premium TradingView account with replay entitlement — the CLI auto-routes but a free account silently yields zero bars.
 - **Symbol mapping:** Manifest writes the bare ticker (`XAUUSD`), not the exchange-prefixed form (`OANDA:XAUUSD`). This matches `configs/datasets/*.yaml` shorthand.
 
 ## Story references
@@ -129,4 +150,4 @@ If TradingView reports a `series_error` containing "no more bars" or similar ter
 - 12.7.0b — Parquet writer + JSON manifest (`internal/store`).
 - 12.7.0c — `tv-cli backtest-fetch` command (`cmd/tv-cli`).
 - 12.7.0d — Python merge tool + this runbook.
-- 12.7.0e — premium ReplayMode (deferred until premium account is available).
+- 12.7.0e — premium ReplayMode port (`internal/session/replay.go` + `pkg/tradingview/replay.go` + CLI auto-route). Daily/weekly/monthly bars unblocked.

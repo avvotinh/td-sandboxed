@@ -3,6 +3,7 @@ package tradingview
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/avvotinh/tv-api/internal/session"
@@ -16,7 +17,9 @@ type ChartSessionOptions struct {
 	// Range is the number of bars to retrieve
 	Range int
 
-	// To is the end timestamp (optional)
+	// To is the FakeReplay anchor (Unix seconds). When set, SetMarket
+	// activates the free-tier bar_count walk-backward path. Mutually
+	// exclusive with ReplayStartFrom.
 	To int64
 
 	// Adjustment is the price adjustment type (e.g., "splits", "dividends")
@@ -27,6 +30,19 @@ type ChartSessionOptions struct {
 
 	// Currency is the currency for price conversion
 	Currency string
+
+	// ReplayStartFrom activates premium ReplayMode (story 12.7.0e). When
+	// set to a Unix-second timestamp, SetMarket performs the full
+	// replay_create_session → replay_add_series → replay_reset →
+	// resolve_symbol → create_series handshake. Requires SESSION_ID and
+	// SESSION_SIGN cookies in the client config (free accounts have no
+	// replay entitlement). Mutually exclusive with To.
+	ReplayStartFrom int64
+
+	// ReplayBars is the initial create_series range issued after the
+	// replay handshake. Defaults to 300 when zero. Only consulted when
+	// ReplayStartFrom > 0.
+	ReplayBars int
 }
 
 // ChartSession represents a chart session for historical OHLCV data.
@@ -39,13 +55,40 @@ type ChartSession struct {
 
 // NewChartSession creates a new chart session for retrieving historical OHLCV data.
 // Use SetMarket to specify the symbol and timeframe for the chart data.
+//
+// A companion replay session (rs_*) is registered eagerly so callers can
+// subscribe to OnReplayLoaded / OnReplayPoint / etc. before SetMarket
+// kicks the handshake. The server only learns about the rs_* ID when
+// SetMarket(opts.ReplayStartFrom > 0) runs, so the eager attachment has
+// no wire cost for FakeReplay or live use.
 func (c *Client) NewChartSession() *ChartSession {
 	sess := session.NewChartSession(c)
 
-	// Register session with client
+	// Register chart session with client. RegisterSession only fails on
+	// duplicate-ID collisions which are astronomically unlikely with
+	// crypto/rand session IDs — but if the swallow happens, OnData never
+	// routes for this session and the caller never receives a single bar.
+	// Surface the failure via the client logger so silent breakage shows
+	// up in production traces; keep the (*ChartSession) return signature
+	// because changing it would ripple through every existing caller.
 	if err := c.RegisterSession(sess); err != nil {
-		// Log error but continue
+		c.logger.Error("failed to register chart session — inbound packets will not route",
+			slog.String("session_id", sess.ID()),
+			slog.Any("error", err))
 	}
+
+	// Eagerly create + register a paired replay session so OnReplayX
+	// callbacks attach cleanly even before SetMarket activates replay.
+	// A silent registration failure here is more dangerous than the
+	// chart-session case because Step / Start / Stop ack channels will
+	// hang forever — log loudly.
+	rs := session.NewReplaySession(c)
+	if err := c.RegisterSession(rs); err != nil {
+		c.logger.Error("failed to register replay session — Step/Start/Stop acks will hang",
+			slog.String("session_id", rs.ID()),
+			slog.Any("error", err))
+	}
+	sess.AttachReplay(rs)
 
 	return &ChartSession{
 		client:  c,
@@ -88,15 +131,22 @@ func NewChartSession(client *Client, symbol, timeframe string) (session.Session,
 // The symbol should be in the format "EXCHANGE:SYMBOL" (e.g., "BINANCE:BTCUSDT").
 // Use the OnUpdate callback to receive chart data updates.
 //
-// FakeReplay anchored fetch (free-tier historical bulk download): set
-// options.To to a non-zero Unix-second timestamp — SetMarket will issue
-// the bar_count anchor packet and remember the reference for reconnection.
-// Pair with FetchUntil / FetchRange to walk backward through history.
+// Three modes branch on the options struct:
+//
+//   - options.ReplayStartFrom > 0 → premium ReplayMode (intraday + D/W/M),
+//     full replay_create_session handshake. Mutually exclusive with To.
+//   - options.To > 0              → FakeReplay anchored fetch (free-tier,
+//     intraday-only). Pair with FetchUntil / FetchRange to walk backward.
+//   - otherwise                   → live tail.
 func (cs *ChartSession) SetMarket(symbol string, options *ChartSessionOptions) error {
 	cs.symbol = symbol
 
 	if options != nil {
 		cs.options = options
+	}
+
+	if cs.options.ReplayStartFrom > 0 && cs.options.To > 0 {
+		return NewSessionError("ReplayStartFrom and To are mutually exclusive — pick FakeReplay (To) or premium Replay (ReplayStartFrom), not both", nil)
 	}
 
 	// Set defaults
@@ -109,8 +159,29 @@ func (cs *ChartSession) SetMarket(symbol string, options *ChartSessionOptions) e
 	// Default range only for live (non-anchored) queries. FakeReplay accepts
 	// negative ranges (walk-backward), so leaving Range == 0 here lets us
 	// pick a sensible initial batch below.
-	if cs.options.Range == 0 && cs.options.To == 0 {
+	if cs.options.Range == 0 && cs.options.To == 0 && cs.options.ReplayStartFrom == 0 {
 		cs.options.Range = 300
+	}
+
+	// Premium ReplayMode (story 12.7.0e): full handshake bundled in the
+	// internal session helper so the wire-order matches JS upstream.
+	if cs.options.ReplayStartFrom > 0 {
+		bars := cs.options.ReplayBars
+		if bars <= 0 {
+			bars = 300
+		}
+		if err := cs.session.SetMarketWithReplay(
+			symbol,
+			cs.options.Timeframe,
+			bars,
+			cs.options.ReplayStartFrom,
+			cs.options.Adjustment,
+			cs.options.Session,
+			cs.options.Currency,
+		); err != nil {
+			return NewSessionError("failed to set market in replay mode", err)
+		}
+		return nil
 	}
 
 	// Resolve symbol
@@ -381,13 +452,29 @@ func (cs *ChartSession) FetchRange(ctx context.Context, fromTs, toTs int64, opts
 	return out, nil
 }
 
-// Delete deletes the chart session and cleans up resources.
+// Delete deletes the chart session and cleans up resources. Order is
+// load-bearing:
+//
+//  1. cs.session.Delete() — sends replay_delete_session +
+//     chart_delete_session on the wire. The manager must still be
+//     able to route any late-arriving replay_ok the server emits in
+//     parallel with our deletes, so we keep registrations live until
+//     the wire packets have been queued.
+//  2. UnregisterSession for chart + replay — local cleanup; releases
+//     the manager slot so the caller may re-register a fresh session
+//     under the same Client.
+//
+// Reversing this order leaves a window in which the server believes
+// the rs_* session exists, our manager has dropped its routing entry,
+// and any in-flight replay_ok is silently lost.
 func (cs *ChartSession) Delete() error {
-	// Unregister from client
-	if err := cs.client.UnregisterSession(cs.session.ID()); err != nil {
+	if err := cs.session.Delete(); err != nil {
 		return err
 	}
-
-	// Delete session
-	return cs.session.Delete()
+	if rs := cs.session.Replay(); rs != nil {
+		if err := cs.client.UnregisterSession(rs.ID()); err != nil {
+			return err
+		}
+	}
+	return cs.client.UnregisterSession(cs.session.ID())
 }

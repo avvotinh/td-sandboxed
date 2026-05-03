@@ -15,16 +15,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// stubSession captures SetMarket/FetchRange calls and returns canned bars.
+// stubSession captures SetMarket/FetchRange/FetchHistoricalReplay calls
+// and returns canned bars. Test code asserts on which fetch method was
+// invoked (FakeReplay vs ReplayMode auto-route).
 type stubSession struct {
-	setMarketErr  error
-	fetchRangeErr error
-	periods       []*tradingview.Period
+	setMarketErr    error
+	fetchRangeErr   error
+	fetchReplayErr  error
+	periods         []*tradingview.Period
 
-	setMarketArgs *tradingview.ChartSessionOptions
-	fetchedFrom   int64
-	fetchedTo     int64
-	deleted       bool
+	setMarketArgs   *tradingview.ChartSessionOptions
+	fetchedFrom     int64
+	fetchedTo       int64
+	fetchRangeCalls int
+	fetchReplayCalls int
+	deleted         bool
 }
 
 func (s *stubSession) SetMarket(symbol string, options *tradingview.ChartSessionOptions) error {
@@ -33,9 +38,17 @@ func (s *stubSession) SetMarket(symbol string, options *tradingview.ChartSession
 }
 
 func (s *stubSession) FetchRange(_ context.Context, fromTs, toTs int64, _ ...tradingview.FetchOption) ([]*tradingview.Period, error) {
+	s.fetchRangeCalls++
 	s.fetchedFrom = fromTs
 	s.fetchedTo = toTs
 	return s.periods, s.fetchRangeErr
+}
+
+func (s *stubSession) FetchHistoricalReplay(_ context.Context, fromTs, toTs int64, _ ...tradingview.FetchOption) ([]*tradingview.Period, error) {
+	s.fetchReplayCalls++
+	s.fetchedFrom = fromTs
+	s.fetchedTo = toTs
+	return s.periods, s.fetchReplayErr
 }
 
 func (s *stubSession) Delete() error {
@@ -359,6 +372,111 @@ func TestFetchAndWrite_FetchRangeErrorPropagates(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "FetchRange")
 	assert.Contains(t, err.Error(), "websocket broken")
+}
+
+// TestRequiresReplayMode pins the timeframe-classification table that
+// drives the auto-route between FakeReplay (intraday) and premium
+// ReplayMode (daily/weekly/monthly).
+func TestRequiresReplayMode(t *testing.T) {
+	cases := map[string]bool{
+		// Intraday — FakeReplay path.
+		"1": false, "5": false, "15": false, "30": false,
+		"60": false, "120": false, "240": false,
+		// Daily / weekly / monthly — ReplayMode required.
+		"D": true, "1D": true, "d": true, "1d": true,
+		"W": true, "1W": true, "w": true, "1w": true,
+		"M": true, "1M": true, "m": true, "1m": true,
+	}
+	for tf, want := range cases {
+		assert.Equal(t, want, requiresReplayMode(tf), "timeframe %q", tf)
+	}
+}
+
+// TestFetchAndWrite_AutoRoutesDailyToReplay covers the new branch: the
+// CLI must pick FetchHistoricalReplay (not FetchRange) for D/W/M and
+// pass ReplayStartFrom (not To) on SetMarket. Without this the daily
+// fetch would silently fall through to the FakeReplay path and the
+// server would reject the bar_count tuple.
+func TestFetchAndWrite_AutoRoutesDailyToReplay(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "daily.parquet")
+
+	periods := []*tradingview.Period{
+		{Time: 1700000000, Open: 1, High: 2, Low: 0.5, Close: 1.5, Volume: 10},
+	}
+	sess := &stubSession{periods: periods}
+
+	cfg := backtestFetchConfig{
+		Symbol:         "OANDA:XAUUSD",
+		Timeframe:      "1D",
+		From:           time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:             time.Date(2023, 12, 31, 23, 59, 59, 0, time.UTC),
+		Out:            out,
+		SpecName:       "smoke-daily",
+		DatasetVersion: "v1",
+		WindowName:     "in_sample",
+		WindowKind:     "in_sample",
+		BatchSize:      1000,
+		Throttle:       0,
+		MaxGapHours:    48.0,
+		MaxBatches:     100,
+	}
+	deps := backtestFetchDeps{
+		NewSession: func() backtestFetchSession { return sess },
+		NewWriter:  func(path string) (barWriter, error) { return store.NewParquetWriter(path) },
+		Now:        time.Now,
+		Stdout:     &bytes.Buffer{},
+	}
+
+	require.NoError(t, fetchAndWrite(context.Background(), cfg, deps))
+
+	require.NotNil(t, sess.setMarketArgs)
+	assert.Equal(t, cfg.To.Unix(), sess.setMarketArgs.ReplayStartFrom,
+		"daily timeframe must populate ReplayStartFrom, not To")
+	assert.Zero(t, sess.setMarketArgs.To,
+		"daily timeframe must NOT use the FakeReplay To anchor")
+	assert.Equal(t, 1, sess.fetchReplayCalls, "FetchHistoricalReplay must be invoked")
+	assert.Zero(t, sess.fetchRangeCalls, "FetchRange must NOT be invoked for daily")
+}
+
+// TestFetchAndWrite_IntradayKeepsFakeReplay is the symmetric guard:
+// minute-tier timeframes continue to use the existing FakeReplay path.
+func TestFetchAndWrite_IntradayKeepsFakeReplay(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "m5.parquet")
+
+	periods := []*tradingview.Period{
+		{Time: 1700000000, Close: 1},
+	}
+	sess := &stubSession{periods: periods}
+
+	cfg := backtestFetchConfig{
+		Symbol:         "OANDA:XAUUSD",
+		Timeframe:      "5",
+		From:           time.Date(2023, 11, 14, 0, 0, 0, 0, time.UTC),
+		To:             time.Date(2023, 11, 14, 23, 59, 59, 0, time.UTC),
+		Out:            out,
+		SpecName:       "smoke-intraday",
+		DatasetVersion: "v1",
+		WindowName:     "in_sample",
+		WindowKind:     "in_sample",
+		BatchSize:      1000,
+		MaxGapHours:    48.0,
+		MaxBatches:     100,
+	}
+	deps := backtestFetchDeps{
+		NewSession: func() backtestFetchSession { return sess },
+		NewWriter:  func(path string) (barWriter, error) { return store.NewParquetWriter(path) },
+		Now:        time.Now,
+		Stdout:     &bytes.Buffer{},
+	}
+
+	require.NoError(t, fetchAndWrite(context.Background(), cfg, deps))
+
+	assert.Equal(t, cfg.To.Unix(), sess.setMarketArgs.To)
+	assert.Zero(t, sess.setMarketArgs.ReplayStartFrom)
+	assert.Equal(t, 1, sess.fetchRangeCalls)
+	assert.Zero(t, sess.fetchReplayCalls)
 }
 
 // resetGlobalFlags is shared by parser tests — flag.* package vars are
