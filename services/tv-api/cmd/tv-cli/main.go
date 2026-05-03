@@ -21,13 +21,29 @@ const (
 
 var (
 	// Command flags
-	command    = flag.String("command", "chart", "Command to run: quote, chart")
+	command    = flag.String("command", "chart", "Command to run: quote, chart, backtest-fetch")
 	symbol     = flag.String("symbol", "OANDA:XAUUSD", "Symbol to subscribe to (e.g., OANDA:XAUUSD)")
 	timeframe  = flag.String("timeframe", "1", "Chart timeframe (e.g., 1, 5, 15, 60, 1D, 1W)")
 	rangeCount = flag.Int("range", 100, "Number of bars to retrieve for chart")
 	formatJSON = flag.Bool("format", false, "Output in JSON format")
 	fields     = flag.String("fields", "", "Comma-separated list of quote fields (default: all)")
 	help       = flag.Bool("help", false, "Show help documentation")
+
+	// backtest-fetch command flags (only consumed when -command=backtest-fetch).
+	// Kept in the global flag set rather than a sub-FlagSet so the existing
+	// chart/quote commands continue to work unchanged and -help shows
+	// every option in one place.
+	bfFrom           = flag.String("from", "", "[backtest-fetch] start timestamp RFC3339 (e.g., 2024-01-01T00:00:00Z)")
+	bfTo             = flag.String("to", "", "[backtest-fetch] end timestamp RFC3339 (e.g., 2026-04-30T23:59:59Z)")
+	bfOut            = flag.String("out", "", "[backtest-fetch] Parquet output path (manifest sidecar lands at <out>.manifest.json)")
+	bfSpecName       = flag.String("spec-name", "xauusd-validation", "[backtest-fetch] manifest spec_name")
+	bfDatasetVersion = flag.String("dataset-version", "v1", "[backtest-fetch] manifest dataset_version")
+	bfWindowName     = flag.String("window-name", "in_sample", "[backtest-fetch] manifest window_name")
+	bfWindowKind     = flag.String("window-kind", "in_sample", "[backtest-fetch] manifest window_kind (in_sample|oos_reserve)")
+	bfThrottleMs     = flag.Int("throttle-ms", 150, "[backtest-fetch] delay (ms) between request_more_data calls")
+	bfBatchSize      = flag.Int("batch-size", 1000, "[backtest-fetch] bars per request_more_data call")
+	bfMaxGapHours    = flag.Float64("max-gap-hours", 48.0, "[backtest-fetch] gap threshold (hours) before flagging in manifest")
+	bfMaxBatches     = flag.Int("max-batches", 1000, "[backtest-fetch] safety cap on FetchUntil iterations")
 )
 
 func main() {
@@ -40,8 +56,8 @@ func main() {
 	}
 
 	// Validate command
-	if *command != "quote" && *command != "chart" {
-		fmt.Fprintf(os.Stderr, "Error: Invalid command '%s'. Use 'quote' or 'chart'\n", *command)
+	if *command != "quote" && *command != "chart" && *command != "backtest-fetch" {
+		fmt.Fprintf(os.Stderr, "Error: Invalid command '%s'. Use 'quote', 'chart', or 'backtest-fetch'\n", *command)
 		os.Exit(exitError)
 	}
 
@@ -91,6 +107,8 @@ func run(cmd string) error {
 		return runQuote(ctx, client)
 	case "chart":
 		return runChart(ctx, client)
+	case "backtest-fetch":
+		return runBacktestFetch(ctx, client)
 	default:
 		return fmt.Errorf("unknown command: %s", cmd)
 	}
@@ -339,7 +357,7 @@ func runChart(ctx context.Context, client *tradingview.Client) error {
 				// Only print if this is a different candle or the close price has changed
 				// This prevents spam from multiple du messages for the same candle state
 				if candleToDisplay.Time != lastDisplayedTime ||
-				   candleToDisplay.Close != lastDisplayedClose {
+					candleToDisplay.Close != lastDisplayedClose {
 					t := time.Unix(candleToDisplay.Time, 0)
 					fmt.Printf("[%s] Update: O=%.2f H=%.2f L=%.2f C=%.2f V=%.0f\n",
 						t.Format("15:04:05"),
@@ -397,6 +415,13 @@ func showHelp() {
 	fmt.Println()
 	fmt.Println("  # Subscribe to specific quote fields")
 	fmt.Println("  tv-cli -command quote -symbol BINANCE:BTCUSDT -fields \"lp,volume,bid,ask\"")
+	fmt.Println()
+	fmt.Println("  # Bulk-fetch XAUUSD M5 history for Epic 12 backtest dataset")
+	fmt.Println("  tv-cli -command backtest-fetch \\")
+	fmt.Println("    -symbol OANDA:XAUUSD -timeframe 5 \\")
+	fmt.Println("    -from 2024-01-01T00:00:00Z -to 2026-01-01T00:00:00Z \\")
+	fmt.Println("    -window-name in_sample -window-kind in_sample \\")
+	fmt.Println("    -out data/historical/XAUUSD/M5/in_sample.parquet")
 	fmt.Println()
 	fmt.Println("AUTHENTICATION:")
 	fmt.Println("  To use this CLI, you need to provide your TradingView session credentials.")
