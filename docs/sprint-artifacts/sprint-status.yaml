@@ -215,7 +215,7 @@ development_status:
   epic-12: contexted
   # Phase 12.A — In-sample validation
   12-1-dataset-pipeline-xauusd: done                       # M  — DatasetSpec/Pipeline + manifest + configs/datasets/xauusd-validation.yaml; BacktestResult.config_snapshot field; 62 new unit tests
-  12-2-in-sample-baseline-harness: backlog                 # M  — single runner wraps run_backtest for 6 strategies; identical venue/fee/seed; reuses BacktestJobConfig
+  12-2-in-sample-baseline-harness: done                    # M  — StrategySpec/BaselineConfig + run_baseline() dispatch; routes per-strategy timeframe → manifest entry → ParquetDataSpec; stamps config_snapshot per Decision §5/§7; 30 unit tests
   12-3-comparison-report-writer: backlog                   # S  — markdown rollup table (Sharpe/Sortino/MaxDD/PF/WinRate/Trades/Breaches) side-by-side
   12-4-ftmo-compliance-verification: backlog               # M  — PropFirmComplianceActor attached; daily-loss/max-DD/consistency rule simulated; breach assertions
   # Phase 12.B — Walk-forward + parameter sweep

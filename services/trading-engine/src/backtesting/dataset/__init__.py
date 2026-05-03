@@ -8,6 +8,13 @@ manifest to ensure every backtest in the validation campaign sees an
 identical dataset.
 """
 
+from src.backtesting.dataset.baseline_harness import (
+    BaselineConfig,
+    StrategySpec,
+    UnknownDatasetEntryError,
+    run_baseline,
+    timeframe_to_bar_suffix,
+)
 from src.backtesting.dataset.manifest import (
     BarGap,
     DatasetEntry,
@@ -29,12 +36,17 @@ from src.backtesting.dataset.spec import (
 __all__ = [
     "BarGap",
     "BarSourceProtocol",
+    "BaselineConfig",
     "DatasetEntry",
     "DatasetManifest",
     "DatasetPipeline",
     "DatasetSpec",
+    "StrategySpec",
+    "UnknownDatasetEntryError",
     "WindowKind",
     "WindowSpec",
     "detect_gaps",
+    "run_baseline",
+    "timeframe_to_bar_suffix",
     "timeframe_to_seconds",
 ]
