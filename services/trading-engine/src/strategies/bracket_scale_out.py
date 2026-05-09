@@ -163,6 +163,10 @@ class BracketScaleOutMixin:
         ):
             self._close_partial(cfg.scale_out_close_fraction)
             st.scaled_out = True
+            # Nautilus Logger.info takes a single str message; f-string
+            # is the only option (no lazy %-style formatting). The
+            # branch fires at most once per trade so eager formatting
+            # cost is bounded.
             self._log.info(
                 f"Scale-out triggered at R={float(unrealized_r):.2f}, "
                 f"closed {float(cfg.scale_out_close_fraction * 100):.0f}% "

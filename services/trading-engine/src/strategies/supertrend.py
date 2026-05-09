@@ -17,11 +17,15 @@ import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from nautilus_trader.core.message import Event
 from nautilus_trader.model.data import Bar
+from nautilus_trader.model.enums import OrderSide, PositionSide
+from nautilus_trader.model.events import PositionClosed, PositionOpened
 
 from src.indicators.supertrend import Supertrend
 from src.orders.signal import SignalType
 from src.strategies.base_strategy import BaseStrategy
+from src.strategies.bracket_scale_out import BracketScaleOutMixin
 from src.strategies.bracket_strategy import (
     BracketStrategyConfig,
     BracketStrategyMixin,
@@ -66,9 +70,22 @@ class SupertrendConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     regimes=[RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN],
 )
 class SupertrendStrategy(
-    BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin
+    BracketScaleOutMixin,
+    BaseStrategy,
+    ATRStopMixin,
+    RiskSizedMixin,
+    BracketStrategyMixin,
 ):
-    """Trend-following strategy driven by the Supertrend indicator."""
+    """Trend-following strategy driven by the Supertrend indicator.
+
+    Phase 1 scale-out + trail tactics (Epic 13) compose via
+    ``BracketScaleOutMixin``. Default-off — strategies built from a
+    config with ``scale_out_enabled=False`` keep the legacy single-fill
+    + hard-TP behaviour. When enabled, ``_dispatch_scale_out_event``
+    forwards Nautilus position-lifecycle events into the mixin's state
+    machine, and ``_evaluate_scale_out_for_bar`` drives the per-bar
+    transitions off the latest close.
+    """
 
     def __init__(self, config: SupertrendConfig) -> None:
         super().__init__(config)
@@ -151,3 +168,89 @@ class SupertrendStrategy(
 
         atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)
+
+    # --- Story 13.5: scale-out lifecycle wiring ---------------------------
+
+    def on_event(self, event: Event) -> None:
+        """Extend BaseStrategy.on_event to feed the scale-out mixin.
+
+        ``super().on_event`` updates ``self._position`` from the cache;
+        we then dispatch the event into the scale-out state machine via
+        the testable seam ``_dispatch_scale_out_event``.
+        """
+        super().on_event(event)
+        self._dispatch_scale_out_event(event)
+
+    def _dispatch_scale_out_event(self, event: Event) -> None:
+        """Forward position lifecycle events into the scale-out mixin.
+
+        Separated from ``on_event`` so unit tests can drive the dispatch
+        logic with stubbed ``_position`` / ``_find_active_sl_order``
+        without booting a Nautilus cache (super().on_event reads
+        ``self.cache.position(...)`` which is read-only on Actor).
+        """
+        if not self.config.scale_out_enabled:
+            return
+        # Nautilus Logger.warning(message, color) takes a single
+        # str message — no %-style lazy formatting like stdlib. So
+        # f-strings are unavoidable on this surface; keep them short.
+        if isinstance(event, PositionOpened):
+            position = self._position
+            if position is None:
+                # Cache miss / race: super().on_event could not resolve
+                # the position. Skip rather than pass None into the
+                # mixin — next bar the position should be visible.
+                self._log.warning(
+                    "PositionOpened received but _position not set; "
+                    "skipping scale-out init"
+                )
+                return
+            sl_order = self._find_active_sl_order()
+            if sl_order is None:
+                # SL leg may register slightly after fill on some paths;
+                # without it we can't compute risk_per_unit, so skip
+                # cleanly rather than init with a bogus SL.
+                self._log.warning(
+                    "No active SL order at PositionOpened; "
+                    "scale-out init skipped (race?)"
+                )
+                return
+            side = (
+                OrderSide.BUY
+                if position.side == PositionSide.LONG
+                else OrderSide.SELL
+            )
+            # .as_double() for Nautilus Price / Quantity types matches
+            # the project pattern in bracket_strategy.py:154,207. Going
+            # through .as_double() makes the float-rounding explicit
+            # rather than relying on Price.__str__ stability across
+            # Nautilus versions.
+            self._init_scale_state(
+                side=side,
+                entry_price=Decimal(str(position.avg_px_open)),
+                sl_price=Decimal(str(sl_order.trigger_price.as_double())),
+                qty=Decimal(str(position.quantity.as_double())),
+            )
+        elif isinstance(event, PositionClosed):
+            self._clear_scale_state()
+
+    def on_bar(self, bar: Bar) -> None:
+        """Extend BaseStrategy.on_bar to drive the scale-out evaluator.
+
+        ``super().on_bar`` runs the existing signal logic (generate +
+        execute). The scale-out evaluator runs AFTER signals so a flip
+        signal that closes the position clears state via the resulting
+        PositionClosed event before the next bar's evaluator runs.
+        """
+        super().on_bar(bar)
+        self._evaluate_scale_out_for_bar(bar)
+
+    def _evaluate_scale_out_for_bar(self, bar: Bar) -> None:
+        """Drive the scale-out state machine off the latest bar close.
+
+        No-op when scale_out is disabled or the strategy is flat — the
+        mixin only has work to do while a position is open.
+        """
+        if not self.config.scale_out_enabled or self.is_flat:
+            return
+        self.evaluate_scale_out(Decimal(str(bar.close.as_double())))
