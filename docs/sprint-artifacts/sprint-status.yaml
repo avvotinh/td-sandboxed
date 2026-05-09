@@ -235,3 +235,19 @@ development_status:
   12-11-runbook-update: backlog                            # S  — docs/runbooks/backtesting.md adds harness wrapper pointers + dataset fingerprint reference
   12-12-strategy-roster-memo: backlog                      # S  — (optional) go/no-go memo per strategy with evidence; deliverable doc consolidates 12.3 + 12.7 outputs
   epic-12-retrospective: optional
+
+  # Epic 13: Strategy Tactics Phase 1 — 50/50 + Trail Uncapped (9 stories — backtest-only)
+  # Source: docs/research/strategy-tactics-implementation-plan.md + docs/research/strategy-tactics-quant-review.md
+  # Context: docs/epic-13-context.md
+  # Goal: scale-out 50% at +1R + BE move + Supertrend ATR(7)×2.1 trail uncapped on remaining 50%; trend-following only; default OFF; backtest-validated, live deferred to Epic 14
+  epic-13: contexted
+  13-1-nautilus-modify-order-spike: done                   # research-only spike — Strategy.modify_order + reduce_only verified via uv run python (§5.1 + §5.5 of implementation plan); no code commit
+  13-2-config-fields-and-validation: backlog               # S — BracketStrategyConfig: scale_out_enabled, scale_out_r_trigger, scale_out_close_fraction, breakeven_at_r, trailing_enabled/method/atr_period/atr_multiplier, safety_tp_atr_mult; __post_init__ invariants
+  13-3-base-strategy-helpers: backlog                      # M — BaseStrategy._close_partial(fraction) with defensive cap min(qty*frac, qty-lot_step); _modify_sl(price) atomic via Strategy.modify_order public API
+  13-4-bracket-scale-out-mixin: backlog                    # M — BracketScaleOutMixin state machine (INITIAL → SCALED_OUT_BE → flat); 13 table-driven test cases per implementation plan §3.1
+  13-5-supertrend-integration: backlog                     # M — wire BracketScaleOutMixin into SupertrendStrategy: on_position_opened init state, on_bar evaluate scale-out trigger + trail update, reversal handling
+  13-6-supertrend-trail-indicator: backlog                 # M — Supertrend ATR(7)×2.1 trailing indicator instance + _update_trailing_sl(); only tightens (no loosen) per long/short side
+  13-7-integration-test-synthetic-bars: backlog            # M — test_supertrend_scale_out_e2e_synthetic_bars: full lifecycle entry → +1R partial close → BE move → trail tighten → close on Supertrend flip
+  13-8-per-firm-config-wiring: backlog                     # S — configs/firms/ftmo.yaml regime overrides; CLI smoke test load config; Epic 9 firm-bound rule discipline preserved
+  13-9-backtest-ab-validation-report: backlog              # M — XAUUSD M5 ≥100 trades A/B baseline vs scale-out; produces docs/sprint-artifacts/validation-report-epic13.md; depends operator dataset fetch
+  epic-13-retrospective: optional
