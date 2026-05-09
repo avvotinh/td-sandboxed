@@ -206,51 +206,64 @@ class SupertrendStrategy(
         logic with stubbed ``_position`` / ``_find_active_sl_order``
         without booting a Nautilus cache (super().on_event reads
         ``self.cache.position(...)`` which is read-only on Actor).
+
+        Handles both PositionOpened (best-effort init: the bracket's
+        SL leg may not be in cache yet — see race note below) and
+        PositionClosed (clear state). When init at PositionOpened
+        skips, ``_evaluate_scale_out_for_bar`` retries on each bar
+        until the SL leg is visible.
         """
         if not self.config.scale_out_enabled:
             return
-        # Nautilus Logger.warning(message, color) takes a single
-        # str message — no %-style lazy formatting like stdlib. So
-        # f-strings are unavoidable on this surface; keep them short.
         if isinstance(event, PositionOpened):
-            position = self._position
-            if position is None:
-                # Cache miss / race: super().on_event could not resolve
-                # the position. Skip rather than pass None into the
-                # mixin — next bar the position should be visible.
-                self._log.warning(
-                    "PositionOpened received but _position not set; "
-                    "skipping scale-out init"
-                )
-                return
-            sl_order = self._find_active_sl_order()
-            if sl_order is None:
-                # SL leg may register slightly after fill on some paths;
-                # without it we can't compute risk_per_unit, so skip
-                # cleanly rather than init with a bogus SL.
-                self._log.warning(
-                    "No active SL order at PositionOpened; "
-                    "scale-out init skipped (race?)"
-                )
-                return
-            side = (
-                OrderSide.BUY
-                if position.side == PositionSide.LONG
-                else OrderSide.SELL
-            )
-            # .as_double() for Nautilus Price / Quantity types matches
-            # the project pattern in bracket_strategy.py:154,207. Going
-            # through .as_double() makes the float-rounding explicit
-            # rather than relying on Price.__str__ stability across
-            # Nautilus versions.
-            self._init_scale_state(
-                side=side,
-                entry_price=Decimal(str(position.avg_px_open)),
-                sl_price=Decimal(str(sl_order.trigger_price.as_double())),
-                qty=Decimal(str(position.quantity.as_double())),
-            )
+            # Best-effort init. PositionOpened fires the moment the
+            # entry MARKET fills, but the bracket's STOP_MARKET (SL)
+            # child can still be in PENDING state at that exact tick —
+            # it's only visible in cache.orders_open() after Nautilus
+            # transitions it to ACCEPTED. _try_init_scale_state no-ops
+            # cleanly in that case; the bar evaluator retries.
+            self._try_init_scale_state()
         elif isinstance(event, PositionClosed):
             self._clear_scale_state()
+
+    def _try_init_scale_state(self) -> None:
+        """Best-effort scale-out init from the live position + SL leg.
+
+        Returns silently when:
+
+        - ``_scale_state`` is already set (avoid clobbering an active
+          state machine — would zero ``scaled_out``/``breakeven_moved``
+          mid-trade if the retry loop and the PositionOpened path both
+          succeed).
+        - ``_position`` is not set (cache race).
+        - ``_find_active_sl_order`` cannot find the SL (the bracket SL
+          may still be in PENDING state after a fresh PositionOpened).
+
+        Retried each bar by ``_evaluate_scale_out_for_bar`` until the
+        bracket's SL is visible — at which point init completes and
+        the state machine becomes active for the rest of the trade.
+        """
+        if self._scale_state is not None:
+            return  # Already initialised; do not clobber live state.
+        position = self._position
+        if position is None:
+            return
+        sl_order = self._find_active_sl_order()
+        if sl_order is None:
+            return
+        side = (
+            OrderSide.BUY
+            if position.side == PositionSide.LONG
+            else OrderSide.SELL
+        )
+        # .as_double() for Nautilus Price / Quantity types matches
+        # the project pattern in bracket_strategy.py:154,207.
+        self._init_scale_state(
+            side=side,
+            entry_price=Decimal(str(position.avg_px_open)),
+            sl_price=Decimal(str(sl_order.trigger_price.as_double())),
+            qty=Decimal(str(position.quantity.as_double())),
+        )
 
     def on_bar(self, bar: Bar) -> None:
         """Extend BaseStrategy.on_bar to drive the scale-out evaluator.
@@ -266,9 +279,18 @@ class SupertrendStrategy(
     def _evaluate_scale_out_for_bar(self, bar: Bar) -> None:
         """Drive the scale-out state machine off the latest bar close.
 
-        No-op when scale_out is disabled or the strategy is flat — the
-        mixin only has work to do while a position is open.
+        No-op when scale_out is disabled or the strategy is flat. When
+        in position but ``_scale_state`` is None, retry init — covers
+        the PositionOpened-vs-SL-leg race.
         """
         if not self.config.scale_out_enabled or self.is_flat:
             return
+        if self._scale_state is None:
+            # Init raced ahead of the bracket's SL leg at PositionOpened
+            # time — retry now. By bar N+1 the SL is in cache. If it's
+            # still not visible (closed-position trades flush fast in
+            # synthetic data), skip this bar.
+            self._try_init_scale_state()
+            if self._scale_state is None:
+                return
         self.evaluate_scale_out(Decimal(str(bar.close.as_double())))

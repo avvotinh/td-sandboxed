@@ -402,11 +402,36 @@ class TestEvaluateScaleOutForBar:
         pos = Mock()
         pos.side = PositionSide.LONG
         strategy._position = pos
+        # Pre-set _scale_state so the bar evaluator skips the init-retry
+        # path (story 13.7 added bar-driven init recovery for the SL
+        # race; that path is exercised in TestDispatchScaleOutEvent).
+        strategy._scale_state = Mock(name="ScaleOutTradeState")
         strategy.evaluate_scale_out = Mock()
 
         strategy._evaluate_scale_out_for_bar(self._stub_bar(2010.0))
 
         strategy.evaluate_scale_out.assert_called_once_with(Decimal("2010.0"))
+
+    def test_init_retry_when_state_none(self) -> None:
+        # Story 13.7 — bar-driven init retry for the PositionOpened-vs-SL
+        # race. When the bar evaluator sees scale_out enabled + in
+        # position + state is None, it calls _try_init_scale_state.
+        from nautilus_trader.model.enums import PositionSide
+
+        strategy = _make_strategy(scale_out_enabled=True)
+        pos = Mock()
+        pos.side = PositionSide.LONG
+        strategy._position = pos
+        strategy._scale_state = None
+        strategy._try_init_scale_state = Mock()
+        strategy.evaluate_scale_out = Mock()
+
+        strategy._evaluate_scale_out_for_bar(self._stub_bar(2010.0))
+
+        strategy._try_init_scale_state.assert_called_once()
+        # _try_init_scale_state was mocked → state stays None → bar
+        # evaluator must skip evaluate_scale_out for this bar.
+        strategy.evaluate_scale_out.assert_not_called()
 
     def test_skipped_when_disabled(self) -> None:
         from nautilus_trader.model.enums import PositionSide
