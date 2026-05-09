@@ -72,8 +72,12 @@ docker-compose.override.yml
 
 .bmad/
 .gemini/
-# .claude/ — track shared config (rules, agents, skills, commands), ignore local settings
+# .claude/ — track shared config (rules, agents, skills, commands), ignore local settings + runtime state
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 .specify/
 specs/
 .vscode/
+
+# External reference repos (read-only, not part of Sandboxed)
+TradingView-API/
