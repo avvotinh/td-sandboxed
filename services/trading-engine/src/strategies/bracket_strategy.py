@@ -69,6 +69,25 @@ class BracketStrategyConfig(BaseStrategyConfig, frozen=True, kw_only=True):
     pip_size: Decimal = Decimal("0.01")
     pip_value_per_lot: Decimal = Decimal("1.0")
 
+    # Phase 1 — scale-out + trail tactics (Epic 13).
+    # Both flags default False so legacy strategies keep single-fill +
+    # hard-TP behaviour. When scale_out_enabled flips True, the bracket
+    # helper closes ``scale_out_close_fraction`` at +``scale_out_r_trigger``R,
+    # moves SL to BE if ``breakeven_at_r`` is not None, and (when
+    # trailing_enabled) tightens SL on the remainder via the Supertrend
+    # ATR trail. ``safety_tp_atr_mult`` is the runaway-protection cap
+    # used by the strategy as a TP ceiling regardless of mode (see
+    # implementation plan §1).
+    scale_out_enabled: bool = False
+    scale_out_r_trigger: Decimal = Decimal("1.0")
+    scale_out_close_fraction: Decimal = Decimal("0.5")
+    breakeven_at_r: Decimal | None = Decimal("1.0")
+    trailing_enabled: bool = False
+    trailing_method: str = "supertrend"
+    trailing_atr_period: int = 7
+    trailing_atr_multiplier: Decimal = Decimal("2.1")
+    safety_tp_atr_mult: Decimal = Decimal("6.0")
+
     def __post_init__(self) -> None:
         if self.atr_period <= 0:
             raise ValueError(
@@ -94,6 +113,76 @@ class BracketStrategyConfig(BaseStrategyConfig, frozen=True, kw_only=True):
                 "sl_atr_mult must be < tp_atr_mult (R:R > 1), "
                 f"got sl={self.sl_atr_mult} tp={self.tp_atr_mult}"
             )
+
+        # Safety cap is always read by the strategy regardless of mode
+        # (implementation plan §1: TP ceiling in both hard-TP and trail
+        # modes). Gating this on scale_out_enabled would let a legacy
+        # config ship with safety_tp_atr_mult=0 and silently break the
+        # moment the operator flips the flag.
+        if self.safety_tp_atr_mult <= 0:
+            raise ValueError(
+                f"safety_tp_atr_mult must be > 0, got {self.safety_tp_atr_mult}"
+            )
+
+        # Phase 1 invariants only fire when the relevant flag is on, so
+        # operators can stage YAML defaults that pass validation while
+        # the feature is still disabled.
+        if self.scale_out_enabled:
+            if self.scale_out_r_trigger <= 0:
+                raise ValueError(
+                    "scale_out_r_trigger must be > 0, "
+                    f"got {self.scale_out_r_trigger}"
+                )
+            if not (
+                Decimal("0") < self.scale_out_close_fraction < Decimal("1")
+            ):
+                raise ValueError(
+                    "scale_out_close_fraction must be in (0, 1), "
+                    f"got {self.scale_out_close_fraction}"
+                )
+            if self.breakeven_at_r is not None and self.breakeven_at_r <= 0:
+                raise ValueError(
+                    "breakeven_at_r must be > 0 when set, "
+                    f"got {self.breakeven_at_r}"
+                )
+            # The state machine moves SL to BE at the same bar as the
+            # partial close (implementation plan §1). A breakeven trigger
+            # set ABOVE the partial-close trigger means the trail
+            # tightens before BE ever fires — silent tactic regression.
+            if (
+                self.breakeven_at_r is not None
+                and self.breakeven_at_r > self.scale_out_r_trigger
+            ):
+                raise ValueError(
+                    "breakeven_at_r must be <= scale_out_r_trigger "
+                    "(BE moves at the partial close, not after it), "
+                    f"got be={self.breakeven_at_r} "
+                    f"trigger={self.scale_out_r_trigger}"
+                )
+
+        if self.trailing_enabled:
+            # Trail tightens the remaining size after partial close —
+            # without scale-out there is no remainder to tighten against.
+            if not self.scale_out_enabled:
+                raise ValueError(
+                    "trailing_enabled requires scale_out_enabled=True "
+                    "(trail applies only to the remainder after partial close)"
+                )
+            if self.trailing_method != "supertrend":
+                raise ValueError(
+                    "trailing_method must be 'supertrend' in Phase 1, "
+                    f"got {self.trailing_method!r}"
+                )
+            if self.trailing_atr_period <= 0:
+                raise ValueError(
+                    "trailing_atr_period must be > 0, "
+                    f"got {self.trailing_atr_period}"
+                )
+            if self.trailing_atr_multiplier <= 0:
+                raise ValueError(
+                    "trailing_atr_multiplier must be > 0, "
+                    f"got {self.trailing_atr_multiplier}"
+                )
 
 
 class BracketStrategyMixin:

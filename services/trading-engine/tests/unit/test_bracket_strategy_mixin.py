@@ -156,3 +156,169 @@ class TestBracketStrategyConfigValidation:
                 sl_atr_mult=Decimal("2.0"),
                 tp_atr_mult=Decimal("2.0"),
             )
+
+
+# ---------------------------------------------------------------------------
+# BracketStrategyConfig — Phase 1 scale-out + trail fields (Epic 13 story 13.2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestBracketScaleOutConfigDefaults:
+    def test_scale_out_default_off(self) -> None:
+        # Existing strategies must not be affected — both feature flags
+        # default False so a config that omits them keeps the legacy
+        # single-fill + hard-TP behaviour.
+        cfg = _bracket_config()
+        assert cfg.scale_out_enabled is False
+        assert cfg.trailing_enabled is False
+
+    def test_phase1_field_defaults(self) -> None:
+        cfg = _bracket_config()
+        assert cfg.scale_out_r_trigger == Decimal("1.0")
+        assert cfg.scale_out_close_fraction == Decimal("0.5")
+        assert cfg.breakeven_at_r == Decimal("1.0")
+        assert cfg.trailing_method == "supertrend"
+        assert cfg.trailing_atr_period == 7
+        assert cfg.trailing_atr_multiplier == Decimal("2.1")
+        assert cfg.safety_tp_atr_mult == Decimal("6.0")
+
+    def test_disabled_fields_inert(self) -> None:
+        # When scale-out + trailing are off, invalid Phase 1 inputs must
+        # not gate construction — operator may set them speculatively in
+        # YAML before flipping the flag, and the inert path stays usable.
+        cfg = _bracket_config(
+            scale_out_enabled=False,
+            scale_out_close_fraction=Decimal("1.5"),  # invalid if enabled
+            trailing_enabled=False,
+            trailing_method="chandelier",  # invalid if enabled
+            trailing_atr_period=0,  # invalid if enabled
+        )
+        assert cfg.scale_out_enabled is False
+
+
+@pytest.mark.unit
+class TestBracketScaleOutConfigInvariants:
+    @pytest.mark.parametrize(
+        "bad",
+        [Decimal("0"), Decimal("1.0"), Decimal("-0.1"), Decimal("1.5")],
+    )
+    def test_scale_out_close_fraction_must_be_strict_open_unit(
+        self, bad: Decimal
+    ) -> None:
+        # Fraction must be in (0, 1): 0 closes nothing, 1 closes the whole
+        # trade (defeats scale-out), >1 over-closes.
+        with pytest.raises(ValueError, match="scale_out_close_fraction"):
+            _bracket_config(
+                scale_out_enabled=True,
+                scale_out_close_fraction=bad,
+            )
+
+    @pytest.mark.parametrize("bad", [Decimal("0"), Decimal("-0.5")])
+    def test_scale_out_r_trigger_must_be_positive(self, bad: Decimal) -> None:
+        with pytest.raises(ValueError, match="scale_out_r_trigger"):
+            _bracket_config(
+                scale_out_enabled=True,
+                scale_out_r_trigger=bad,
+            )
+
+    def test_breakeven_at_r_none_is_valid(self) -> None:
+        # ``None`` means "do not move SL to BE" — the partial close still
+        # fires at scale_out_r_trigger but the remaining 50% keeps the
+        # original hard SL.
+        cfg = _bracket_config(scale_out_enabled=True, breakeven_at_r=None)
+        assert cfg.breakeven_at_r is None
+
+    @pytest.mark.parametrize("bad", [Decimal("0"), Decimal("-1.0")])
+    def test_breakeven_at_r_when_set_must_be_positive(
+        self, bad: Decimal
+    ) -> None:
+        with pytest.raises(ValueError, match="breakeven_at_r"):
+            _bracket_config(
+                scale_out_enabled=True,
+                breakeven_at_r=bad,
+            )
+
+    def test_breakeven_above_scale_out_trigger_rejected(self) -> None:
+        # State machine moves SL to BE at the same bar as the partial
+        # close — BE > trigger means BE never fires, silent regression.
+        with pytest.raises(ValueError, match="breakeven_at_r"):
+            _bracket_config(
+                scale_out_enabled=True,
+                scale_out_r_trigger=Decimal("1.0"),
+                breakeven_at_r=Decimal("2.0"),
+            )
+
+    def test_breakeven_equal_to_scale_out_trigger_accepted(self) -> None:
+        # The == case is the canonical Phase 1 layout (BE at +1R, partial
+        # close at +1R). Must not be rejected by the new invariant.
+        cfg = _bracket_config(
+            scale_out_enabled=True,
+            scale_out_r_trigger=Decimal("1.0"),
+            breakeven_at_r=Decimal("1.0"),
+        )
+        assert cfg.breakeven_at_r == cfg.scale_out_r_trigger
+
+    def test_trailing_method_supertrend_only(self) -> None:
+        # Phase 1 only supports the Supertrend trail; Chandelier and
+        # other methods are deferred to Phase 2.
+        with pytest.raises(ValueError, match="trailing_method"):
+            _bracket_config(
+                scale_out_enabled=True,
+                trailing_enabled=True,
+                trailing_method="chandelier",
+            )
+
+    @pytest.mark.parametrize("bad", [0, -7])
+    def test_trailing_atr_period_must_be_positive(self, bad: int) -> None:
+        with pytest.raises(ValueError, match="trailing_atr_period"):
+            _bracket_config(
+                scale_out_enabled=True,
+                trailing_enabled=True,
+                trailing_atr_period=bad,
+            )
+
+    @pytest.mark.parametrize("bad", [Decimal("0"), Decimal("-2.1")])
+    def test_trailing_atr_multiplier_must_be_positive(
+        self, bad: Decimal
+    ) -> None:
+        with pytest.raises(ValueError, match="trailing_atr_multiplier"):
+            _bracket_config(
+                scale_out_enabled=True,
+                trailing_enabled=True,
+                trailing_atr_multiplier=bad,
+            )
+
+    def test_trailing_requires_scale_out(self) -> None:
+        # Trail applies only to the remaining 50% after partial close
+        # (implementation plan §1) — enabling trail without scale-out is
+        # a configuration error.
+        with pytest.raises(ValueError, match="trailing_enabled"):
+            _bracket_config(
+                scale_out_enabled=False,
+                trailing_enabled=True,
+            )
+
+    @pytest.mark.parametrize("bad", [Decimal("0"), Decimal("-6.0")])
+    def test_safety_tp_atr_mult_must_be_positive(self, bad: Decimal) -> None:
+        # Safety cap protects against runaway trades when trailing logic
+        # has a bug or a bar gaps through the trail line; must be > 0
+        # regardless of whether scale_out is enabled (always read by
+        # the bracket helper as a sanity ceiling).
+        with pytest.raises(ValueError, match="safety_tp_atr_mult"):
+            _bracket_config(safety_tp_atr_mult=bad)
+
+    def test_full_phase1_config_valid(self) -> None:
+        cfg = _bracket_config(
+            scale_out_enabled=True,
+            scale_out_r_trigger=Decimal("1.0"),
+            scale_out_close_fraction=Decimal("0.5"),
+            breakeven_at_r=Decimal("1.0"),
+            trailing_enabled=True,
+            trailing_method="supertrend",
+            trailing_atr_period=7,
+            trailing_atr_multiplier=Decimal("2.1"),
+            safety_tp_atr_mult=Decimal("6.0"),
+        )
+        assert cfg.scale_out_enabled is True
+        assert cfg.trailing_enabled is True
