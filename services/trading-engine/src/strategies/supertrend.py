@@ -96,6 +96,18 @@ class SupertrendStrategy(
         from nautilus_trader.indicators.volatility import AverageTrueRange
 
         self._atr: AverageTrueRange = AverageTrueRange(config.atr_period)
+        # Phase 1 trail indicator — separate Supertrend instance with
+        # the trailing_atr_period / trailing_atr_multiplier params so
+        # the trail line can be tuned independently of the signal line.
+        # None when trailing is off so we skip the indicator overhead.
+        self._supertrend_trail: Supertrend | None = (
+            Supertrend(
+                period=config.trailing_atr_period,
+                multiplier=float(config.trailing_atr_multiplier),
+            )
+            if config.trailing_enabled
+            else None
+        )
         self.set_position_sizer(
             RiskBasedPositionSizer(
                 RiskBasedSizerConfig(risk_percent=config.risk_percent)
@@ -107,6 +119,10 @@ class SupertrendStrategy(
         super().on_start()
         self.register_indicator_for_bars(self.config.bar_type, self._supertrend)
         self.register_indicator_for_bars(self.config.bar_type, self._atr)
+        if self._supertrend_trail is not None:
+            self.register_indicator_for_bars(
+                self.config.bar_type, self._supertrend_trail
+            )
         self._log.info(
             f"Supertrend started period={self.config.period} mult={self.config.multiplier}"
         )
@@ -114,6 +130,8 @@ class SupertrendStrategy(
     def on_reset(self) -> None:
         self._supertrend.reset()
         self._atr.reset()
+        if self._supertrend_trail is not None:
+            self._supertrend_trail.reset()
         self._prev_trend = None
 
     def generate_signal(self, bar: Bar) -> SignalType:

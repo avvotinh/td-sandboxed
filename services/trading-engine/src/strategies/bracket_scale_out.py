@@ -52,11 +52,16 @@ class _ScaleOutTradeState:
     """Per-trade state while ``scale_out_enabled`` is True.
 
     ``setup`` is frozen (captured once, never rewritten); the three
-    booleans flip during evaluation as the state machine progresses
+    booleans + ``current_sl`` mutate as the state machine progresses
     through ``INITIAL → SCALED_OUT_BE → flat`` transitions.
+
+    ``current_sl`` tracks the live SL trigger price so the trail body
+    in story 13.6 can compare candidate trail lines against the
+    last-known SL — only tighten, never loosen.
     """
 
     setup: _ScaleOutSetup
+    current_sl: Decimal
     scaled_out: bool = False
     breakeven_moved: bool = False
     trail_active: bool = False
@@ -117,6 +122,7 @@ class BracketScaleOutMixin:
                 side=side,
                 risk_per_unit=abs(entry_price - sl_price),
             ),
+            current_sl=sl_price,
         )
 
     def _clear_scale_state(self) -> None:
@@ -184,6 +190,7 @@ class BracketScaleOutMixin:
         ):
             self._modify_sl(setup.entry_price)
             st.breakeven_moved = True
+            st.current_sl = setup.entry_price
             self._log.info(f"SL moved to breakeven at {setup.entry_price}")
 
         # Step 3: activate trail (only after BE move; trailing_enabled
@@ -202,23 +209,52 @@ class BracketScaleOutMixin:
             self._update_trailing_sl(st)
 
     def _update_trailing_sl(self, state: _ScaleOutTradeState) -> None:
-        """Tighten SL via Supertrend trail line. Body in story 13.6.
+        """Tighten SL via the Supertrend trail line. Tightens-only.
 
-        Story 13.6 will:
-        - Read ``self._supertrend_trail.value`` (Supertrend instance
-          configured with ``trailing_atr_period`` / ``trailing_atr_multiplier``
-          per 13.2 config).
-        - Compute the candidate SL price from the trail line, side-aware.
-        - Call ``self._modify_sl(new_price)`` ONLY if it tightens vs the
-          current SL (no loosening — implementation plan §1 invariant).
+        Reads ``self._supertrend_trail`` (Supertrend instance configured
+        with the Phase 1 ``trailing_atr_period`` / ``trailing_atr_multiplier``
+        — separate instance from the signal-generating Supertrend so the
+        host can pick distinct params). The Supertrend ``value`` IS the
+        trail line: ``final_lower`` in uptrend, ``final_upper`` in
+        downtrend (see ``src/indicators/supertrend.py:64-66``).
 
-        Until 13.6 lands, this stub is a deliberate no-op so 13.4 can
-        ship the state machine in isolation. Tests in 13.4 verify the
-        delegation (called when ``trail_active``, not called otherwise);
-        the actual tightening logic is exercised in 13.6 tests.
+        Skip conditions (each silent):
+
+        - ``_supertrend_trail`` missing — host wiring failure; defensive.
+        - Trail not yet ``initialized`` — ATR warmup not complete.
+        - Trail ``value`` is None — belt-and-braces (initialized=True
+          but value not yet computed on the boundary bar).
+        - Trail trend mismatches position side — when the trail's own
+          Supertrend flips against the position, ``value`` jumps to the
+          opposite band (above price for LONG → invalid SL). Side-check
+          filters that out before the loosen-check could ever trigger
+          a wrong-direction modify.
+        - New SL would loosen vs ``state.current_sl`` (LONG: ≤; SHORT: ≥).
+          Strict inequality so equal-value bars don't burn a redundant
+          modify call.
         """
-        # Intentional no-op — see docstring. Story 13.6 fills the body.
-        return
+        trail = getattr(self, "_supertrend_trail", None)
+        if trail is None or not trail.initialized:
+            return
+
+        new_line = trail.value
+        if new_line is None:
+            return
+
+        new_sl = Decimal(str(new_line))
+        setup = state.setup
+
+        if setup.side == OrderSide.BUY:
+            # LONG: trail must be in uptrend AND tighten toward price.
+            if trail.trend != 1 or new_sl <= state.current_sl:
+                return
+        else:
+            # SHORT: trail must be in downtrend AND tighten toward price.
+            if trail.trend != -1 or new_sl >= state.current_sl:
+                return
+
+        self._modify_sl(new_sl)
+        state.current_sl = new_sl
 
     def _cfg(self) -> "BracketStrategyConfig":
         """Typed alias for ``self.config``.

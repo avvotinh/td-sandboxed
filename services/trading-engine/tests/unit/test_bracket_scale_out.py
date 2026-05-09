@@ -50,7 +50,7 @@ class _Host(BracketScaleOutMixin):
     production initialisation order.
     """
 
-    def __init__(self, config) -> None:
+    def __init__(self, config, *, supertrend_trail=None) -> None:
         super().__init__()
         self.config = config
         # Helpers the mixin invokes — all mocked so we can assert
@@ -58,9 +58,14 @@ class _Host(BracketScaleOutMixin):
         self._close_partial = Mock(return_value=Mock(name="Order"))
         self._modify_sl = Mock(return_value=True)
         self._log = Mock()
-        # _update_trailing_sl is the stub method on the mixin — wrap
-        # it so tests can assert delegation while keeping the no-op
-        # body that ships in 13.4 (real body lands in 13.6).
+        # Supertrend trail indicator — only tests in TestTrailUpdate
+        # provide a real-ish stub; everywhere else the trail body is
+        # bypassed via mock-of-mock on _update_trailing_sl below.
+        self._supertrend_trail = supertrend_trail
+        # _update_trailing_sl is the real method on the mixin — wrap
+        # it so tests can assert delegation while still exercising the
+        # body when supertrend_trail is provided. Tests that want to
+        # bypass the body entirely can rebind this to ``Mock()``.
         self._update_trailing_sl = Mock(wraps=self._update_trailing_sl)
 
 
@@ -325,10 +330,12 @@ class TestScaleOutTradeState:
                 side=OrderSide.BUY,
                 risk_per_unit=Decimal("10"),
             ),
+            current_sl=Decimal("1990"),
         )
         assert st.scaled_out is False
         assert st.breakeven_moved is False
         assert st.trail_active is False
+        assert st.current_sl == Decimal("1990")
 
     def test_setup_is_frozen(self) -> None:
         # Frozen guarantees the captured fields cannot be silently
@@ -354,3 +361,223 @@ class TestScaleOutTradeState:
         assert st.setup.side == OrderSide.BUY
         assert st.setup.risk_per_unit == Decimal("10")
         assert st.setup.initial_qty == Decimal("1.0")
+
+    def test_current_sl_tracks_initial_sl_at_init(
+        self, host_long: _Host
+    ) -> None:
+        # Story 13.6: current_sl tracks the live SL trigger so the trail
+        # body can compare candidate trail lines against the live SL.
+        # Until BE / trail moves, current_sl mirrors initial_sl.
+        assert host_long._scale_state.current_sl == Decimal("1990")
+
+    def test_current_sl_updates_to_entry_on_breakeven(
+        self, host_long: _Host
+    ) -> None:
+        host_long.evaluate_scale_out(Decimal("2010"))  # +1R fires BE move
+
+        assert host_long._scale_state.breakeven_moved is True
+        assert host_long._scale_state.current_sl == Decimal("2000")  # entry
+
+
+# ---------------------------------------------------------------------------
+# Story 13.6 — _update_trailing_sl body (plan §3.1 cases #10, #11)
+# ---------------------------------------------------------------------------
+
+
+def _stub_trail(*, value: float | None, trend: int, initialized: bool = True) -> Mock:
+    """Stub the Supertrend trail indicator surface."""
+    trail = Mock()
+    trail.value = value
+    trail.trend = trend
+    trail.initialized = initialized
+    return trail
+
+
+def _post_be_state(side: OrderSide) -> _ScaleOutTradeState:
+    """Build a state record already past BE move so the trail body runs."""
+    if side == OrderSide.BUY:
+        setup = _ScaleOutSetup(
+            entry_price=Decimal("2000"),
+            initial_sl=Decimal("1990"),
+            initial_qty=Decimal("1.0"),
+            side=OrderSide.BUY,
+            risk_per_unit=Decimal("10"),
+        )
+        current_sl = Decimal("2000")  # at BE
+    else:
+        setup = _ScaleOutSetup(
+            entry_price=Decimal("2000"),
+            initial_sl=Decimal("2010"),
+            initial_qty=Decimal("1.0"),
+            side=OrderSide.SELL,
+            risk_per_unit=Decimal("10"),
+        )
+        current_sl = Decimal("2000")  # at BE
+    return _ScaleOutTradeState(
+        setup=setup,
+        scaled_out=True,
+        breakeven_moved=True,
+        trail_active=True,
+        current_sl=current_sl,
+    )
+
+
+class TestTrailUpdate:
+    """Plan §3.1 #10 + #11 — trail tightens-only, never loosens.
+
+    Tests bypass the ``Mock(wraps=...)`` indirection by re-binding the
+    real method back onto the host instance.
+    """
+
+    def _bind_real_trail_body(self, host: _Host) -> None:
+        # Drop the Mock wrap so we exercise the real _update_trailing_sl
+        # body. The wrap is set in _Host.__init__ for delegation tests
+        # in earlier test classes.
+        del host._update_trailing_sl
+
+    def test_skipped_when_trail_indicator_not_initialized(self) -> None:
+        cfg = _make_config(trailing_enabled=True)
+        trail = _stub_trail(value=None, trend=0, initialized=False)
+        host = _Host(cfg, supertrend_trail=trail)
+        self._bind_real_trail_body(host)
+
+        host._update_trailing_sl(_post_be_state(OrderSide.BUY))
+
+        host._modify_sl.assert_not_called()
+
+    def test_skipped_when_trail_value_none(self) -> None:
+        # Belt-and-braces: even if initialized=True, value=None means
+        # the indicator has nothing to give us.
+        cfg = _make_config(trailing_enabled=True)
+        trail = _stub_trail(value=None, trend=1, initialized=True)
+        host = _Host(cfg, supertrend_trail=trail)
+        self._bind_real_trail_body(host)
+
+        host._update_trailing_sl(_post_be_state(OrderSide.BUY))
+
+        host._modify_sl.assert_not_called()
+
+    def test_long_tightens_when_trail_above_current_sl(self) -> None:
+        # LONG @ 2000 BE'd to 2000. Trail line at 2005 (above BE) →
+        # tighten by moving SL up to 2005.
+        cfg = _make_config(trailing_enabled=True)
+        trail = _stub_trail(value=2005.0, trend=1)
+        host = _Host(cfg, supertrend_trail=trail)
+        self._bind_real_trail_body(host)
+        state = _post_be_state(OrderSide.BUY)
+
+        host._update_trailing_sl(state)
+
+        host._modify_sl.assert_called_once_with(Decimal("2005.0"))
+        assert state.current_sl == Decimal("2005.0")
+
+    def test_long_does_not_loosen_when_trail_below_current_sl(self) -> None:
+        # Plan §3.1 #11: trail line dropped back below current SL.
+        # Skip the modify — never move SL further from price.
+        cfg = _make_config(trailing_enabled=True)
+        trail = _stub_trail(value=1995.0, trend=1)
+        host = _Host(cfg, supertrend_trail=trail)
+        self._bind_real_trail_body(host)
+        state = _post_be_state(OrderSide.BUY)
+
+        host._update_trailing_sl(state)
+
+        host._modify_sl.assert_not_called()
+        assert state.current_sl == Decimal("2000")  # unchanged
+
+    def test_long_skips_when_trail_equal_current_sl(self) -> None:
+        # Strict tighten: equal = no-op (saves an unneeded modify call).
+        cfg = _make_config(trailing_enabled=True)
+        trail = _stub_trail(value=2000.0, trend=1)
+        host = _Host(cfg, supertrend_trail=trail)
+        self._bind_real_trail_body(host)
+        state = _post_be_state(OrderSide.BUY)
+
+        host._update_trailing_sl(state)
+
+        host._modify_sl.assert_not_called()
+
+    def test_long_skips_when_trail_trend_flipped_to_short(self) -> None:
+        # Trail Supertrend flipped to downtrend mid-trade. value would
+        # be final_upper (above price) — applying it as LONG SL is
+        # invalid (would close immediately). Side-check filters it out.
+        cfg = _make_config(trailing_enabled=True)
+        trail = _stub_trail(value=2050.0, trend=-1)
+        host = _Host(cfg, supertrend_trail=trail)
+        self._bind_real_trail_body(host)
+        state = _post_be_state(OrderSide.BUY)
+
+        host._update_trailing_sl(state)
+
+        host._modify_sl.assert_not_called()
+
+    def test_short_tightens_when_trail_below_current_sl(self) -> None:
+        # SHORT @ 2000 BE'd to 2000. Trail line at 1995 (below BE) →
+        # tighten by moving SL down to 1995.
+        cfg = _make_config(trailing_enabled=True)
+        trail = _stub_trail(value=1995.0, trend=-1)
+        host = _Host(cfg, supertrend_trail=trail)
+        self._bind_real_trail_body(host)
+        state = _post_be_state(OrderSide.SELL)
+
+        host._update_trailing_sl(state)
+
+        host._modify_sl.assert_called_once_with(Decimal("1995.0"))
+        assert state.current_sl == Decimal("1995.0")
+
+    def test_short_does_not_loosen_when_trail_above_current_sl(self) -> None:
+        cfg = _make_config(trailing_enabled=True)
+        trail = _stub_trail(value=2005.0, trend=-1)
+        host = _Host(cfg, supertrend_trail=trail)
+        self._bind_real_trail_body(host)
+        state = _post_be_state(OrderSide.SELL)
+
+        host._update_trailing_sl(state)
+
+        host._modify_sl.assert_not_called()
+        assert state.current_sl == Decimal("2000")
+
+    def test_short_skips_when_trail_trend_flipped_to_long(self) -> None:
+        cfg = _make_config(trailing_enabled=True)
+        trail = _stub_trail(value=1950.0, trend=1)
+        host = _Host(cfg, supertrend_trail=trail)
+        self._bind_real_trail_body(host)
+        state = _post_be_state(OrderSide.SELL)
+
+        host._update_trailing_sl(state)
+
+        host._modify_sl.assert_not_called()
+
+    def test_skipped_when_trail_indicator_missing(self) -> None:
+        # Defensive: if trailing_enabled was set but the host failed to
+        # construct _supertrend_trail (None), skip rather than crash.
+        cfg = _make_config(trailing_enabled=True)
+        host = _Host(cfg, supertrend_trail=None)
+        self._bind_real_trail_body(host)
+
+        host._update_trailing_sl(_post_be_state(OrderSide.BUY))
+
+        host._modify_sl.assert_not_called()
+
+    def test_consecutive_tightens_track_through_state(self) -> None:
+        # First bar: trail at 2005 → SL → 2005.
+        # Second bar: trail at 2010 → SL → 2010 (further tighten).
+        # Third bar: trail back to 2008 → no-op (would loosen).
+        cfg = _make_config(trailing_enabled=True)
+        trail = _stub_trail(value=2005.0, trend=1)
+        host = _Host(cfg, supertrend_trail=trail)
+        self._bind_real_trail_body(host)
+        state = _post_be_state(OrderSide.BUY)
+
+        host._update_trailing_sl(state)
+        assert state.current_sl == Decimal("2005.0")
+
+        trail.value = 2010.0
+        host._update_trailing_sl(state)
+        assert state.current_sl == Decimal("2010.0")
+
+        trail.value = 2008.0
+        host._update_trailing_sl(state)
+        assert state.current_sl == Decimal("2010.0")  # unchanged
+
+        assert host._modify_sl.call_count == 2

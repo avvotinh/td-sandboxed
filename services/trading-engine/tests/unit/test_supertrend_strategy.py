@@ -431,3 +431,49 @@ class TestEvaluateScaleOutForBar:
         strategy._evaluate_scale_out_for_bar(self._stub_bar(2010.0))
 
         strategy.evaluate_scale_out.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Story 13.6 — Supertrend trail indicator wiring
+# ---------------------------------------------------------------------------
+
+
+class TestTrailIndicatorWiring:
+    """``_supertrend_trail`` only constructed when trailing_enabled."""
+
+    def test_trail_indicator_created_when_enabled(self) -> None:
+        strategy = _make_strategy(
+            scale_out_enabled=True,
+            trailing_enabled=True,
+            trailing_atr_period=7,
+            trailing_atr_multiplier=Decimal("2.1"),
+        )
+
+        from src.indicators.supertrend import Supertrend
+
+        assert isinstance(strategy._supertrend_trail, Supertrend)
+        # Indicator picks up the Phase 1 trailing-specific params, not
+        # the signal-line params (period=10, multiplier=3.0 default).
+        assert strategy._supertrend_trail.period == 7
+        # Decimal → float conversion: indicator accepts float, config
+        # holds Decimal for invariant checks (story 13.2).
+        assert strategy._supertrend_trail.multiplier == 2.1
+
+    def test_trail_indicator_none_when_disabled(self) -> None:
+        # Default: trailing_enabled=False — skip the indicator overhead.
+        strategy = _make_strategy()
+
+        assert strategy._supertrend_trail is None
+
+    def test_signal_indicator_unaffected_by_trail(self) -> None:
+        # Regression: prepending the trail indicator must not affect
+        # the signal-line Supertrend (period=10, multiplier=3.0).
+        strategy = _make_strategy(
+            scale_out_enabled=True,
+            trailing_enabled=True,
+            trailing_atr_period=7,
+            trailing_atr_multiplier=Decimal("2.1"),
+        )
+
+        assert strategy._supertrend.period == 10
+        assert strategy._supertrend.multiplier == 3.0
