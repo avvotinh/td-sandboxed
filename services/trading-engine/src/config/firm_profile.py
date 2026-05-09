@@ -430,6 +430,14 @@ class FirmProfile:
     report_template: ReportTemplate | None = None
     notification_template: Mapping[str, Any] = field(default_factory=dict)
     regime_classifier: RegimeConfig | None = None
+    # Epic 13 story 13.8 — per-strategy parameter overrides keyed by
+    # strategy registry id (``supertrend``, ``donchian_breakout``, etc.).
+    # Schema-free at this layer: each value is the raw kwargs dict the
+    # operator wants merged into the strategy config at job-assembly
+    # time. Strict-typed validation happens when the strategy config
+    # itself runs ``__post_init__`` (story 13.2 invariants), so the
+    # firm profile only carries the dict and lets the consumer merge.
+    strategy_overrides: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.firm_id:
@@ -453,6 +461,16 @@ class FirmProfile:
         object.__setattr__(
             self, "notification_template", _freeze_mapping(self.notification_template)
         )
+        # Freeze BOTH the outer dict (MappingProxyType) and each inner
+        # value (_freeze_mapping makes a fresh copy then wraps it).
+        # The dict(v) defensive copy inside _freeze_mapping matters:
+        # Pydantic hands us mutable dicts and a future caller could
+        # otherwise mutate cached kwargs (e.g. add a key before passing
+        # to the strategy factory) and corrupt the registry's view.
+        frozen_overrides = MappingProxyType(
+            {k: _freeze_mapping(v) for k, v in dict(self.strategy_overrides).items()}
+        )
+        object.__setattr__(self, "strategy_overrides", frozen_overrides)
 
     def get_product(self, product_id: str) -> AccountProduct:
         """Return the product with the given id.
