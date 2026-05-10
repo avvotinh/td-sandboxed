@@ -231,7 +231,7 @@ development_status:
   # Phase 12.C — Strategy review carryover + runbook
   12-8-bracket-execution-coverage-tests: backlog           # M  — tick-rounding, ATR-zero, position-reversal across 5 bracket strategies (strategy review §"Land during" #4)
   12-9-router-e2e-integration-tests: backlog               # M  — regime rejection actually filters bars; 1-2 strategies + 4 CSV fixtures; ablation harness path (strategy review §"Land during" #5)
-  12-10-post-init-regression-tests: backlog                # S  — one deliberately-invalid config per strategy, asserts ValueError (strategy review §"Land during" #6)
+  12-10-post-init-regression-tests: done                   # S  — coverage already exists (176 tests, 2026-05-11 audit): test_ma_crossover (4), test_supertrend_strategy (5), test_donchian_breakout_strategy (2 + base), test_bollinger_mean_reversion_strategy (4), test_rsi_mean_reversion_strategy (5), test_orb_strategy (7), test_bracket_strategy_mixin (14 — Phase 1 invariants from 13.2). Every concrete strategy has ≥1 deliberately-invalid config asserting ValueError per strategy review §"Land during" #6.
   12-11-runbook-update: backlog                            # S  — docs/runbooks/backtesting.md adds harness wrapper pointers + dataset fingerprint reference
   12-12-strategy-roster-memo: backlog                      # S  — (optional) go/no-go memo per strategy with evidence; deliverable doc consolidates 12.3 + 12.7 outputs
   epic-12-retrospective: optional
