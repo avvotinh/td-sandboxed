@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -61,9 +64,34 @@ func GetUser(credentials *Credentials) (*User, error) {
 		return nil, fmt.Errorf("invalid credentials: %w", err)
 	}
 
-	// Create HTTP client
+	// Use a cookie jar so cookies survive geo-redirects (e.g. www → vn.tradingview.com).
+	// Setting Domain="tradingview.com" scopes both cookies to every subdomain, which is
+	// what the browser does after login.
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
+	}
+	tvURL, err := url.Parse(TradingViewURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse tradingview URL: %w", err)
+	}
+	jar.SetCookies(tvURL, []*http.Cookie{
+		{Name: "sessionid", Value: credentials.SessionID, Domain: "tradingview.com", Path: "/", Secure: true},
+		{Name: "sessionid_sign", Value: credentials.SessionSign, Domain: "tradingview.com", Path: "/", Secure: true},
+	})
+
 	client := &http.Client{
 		Timeout: 30 * time.Second,
+		Jar:     jar,
+		// Refuse to follow redirects outside *.tradingview.com so a misconfigured
+		// or compromised redirect chain cannot pull us into an unrelated host.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			host := req.URL.Hostname()
+			if host != "tradingview.com" && !strings.HasSuffix(host, ".tradingview.com") {
+				return fmt.Errorf("auth: refusing redirect to non-tradingview host %q", host)
+			}
+			return nil
+		},
 	}
 
 	// Create request
@@ -72,8 +100,6 @@ func GetUser(credentials *Credentials) (*User, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Add cookie header
-	req.Header.Set("Cookie", credentials.GenAuthCookies())
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; TradingView-Go-API/1.0)")
 
 	// Execute request
