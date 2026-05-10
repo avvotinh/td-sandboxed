@@ -64,34 +64,14 @@ func GetUser(credentials *Credentials) (*User, error) {
 		return nil, fmt.Errorf("invalid credentials: %w", err)
 	}
 
-	// Use a cookie jar so cookies survive geo-redirects (e.g. www → vn.tradingview.com).
-	// Setting Domain="tradingview.com" scopes both cookies to every subdomain, which is
-	// what the browser does after login.
-	jar, err := cookiejar.New(nil)
+	jar, err := buildAuthCookieJar(credentials)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
+		return nil, fmt.Errorf("auth.GetUser: %w", err)
 	}
-	tvURL, err := url.Parse(TradingViewURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse tradingview URL: %w", err)
-	}
-	jar.SetCookies(tvURL, []*http.Cookie{
-		{Name: "sessionid", Value: credentials.SessionID, Domain: "tradingview.com", Path: "/", Secure: true},
-		{Name: "sessionid_sign", Value: credentials.SessionSign, Domain: "tradingview.com", Path: "/", Secure: true},
-	})
-
 	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Jar:     jar,
-		// Refuse to follow redirects outside *.tradingview.com so a misconfigured
-		// or compromised redirect chain cannot pull us into an unrelated host.
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			host := req.URL.Hostname()
-			if host != "tradingview.com" && !strings.HasSuffix(host, ".tradingview.com") {
-				return fmt.Errorf("auth: refusing redirect to non-tradingview host %q", host)
-			}
-			return nil
-		},
+		Timeout:       30 * time.Second,
+		Jar:           jar,
+		CheckRedirect: checkRedirectStaysOnTradingView,
 	}
 
 	// Create request
@@ -139,6 +119,40 @@ func GetUser(credentials *Credentials) (*User, error) {
 	}
 
 	return user, nil
+}
+
+// buildAuthCookieJar returns a jar with sessionid + sessionid_sign scoped
+// to ``tradingview.com`` so they survive geo-redirects (e.g. www →
+// vn.tradingview.com). Browsers set the cookies on the .tradingview.com
+// effective domain after login; mirror that here so a Go-side request
+// behaves the same as a browser session.
+func buildAuthCookieJar(credentials *Credentials) (http.CookieJar, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
+	}
+	tvURL, err := url.Parse(TradingViewURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse tradingview URL: %w", err)
+	}
+	jar.SetCookies(tvURL, []*http.Cookie{
+		{Name: "sessionid", Value: credentials.SessionID, Domain: "tradingview.com", Path: "/", Secure: true},
+		{Name: "sessionid_sign", Value: credentials.SessionSign, Domain: "tradingview.com", Path: "/", Secure: true},
+	})
+	return jar, nil
+}
+
+// checkRedirectStaysOnTradingView is the redirect policy used by the auth
+// client. It blocks any redirect whose target host isn't
+// ``tradingview.com`` or one of its subdomains, so a misconfigured or
+// compromised redirect chain cannot pull the auth request into an
+// unrelated host.
+func checkRedirectStaysOnTradingView(req *http.Request, _ []*http.Request) error {
+	host := req.URL.Hostname()
+	if host != "tradingview.com" && !strings.HasSuffix(host, ".tradingview.com") {
+		return fmt.Errorf("auth: refusing redirect to non-tradingview host %q", host)
+	}
+	return nil
 }
 
 // extractAuthToken extracts the auth_token from HTML content.
