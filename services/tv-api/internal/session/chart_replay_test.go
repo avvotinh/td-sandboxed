@@ -175,18 +175,25 @@ func TestSetSubscriptionWithReference_ResetsRangeAfterPlainSubscription(t *testi
 	assert.Equal(t, int64(1700000000), cs.referenceToTs)
 }
 
-// TestRequestMoreData_NegativeBatchSize covers the FakeReplay walk-backward call.
-// Existing RequestMoreData accepts negative count (JS session.js:412 fetchMore(-N)).
-func TestRequestMoreData_NegativeBatchSize(t *testing.T) {
+// TestRequestMoreData_WireFormat verifies request_more_data matches the JS
+// reference (TradingView-API/src/chart/session.js:413):
+//
+//	this.#client.send('request_more_data', [chartSessionID, '$prices', number])
+//
+// Data[1] must be the literal "$prices" feed name (NOT a series ID like
+// "s1") and Data[2] must be a positive count. The seriesID arg to the Go
+// function is retained for API stability but ignored — passing "s1" or
+// any other string must produce the same wire output.
+func TestRequestMoreData_WireFormat(t *testing.T) {
 	bridge := &fakeClientBridge{}
 	cs := NewChartSession(bridge)
 
-	require.NoError(t, cs.RequestMoreData("s1", -1000))
+	require.NoError(t, cs.RequestMoreData("ignored", 1000))
 
 	pkts := bridge.byType("request_more_data")
 	require.Len(t, pkts, 1)
-	assert.Equal(t, "s1", pkts[0].Data[1])
-	assert.Equal(t, -1000, pkts[0].Data[2])
+	assert.Equal(t, "$prices", pkts[0].Data[1])
+	assert.Equal(t, 1000, pkts[0].Data[2])
 }
 
 // ----------------------------------------------------------------------

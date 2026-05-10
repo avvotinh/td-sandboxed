@@ -432,10 +432,22 @@ func (cs *ChartSession) CreateSeriesWithReference(timeframe string, rangeCount i
 }
 
 // RequestMoreData sends the request_more_data packet.
-func (cs *ChartSession) RequestMoreData(seriesID string, count int) error {
+//
+// Per JS reference (TradingView-API/src/chart/session.js:413), the second
+// argument is the literal feed name "$prices", NOT the series ID. Sending
+// the series ID (e.g. "s1") makes the server reply with
+// `critical_error: unknown series id` and tear down the WebSocket. The
+// seriesID parameter is retained for API stability but ignored here; all
+// callers are paging the same "$prices" feed that create_series anchored.
+//
+// The count must also be positive — JS sends a plain `number` to mean
+// "fetch this many more older bars". Negative values are silently
+// reinterpreted by the server (same wrong-direction class as the
+// CreateSeriesWithReference -1000 bug) and produce no useful data.
+func (cs *ChartSession) RequestMoreData(_ string, count int) error {
 	packet := protocol.Packet{
 		Type: "request_more_data",
-		Data: []interface{}{cs.id, seriesID, count},
+		Data: []interface{}{cs.id, "$prices", count},
 	}
 	return cs.client.Send(packet)
 }

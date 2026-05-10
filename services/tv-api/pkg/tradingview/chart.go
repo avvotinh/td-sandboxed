@@ -397,7 +397,10 @@ func fetchUntil(ctx context.Context, sess fetchSession, untilTs int64, opts ...F
 			return nil
 		}
 
-		if err := sess.RequestMoreData("s1", -cfg.batchSize); err != nil {
+		// Positive count per JS reference (session.js:413). The seriesID arg
+		// is ignored by the new RequestMoreData implementation; the literal
+		// "$prices" feed is hardcoded server-side.
+		if err := sess.RequestMoreData("s1", cfg.batchSize); err != nil {
 			return fmt.Errorf("fetch_until request batch=%d at min_ts=%d: %w", batch, minTs, err)
 		}
 
