@@ -1,0 +1,4 @@
+# HIGH_VOLATILITY: bb_width_pct >= bb_width_high_pct (0.80) OR realized_vol >= realized_vol_high (0.025).
+# Highest priority — fires regardless of trend / range signals (per RuleBasedRegimeClassifier.decide).
+adx,plus_di,minus_di,bb_width_pct,realized_vol,ema_slope,is_warmed_up
+20.0,20.0,20.0,0.95,0.05,0.0,True
