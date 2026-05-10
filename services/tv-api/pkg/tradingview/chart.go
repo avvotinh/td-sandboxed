@@ -192,7 +192,15 @@ func (cs *ChartSession) SetMarket(symbol string, options *ChartSessionOptions) e
 	if cs.options.To > 0 {
 		rangeCount := cs.options.Range
 		if rangeCount == 0 {
-			rangeCount = -1000 // walk-backward initial batch
+			// Positive count: TradingView's bar_count tuple semantic returns N
+			// bars at-or-before the To anchor (walk backward). The JS reference
+			// example used a negative literal but empirical testing against the
+			// live server (2026-05-11) showed negative produces bars FORWARD
+			// from the anchor — so a 4-hour FetchRange would land 1 bar after
+			// the filter narrowed the FORWARD-walking batch. 1000 bars covers
+			// ~3.5 days of M5 in the initial batch; FetchUntil pages further
+			// back via request_more_data when the requested fromTs is older.
+			rangeCount = 1000
 		}
 		cs.session.SetSubscriptionWithReference(symbol, cs.options.Timeframe, cs.options.To)
 		if err := cs.session.CreateSeriesWithReference(cs.options.Timeframe, rangeCount, cs.options.To); err != nil {
