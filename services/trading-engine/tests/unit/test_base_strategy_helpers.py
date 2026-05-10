@@ -15,7 +15,7 @@ test_base_strategy.py for signal execution.
 from __future__ import annotations
 
 from datetime import UTC, datetime, time
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from unittest.mock import Mock
 
 import pytest
@@ -161,6 +161,37 @@ class TestBuildBracketArgs:
                 sl_price=Decimal("2390"),
                 tp_price=Decimal("2420"),
             )
+
+    def test_tick_rounding_delegated_to_instrument(
+        self, strategy: _ConcreteStrategy
+    ) -> None:
+        """Story 12.8: SL/TP prices must flow through ``instrument.make_price``
+        so Nautilus rounds them to the venue's tick size before they hit
+        the broker. Skipping make_price would let an off-tick price reach
+        the order book — most venues reject those, some round silently
+        (which can stop the SL outside its intended ATR band).
+
+        Replace the identity make_price with a quantising one and assert
+        the bracket args carry the rounded values, not the raw decimals.
+        """
+        # Quantise to the nearest 0.05 — chosen because it falsifies
+        # both 2390.13 (→ 2390.15) and 2420.07 (→ 2420.05).
+        tick = Decimal("0.05")
+        def round_to_tick(v: Decimal) -> Decimal:
+            return (Decimal(str(v)) / tick).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            ) * tick
+
+        strategy._instrument.make_price = round_to_tick
+
+        args = strategy._build_bracket_args(
+            side=OrderSide.BUY,
+            quantity=Decimal("1.0"),
+            sl_price=Decimal("2390.13"),
+            tp_price=Decimal("2420.07"),
+        )
+        assert args["sl_trigger_price"] == Decimal("2390.15")
+        assert args["tp_price"] == Decimal("2420.05")
 
 
 class TestSubmitBracketOrder:

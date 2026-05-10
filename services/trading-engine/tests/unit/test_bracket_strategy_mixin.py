@@ -10,6 +10,7 @@ import pytest
 from nautilus_trader.model.data import BarType
 from nautilus_trader.model.identifiers import InstrumentId
 
+from src.orders.signal import SignalType
 from src.strategies.bracket_strategy import (
     BracketStrategyConfig,
     BracketStrategyMixin,
@@ -322,3 +323,61 @@ class TestBracketScaleOutConfigInvariants:
         )
         assert cfg.scale_out_enabled is True
         assert cfg.trailing_enabled is True
+
+
+@pytest.mark.unit
+class TestSubmitBracketForEntryGuards:
+    """Story 12.8: bracket-execution coverage for the position-reversal
+    guard. _submit_bracket_for_entry must short-circuit BEFORE building
+    bracket params when the host already holds a position — bracket
+    strategies are not designed to reverse on opposing signals (the
+    breakout / mean-reversion thesis assumes the existing position will
+    flatten via SL/TP first). A premature opposing entry would produce
+    a hedged book the FTMO compliance rules don't model.
+    """
+
+    def _entry_host(self, *, is_flat: bool, last_bar: object | None) -> "_Host":
+        host = _Host(cache=MagicMock(), portfolio=MagicMock(), bar_type=MagicMock())
+        host.is_flat = is_flat
+        host._last_bar = MagicMock(return_value=last_bar)
+        host._read_account_balance = MagicMock(return_value=Decimal("100000"))
+        host._compute_bracket_params = MagicMock(
+            return_value=(Decimal("1.0"), Decimal("2390"), Decimal("2420"))
+        )
+        host._submit_bracket_order = MagicMock()
+        return host
+
+    def test_skips_when_position_already_open(self) -> None:
+        bar = MagicMock()
+        bar.close.as_double.return_value = 2400.0
+        host = self._entry_host(is_flat=False, last_bar=bar)
+        host._submit_bracket_for_entry(SignalType.BUY, Decimal("5"))
+        host._submit_bracket_order.assert_not_called()
+        host._compute_bracket_params.assert_not_called()
+
+    def test_skips_on_none_signal(self) -> None:
+        bar = MagicMock()
+        bar.close.as_double.return_value = 2400.0
+        host = self._entry_host(is_flat=True, last_bar=bar)
+        host._submit_bracket_for_entry(SignalType.NONE, Decimal("5"))
+        host._submit_bracket_order.assert_not_called()
+
+    def test_skips_when_last_bar_missing(self) -> None:
+        # Cache miss between subscribe + first bar — no entry price to
+        # anchor sizing, so the helper bails out without crashing.
+        host = self._entry_host(is_flat=True, last_bar=None)
+        host._submit_bracket_for_entry(SignalType.BUY, Decimal("5"))
+        host._submit_bracket_order.assert_not_called()
+
+    def test_submits_when_flat_with_buy_signal(self) -> None:
+        from nautilus_trader.model.enums import OrderSide
+
+        bar = MagicMock()
+        bar.close.as_double.return_value = 2400.0
+        host = self._entry_host(is_flat=True, last_bar=bar)
+        host._submit_bracket_for_entry(SignalType.BUY, Decimal("5"))
+        host._submit_bracket_order.assert_called_once()
+        kwargs = host._submit_bracket_order.call_args.kwargs
+        assert kwargs["side"] == OrderSide.BUY
+        assert kwargs["sl_price"] == Decimal("2390")
+        assert kwargs["tp_price"] == Decimal("2420")
