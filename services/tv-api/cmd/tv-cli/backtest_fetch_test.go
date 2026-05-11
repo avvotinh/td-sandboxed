@@ -204,6 +204,7 @@ func TestParseBacktestFetchFlags_Happy(t *testing.T) {
 	assert.Equal(t, 1500, cfg.BatchSize)
 	assert.Equal(t, 250*time.Millisecond, cfg.Throttle)
 	assert.False(t, cfg.ForceReplay, "ForceReplay defaults to false (auto-route)")
+	assert.Equal(t, 2*time.Second, cfg.ResponseTimeout, "ResponseTimeout defaults to 2s (suits M5+)")
 }
 
 // TestParseBacktestFetchFlags_ReplayModeFlag pins the --replay-mode
@@ -220,6 +221,51 @@ func TestParseBacktestFetchFlags_ReplayModeFlag(t *testing.T) {
 	cfg, err := parseBacktestFetchFlags()
 	require.NoError(t, err)
 	assert.True(t, cfg.ForceReplay)
+}
+
+// TestParseBacktestFetchFlags_ResponseTimeout pins the
+// --response-timeout-ms flag plumbing + the > 0 validation. M1 fetches
+// hit the default-2000ms timeout on the initial replay batch; this
+// flag is the escape hatch.
+func TestParseBacktestFetchFlags_ResponseTimeout(t *testing.T) {
+	t.Run("happy_path_milliseconds_to_duration", func(t *testing.T) {
+		resetGlobalFlags()
+		*symbol = "OANDA:XAUUSD"
+		*bfFrom = "2024-01-01T00:00:00Z"
+		*bfTo = "2024-02-01T00:00:00Z"
+		*bfOut = "/tmp/xauusd.parquet"
+		*bfResponseTimeoutMs = 8000
+
+		cfg, err := parseBacktestFetchFlags()
+		require.NoError(t, err)
+		assert.Equal(t, 8*time.Second, cfg.ResponseTimeout)
+	})
+
+	t.Run("zero_rejected", func(t *testing.T) {
+		resetGlobalFlags()
+		*symbol = "OANDA:XAUUSD"
+		*bfFrom = "2024-01-01T00:00:00Z"
+		*bfTo = "2024-02-01T00:00:00Z"
+		*bfOut = "/tmp/xauusd.parquet"
+		*bfResponseTimeoutMs = 0
+
+		_, err := parseBacktestFetchFlags()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "response-timeout-ms")
+	})
+
+	t.Run("negative_rejected", func(t *testing.T) {
+		resetGlobalFlags()
+		*symbol = "OANDA:XAUUSD"
+		*bfFrom = "2024-01-01T00:00:00Z"
+		*bfTo = "2024-02-01T00:00:00Z"
+		*bfOut = "/tmp/xauusd.parquet"
+		*bfResponseTimeoutMs = -1
+
+		_, err := parseBacktestFetchFlags()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "response-timeout-ms")
+	})
 }
 
 // TestConvertPeriodsToBarRows verifies the (s → ms) timestamp scaling +
@@ -562,4 +608,5 @@ func resetGlobalFlags() {
 	*bfMaxGapHours = 48.0
 	*bfMaxBatches = 1000
 	*bfReplayMode = false
+	*bfResponseTimeoutMs = 2000
 }

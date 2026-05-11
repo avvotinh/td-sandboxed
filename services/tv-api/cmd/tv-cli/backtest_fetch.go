@@ -58,20 +58,21 @@ type barWriter interface {
 // Pure value type → easy to unit-test the parser without spinning a
 // client.
 type backtestFetchConfig struct {
-	Symbol         string
-	Timeframe      string
-	From           time.Time
-	To             time.Time
-	Out            string
-	SpecName       string
-	DatasetVersion string
-	WindowName     string
-	WindowKind     string
-	Throttle       time.Duration
-	BatchSize      int
-	MaxGapHours    float64
-	MaxBatches     int
-	ForceReplay    bool
+	Symbol          string
+	Timeframe       string
+	From            time.Time
+	To              time.Time
+	Out             string
+	SpecName        string
+	DatasetVersion  string
+	WindowName      string
+	WindowKind      string
+	Throttle        time.Duration
+	BatchSize       int
+	MaxGapHours     float64
+	MaxBatches      int
+	ForceReplay     bool
+	ResponseTimeout time.Duration
 }
 
 // backtestFetchDeps wires the I/O seams runBacktestFetch needs. The
@@ -126,22 +127,26 @@ func parseBacktestFetchFlags() (backtestFetchConfig, error) {
 	if *bfMaxBatches <= 0 {
 		return backtestFetchConfig{}, fmt.Errorf("backtest-fetch: -max-batches must be > 0, got %d", *bfMaxBatches)
 	}
+	if *bfResponseTimeoutMs <= 0 {
+		return backtestFetchConfig{}, fmt.Errorf("backtest-fetch: -response-timeout-ms must be > 0, got %d", *bfResponseTimeoutMs)
+	}
 
 	return backtestFetchConfig{
-		Symbol:         *symbol,
-		Timeframe:      *timeframe,
-		From:           from.UTC(),
-		To:             to.UTC(),
-		Out:            *bfOut,
-		SpecName:       *bfSpecName,
-		DatasetVersion: *bfDatasetVersion,
-		WindowName:     *bfWindowName,
-		WindowKind:     *bfWindowKind,
-		Throttle:       time.Duration(*bfThrottleMs) * time.Millisecond,
-		BatchSize:      *bfBatchSize,
-		MaxGapHours:    *bfMaxGapHours,
-		MaxBatches:     *bfMaxBatches,
-		ForceReplay:    *bfReplayMode,
+		Symbol:          *symbol,
+		Timeframe:       *timeframe,
+		From:            from.UTC(),
+		To:              to.UTC(),
+		Out:             *bfOut,
+		SpecName:        *bfSpecName,
+		DatasetVersion:  *bfDatasetVersion,
+		WindowName:      *bfWindowName,
+		WindowKind:      *bfWindowKind,
+		Throttle:        time.Duration(*bfThrottleMs) * time.Millisecond,
+		BatchSize:       *bfBatchSize,
+		MaxGapHours:     *bfMaxGapHours,
+		MaxBatches:      *bfMaxBatches,
+		ForceReplay:     *bfReplayMode,
+		ResponseTimeout: time.Duration(*bfResponseTimeoutMs) * time.Millisecond,
 	}, nil
 }
 
@@ -196,6 +201,7 @@ func fetchAndWrite(ctx context.Context, cfg backtestFetchConfig, deps backtestFe
 		tradingview.WithBatchSize(cfg.BatchSize),
 		tradingview.WithThrottle(cfg.Throttle),
 		tradingview.WithMaxBatches(cfg.MaxBatches),
+		tradingview.WithResponseTimeout(cfg.ResponseTimeout),
 	}
 
 	var periods []*tradingview.Period

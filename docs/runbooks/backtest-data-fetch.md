@@ -12,7 +12,17 @@ The CLI auto-routes between two API surfaces based on the timeframe:
 This runbook covers the four-shard XAUUSD M5+M15 × in_sample+oos_reserve campaign that Epic 12 needs. The same procedure scales to other timeframes and symbols by swapping the flags — the auto-route picks FakeReplay or ReplayMode without operator input.
 
 > **Anchor history cap (empirical, 2026-05-11 on `oanhcao_dev5` premium account):**
-> A single `backtest-fetch` call returns **~25 days back from `-to`** on premium ReplayMode (intraday or D/W/M) and **~18 days back** on FakeReplay. The server applies a hard window cap per anchor regardless of `-from`, `-batch-size`, or `-max-batches`. For multi-month / multi-year windows you MUST run a series of calls with stepped `-to` anchors (typically every 20 days for safety) and merge via `go_manifest_loader`. The `-replay-mode` flag forces premium ReplayMode for intraday timeframes, which is the wider window.
+> The server applies a hard cap of **≈ 5500 bars per `-to` anchor**, regardless of `-from`, `-batch-size`, `-max-batches`, or subscription tier. The bar count is constant; the calendar coverage depends on timeframe:
+>
+> | Timeframe | Bars/anchor | Calendar coverage back from `-to` |
+> |---|---|---|
+> | M1 | ~5621 | ~4 trading days |
+> | M5 premium ReplayMode | ~5269 | ~25 days |
+> | M5 FakeReplay (free tier or no flag) | ~3888 | ~18 days |
+> | M15 (interpolated) | ~5500 | ~75 days |
+> | 1D / 1W / 1M | well under cap | a single call covers years |
+>
+> For multi-month / multi-year intraday windows you MUST run a series of calls with stepped `-to` anchors and merge via `go_manifest_loader`. The `-replay-mode` flag forces premium ReplayMode for intraday timeframes (wider per-anchor window). M1 additionally needs `-response-timeout-ms ≥ 5000` because the initial replay batch is slow to materialise (default 2000 ms times out).
 
 ---
 
@@ -136,6 +146,7 @@ If TradingView reports a `series_error` containing "no more bars" or similar ter
 - **Timeframe split:** intraday timeframes (`1, 3, 5, 15, 30, 60, 120, 240`) work on any account. Daily / weekly / monthly require a premium TradingView account with replay entitlement — the CLI auto-routes but a free account silently yields zero bars.
 - **Anchor history cap (server-side):** ~25 days back from `-to` on premium ReplayMode, ~18 days on FakeReplay. Multi-month windows require chunked walks (see [Run the four-shard XAUUSD campaign](#run-the-four-shard-xauusd-campaign)). Empirically reproduced 2026-05-11 on `oanhcao_dev5` across both `to=2026-05-01` and `to=2024-06-01` anchors — the cap travels with the anchor, not with the calendar.
 - **`--replay-mode` override:** forces premium ReplayMode for intraday timeframes (default auto-route only enables ReplayMode for D/W/M). On premium accounts ReplayMode returns ~7 days more intraday history per anchor than FakeReplay — measurable as 5269 vs 3888 M5 bars in the empirical smoke. Without a premium subscription, `--replay-mode` produces zero bars for any timeframe.
+- **`--response-timeout-ms` override:** raises the per-batch response wait. Default 2000 ms suffices for M5 and coarser timeframes. M1 in replay mode requires ≥5000 ms (empirically the initial batch lands in ~6–8 s as the server materialises high-density bars at a historical anchor). Without bumping, M1 fails with `fetch_until: no initial batch within 2s`.
 - **Symbol mapping:** Manifest writes the bare ticker (`XAUUSD`), not the exchange-prefixed form (`OANDA:XAUUSD`). This matches `configs/datasets/*.yaml` shorthand.
 
 ## Story references
