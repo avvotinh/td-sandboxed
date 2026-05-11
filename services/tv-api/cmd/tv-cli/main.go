@@ -44,6 +44,7 @@ var (
 	bfBatchSize      = flag.Int("batch-size", 1000, "[backtest-fetch] bars per request_more_data call")
 	bfMaxGapHours    = flag.Float64("max-gap-hours", 48.0, "[backtest-fetch] gap threshold (hours) before flagging in manifest")
 	bfMaxBatches     = flag.Int("max-batches", 1000, "[backtest-fetch] safety cap on FetchUntil iterations")
+	bfReplayMode     = flag.Bool("replay-mode", false, "[backtest-fetch] force premium ReplayMode for any timeframe (REQUIRES premium TV account — free tier silently returns zero bars). Default: auto-route by timeframe (D/W/M only).")
 )
 
 func main() {
@@ -417,9 +418,12 @@ func showHelp() {
 	fmt.Println("  tv-cli -command quote -symbol BINANCE:BTCUSDT -fields \"lp,volume,bid,ask\"")
 	fmt.Println()
 	fmt.Println("  # Bulk-fetch XAUUSD M5 history for Epic 12 backtest dataset")
-	fmt.Println("  tv-cli -command backtest-fetch \\")
+	fmt.Println("  # Note: each call returns ~25 days back from -to on premium ReplayMode")
+	fmt.Println("  # (~18 days on FakeReplay). For multi-month windows, run multiple")
+	fmt.Println("  # invocations with stepped -to anchors and merge via go_manifest_loader.")
+	fmt.Println("  tv-cli -command backtest-fetch -replay-mode \\")
 	fmt.Println("    -symbol OANDA:XAUUSD -timeframe 5 \\")
-	fmt.Println("    -from 2024-01-01T00:00:00Z -to 2026-01-01T00:00:00Z \\")
+	fmt.Println("    -from 2026-04-01T00:00:00Z -to 2026-05-01T00:00:00Z \\")
 	fmt.Println("    -window-name in_sample -window-kind in_sample \\")
 	fmt.Println("    -out data/historical/XAUUSD/M5/in_sample.parquet")
 	fmt.Println()

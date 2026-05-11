@@ -19,17 +19,17 @@ import (
 // and returns canned bars. Test code asserts on which fetch method was
 // invoked (FakeReplay vs ReplayMode auto-route).
 type stubSession struct {
-	setMarketErr    error
-	fetchRangeErr   error
-	fetchReplayErr  error
-	periods         []*tradingview.Period
+	setMarketErr   error
+	fetchRangeErr  error
+	fetchReplayErr error
+	periods        []*tradingview.Period
 
-	setMarketArgs   *tradingview.ChartSessionOptions
-	fetchedFrom     int64
-	fetchedTo       int64
-	fetchRangeCalls int
+	setMarketArgs    *tradingview.ChartSessionOptions
+	fetchedFrom      int64
+	fetchedTo        int64
+	fetchRangeCalls  int
 	fetchReplayCalls int
-	deleted         bool
+	deleted          bool
 }
 
 func (s *stubSession) SetMarket(symbol string, options *tradingview.ChartSessionOptions) error {
@@ -203,6 +203,23 @@ func TestParseBacktestFetchFlags_Happy(t *testing.T) {
 	assert.Equal(t, "in_sample", cfg.WindowKind)
 	assert.Equal(t, 1500, cfg.BatchSize)
 	assert.Equal(t, 250*time.Millisecond, cfg.Throttle)
+	assert.False(t, cfg.ForceReplay, "ForceReplay defaults to false (auto-route)")
+}
+
+// TestParseBacktestFetchFlags_ReplayModeFlag pins the --replay-mode
+// flag plumbing through to ForceReplay. Override is opt-in; default
+// false preserves the auto-route table.
+func TestParseBacktestFetchFlags_ReplayModeFlag(t *testing.T) {
+	resetGlobalFlags()
+	*symbol = "OANDA:XAUUSD"
+	*bfFrom = "2024-01-01T00:00:00Z"
+	*bfTo = "2024-02-01T00:00:00Z"
+	*bfOut = "/tmp/xauusd.parquet"
+	*bfReplayMode = true
+
+	cfg, err := parseBacktestFetchFlags()
+	require.NoError(t, err)
+	assert.True(t, cfg.ForceReplay)
 }
 
 // TestConvertPeriodsToBarRows verifies the (s → ms) timestamp scaling +
@@ -479,6 +496,55 @@ func TestFetchAndWrite_IntradayKeepsFakeReplay(t *testing.T) {
 	assert.Zero(t, sess.fetchReplayCalls)
 }
 
+// TestFetchAndWrite_ForceReplayOverridesIntraday pins the --replay-mode
+// override: intraday timeframe + ForceReplay=true must route through
+// ReplayMode (ReplayStartFrom + FetchHistoricalReplay) instead of the
+// default FakeReplay path. Empirical 2026-05-11: FakeReplay caps M5
+// at ~18 trading days back from To even on a premium account, while
+// ReplayMode reaches ~25 days — the override is the only way to opt
+// in without changing the auto-route table.
+func TestFetchAndWrite_ForceReplayOverridesIntraday(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "m5_replay.parquet")
+
+	periods := []*tradingview.Period{
+		{Time: 1700000000, Close: 1},
+	}
+	sess := &stubSession{periods: periods}
+
+	cfg := backtestFetchConfig{
+		Symbol:         "OANDA:XAUUSD",
+		Timeframe:      "5",
+		From:           time.Date(2023, 11, 14, 0, 0, 0, 0, time.UTC),
+		To:             time.Date(2023, 11, 14, 23, 59, 59, 0, time.UTC),
+		Out:            out,
+		SpecName:       "smoke-force-replay",
+		DatasetVersion: "v1",
+		WindowName:     "in_sample",
+		WindowKind:     "in_sample",
+		BatchSize:      1000,
+		MaxGapHours:    48.0,
+		MaxBatches:     100,
+		ForceReplay:    true,
+	}
+	deps := backtestFetchDeps{
+		NewSession: func() backtestFetchSession { return sess },
+		NewWriter:  func(path string) (barWriter, error) { return store.NewParquetWriter(path) },
+		Now:        time.Now,
+		Stdout:     &bytes.Buffer{},
+	}
+
+	require.NoError(t, fetchAndWrite(context.Background(), cfg, deps))
+
+	require.NotNil(t, sess.setMarketArgs)
+	assert.Equal(t, cfg.To.Unix(), sess.setMarketArgs.ReplayStartFrom,
+		"ForceReplay must populate ReplayStartFrom even for intraday")
+	assert.Zero(t, sess.setMarketArgs.To,
+		"ForceReplay must NOT set the FakeReplay To anchor")
+	assert.Equal(t, 1, sess.fetchReplayCalls, "FetchHistoricalReplay must be invoked")
+	assert.Zero(t, sess.fetchRangeCalls, "FetchRange must NOT be invoked when ForceReplay=true")
+}
+
 // resetGlobalFlags is shared by parser tests — flag.* package vars are
 // shared module state so tests must restore defaults to stay isolated.
 func resetGlobalFlags() {
@@ -495,4 +561,5 @@ func resetGlobalFlags() {
 	*bfBatchSize = 1000
 	*bfMaxGapHours = 48.0
 	*bfMaxBatches = 1000
+	*bfReplayMode = false
 }

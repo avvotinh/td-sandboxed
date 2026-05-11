@@ -71,6 +71,7 @@ type backtestFetchConfig struct {
 	BatchSize      int
 	MaxGapHours    float64
 	MaxBatches     int
+	ForceReplay    bool
 }
 
 // backtestFetchDeps wires the I/O seams runBacktestFetch needs. The
@@ -140,6 +141,7 @@ func parseBacktestFetchFlags() (backtestFetchConfig, error) {
 		BatchSize:      *bfBatchSize,
 		MaxGapHours:    *bfMaxGapHours,
 		MaxBatches:     *bfMaxBatches,
+		ForceReplay:    *bfReplayMode,
 	}, nil
 }
 
@@ -171,7 +173,7 @@ func fetchAndWrite(ctx context.Context, cfg backtestFetchConfig, deps backtestFe
 	sess := deps.NewSession()
 	defer func() { _ = sess.Delete() }()
 
-	useReplay := requiresReplayMode(cfg.Timeframe)
+	useReplay := cfg.ForceReplay || requiresReplayMode(cfg.Timeframe)
 
 	var setMarketOpts *tradingview.ChartSessionOptions
 	if useReplay {

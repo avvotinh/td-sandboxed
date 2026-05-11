@@ -11,6 +11,9 @@ The CLI auto-routes between two API surfaces based on the timeframe:
 
 This runbook covers the four-shard XAUUSD M5+M15 × in_sample+oos_reserve campaign that Epic 12 needs. The same procedure scales to other timeframes and symbols by swapping the flags — the auto-route picks FakeReplay or ReplayMode without operator input.
 
+> **Anchor history cap (empirical, 2026-05-11 on `oanhcao_dev5` premium account):**
+> A single `backtest-fetch` call returns **~25 days back from `-to`** on premium ReplayMode (intraday or D/W/M) and **~18 days back** on FakeReplay. The server applies a hard window cap per anchor regardless of `-from`, `-batch-size`, or `-max-batches`. For multi-month / multi-year windows you MUST run a series of calls with stepped `-to` anchors (typically every 20 days for safety) and merge via `go_manifest_loader`. The `-replay-mode` flag forces premium ReplayMode for intraday timeframes, which is the wider window.
+
 ---
 
 ## Prerequisites
@@ -30,41 +33,30 @@ go build -o bin/tv-cli ./cmd/tv-cli
 
 ## Run the four-shard XAUUSD campaign
 
+Because each call caps at ~25 days, a 2-year M5 in-sample shard requires ~30 stepped invocations. Drive the loop from a shell script that walks `-to` backward in 20-day increments (5-day safety overlap absorbs weekend gaps and partial batches), writing each chunk to a numbered file. Then merge with `go_manifest_loader`.
+
 ```bash
-# 1) M5 in-sample (2 years)
-./bin/tv-cli -command backtest-fetch \
-  -symbol OANDA:XAUUSD -timeframe 5 \
-  -from 2024-01-01T00:00:00Z -to 2026-01-01T00:00:00Z \
-  -spec-name xauusd-validation -dataset-version v1 \
-  -window-name in_sample -window-kind in_sample \
-  -out ../../data/historical/XAUUSD/M5/in_sample.parquet
-
-# 2) M5 OOS reserve (4 months)
-./bin/tv-cli -command backtest-fetch \
-  -symbol OANDA:XAUUSD -timeframe 5 \
-  -from 2026-01-01T00:00:00Z -to 2026-04-30T23:59:59Z \
-  -spec-name xauusd-validation -dataset-version v1 \
-  -window-name oos_reserve -window-kind oos_reserve \
-  -out ../../data/historical/XAUUSD/M5/oos_reserve.parquet
-
-# 3) M15 in-sample
-./bin/tv-cli -command backtest-fetch \
-  -symbol OANDA:XAUUSD -timeframe 15 \
-  -from 2024-01-01T00:00:00Z -to 2026-01-01T00:00:00Z \
-  -spec-name xauusd-validation -dataset-version v1 \
-  -window-name in_sample -window-kind in_sample \
-  -out ../../data/historical/XAUUSD/M15/in_sample.parquet
-
-# 4) M15 OOS reserve
-./bin/tv-cli -command backtest-fetch \
-  -symbol OANDA:XAUUSD -timeframe 15 \
-  -from 2026-01-01T00:00:00Z -to 2026-04-30T23:59:59Z \
-  -spec-name xauusd-validation -dataset-version v1 \
-  -window-name oos_reserve -window-kind oos_reserve \
-  -out ../../data/historical/XAUUSD/M15/oos_reserve.parquet
+# 1) M5 in-sample — chunked walk, ~30 calls covering 2024-01-01 → 2026-01-01
+mkdir -p chunks/XAUUSD/M5/in_sample
+to=2026-01-01T00:00:00Z
+i=0
+while :; do
+  from=$(date -u -d "$to - 20 days" +%Y-%m-%dT%H:%M:%SZ)
+  ./bin/tv-cli -command backtest-fetch -replay-mode \
+    -symbol OANDA:XAUUSD -timeframe 5 \
+    -from "$from" -to "$to" \
+    -spec-name xauusd-validation -dataset-version v1 \
+    -window-name in_sample -window-kind in_sample \
+    -out chunks/XAUUSD/M5/in_sample/$(printf '%03d' $i).parquet || break
+  [[ "$from" < "2024-01-01T00:00:00Z" ]] && break
+  to=$from
+  i=$((i+1))
+done
 ```
 
-Each invocation produces a Parquet shard plus a JSON sidecar at `<out>.manifest.json`.
+Repeat with `to=2026-04-30T23:59:59Z`, walking back to `2026-01-01T00:00:00Z` for the OOS reserve shard (~6 calls); swap `-timeframe 5` for `15` to run the M15 pair. The campaign produces four directories of chunked Parquet files plus their `.manifest.json` sidecars.
+
+Merge each shard's chunks via `go_manifest_loader --sidecar chunks/.../*.parquet.manifest.json …` — see [Merge sidecars into the canonical manifest](#merge-sidecars-into-the-canonical-manifest). The tool concatenates manifest entries; row-level deduplication of the 5-day overlap is not done here, so the consumer must dedupe by `(timeframe, ts)` before backtest replay. Verify the merged shard has no duplicate timestamps with `pandas.duplicated()` against the union of all chunk Parquets before treating it as the canonical dataset.
 
 ## ReplayMode example (premium account, daily / weekly / monthly)
 
@@ -142,6 +134,8 @@ If TradingView reports a `series_error` containing "no more bars" or similar ter
 - **ToS:** the TradingView API used here is reverse-engineered. There is no SLA, and rate-limit responses are silent. Use modest concurrency (one fetch at a time per IP).
 - **Data provenance:** OANDA:XAUUSD on TradingView reflects OANDA retail spreads; FTMO MT5 spreads differ. Per Decision §1 in `docs/epic-12-context.md`, spread for the backtest comes from `configs/firms/ftmo.yaml` via `SpreadAwareFeeModel`, not from the bars file — so this provenance gap does not block the validation campaign.
 - **Timeframe split:** intraday timeframes (`1, 3, 5, 15, 30, 60, 120, 240`) work on any account. Daily / weekly / monthly require a premium TradingView account with replay entitlement — the CLI auto-routes but a free account silently yields zero bars.
+- **Anchor history cap (server-side):** ~25 days back from `-to` on premium ReplayMode, ~18 days on FakeReplay. Multi-month windows require chunked walks (see [Run the four-shard XAUUSD campaign](#run-the-four-shard-xauusd-campaign)). Empirically reproduced 2026-05-11 on `oanhcao_dev5` across both `to=2026-05-01` and `to=2024-06-01` anchors — the cap travels with the anchor, not with the calendar.
+- **`--replay-mode` override:** forces premium ReplayMode for intraday timeframes (default auto-route only enables ReplayMode for D/W/M). On premium accounts ReplayMode returns ~7 days more intraday history per anchor than FakeReplay — measurable as 5269 vs 3888 M5 bars in the empirical smoke. Without a premium subscription, `--replay-mode` produces zero bars for any timeframe.
 - **Symbol mapping:** Manifest writes the bare ticker (`XAUUSD`), not the exchange-prefixed form (`OANDA:XAUUSD`). This matches `configs/datasets/*.yaml` shorthand.
 
 ## Story references
