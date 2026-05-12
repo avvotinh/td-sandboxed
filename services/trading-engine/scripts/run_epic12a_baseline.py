@@ -45,98 +45,110 @@ from src.backtesting.job_config import PropFirmSpec, VenueSpec
 # intentionally use each strategy's __post_init__ defaults wherever
 # possible (`scale_out_enabled` stays False because Epic 13 ships
 # default-OFF — this baseline is the pre-tactic comparison).
-_STRATEGIES: tuple[StrategySpec, ...] = (
-    StrategySpec(
-        name="supertrend",
-        timeframe="M5",
-        bar_type_suffix=timeframe_to_bar_suffix("M5"),
-        params={
-            "period": 10,
-            "multiplier": 3.0,
-            "atr_period": 14,
-            "sl_atr_mult": "1.5",
-            "tp_atr_mult": "3.0",
-            "risk_percent": "0.5",
-            "pip_size": "0.01",
-            "pip_value_per_lot": "1.0",
-        },
-    ),
-    StrategySpec(
-        name="donchian_breakout",
-        timeframe="M5",
-        bar_type_suffix=timeframe_to_bar_suffix("M5"),
-        params={
-            "channel_period": 20,
-            "atr_period": 14,
-            "sl_atr_mult": "2.0",
-            "tp_atr_mult": "4.0",
-            "risk_percent": "0.5",
-            "pip_size": "0.01",
-            "pip_value_per_lot": "1.0",
-        },
-    ),
-    StrategySpec(
-        name="ma_crossover",
-        timeframe="M5",
-        bar_type_suffix=timeframe_to_bar_suffix("M5"),
-        params={
-            "fast_period": 20,
-            "slow_period": 50,
-            "trade_size": "0.1",
-        },
-    ),
-    StrategySpec(
-        name="bollinger_mean_reversion",
-        timeframe="M5",
-        bar_type_suffix=timeframe_to_bar_suffix("M5"),
-        params={
-            "period": 20,
-            "num_std": 2.0,
-            "atr_period": 14,
-            "sl_atr_mult": "1.0",
-            "tp_atr_mult": "2.0",
-            "risk_percent": "0.5",
-            "pip_size": "0.01",
-            "pip_value_per_lot": "1.0",
-        },
-    ),
-    StrategySpec(
-        name="rsi_mean_reversion",
-        timeframe="M5",
-        bar_type_suffix=timeframe_to_bar_suffix("M5"),
-        params={
-            "rsi_period": 14,
-            "oversold": 0.3,
-            "overbought": 0.7,
-            "exit_neutral": 0.5,
-            "atr_period": 14,
-            "sl_atr_mult": "1.0",
-            "tp_atr_mult": "2.0",
-            "risk_percent": "0.5",
-            "pip_size": "0.01",
-            "pip_value_per_lot": "1.0",
-        },
-    ),
-    StrategySpec(
-        name="orb",
-        timeframe="M5",
-        bar_type_suffix=timeframe_to_bar_suffix("M5"),
-        params={
-            "session_open_hour": 8,
-            "session_open_minute": 0,
-            "session_close_hour": 16,
-            "session_close_minute": 30,
-            "session_tz": "Europe/London",
-            "opening_range_minutes": 30,
-            "atr_period": 14,
-            "sl_atr_mult": "1.0",
-            "tp_atr_mult": "2.0",
-            "risk_percent": "0.5",
-            "pip_size": "0.01",
-            "pip_value_per_lot": "1.0",
-        },
-    ),
-)
+#
+# Parameters are timeframe-independent except where noted: the same
+# defaults are used on M5 and M15 so the comparison shows pure
+# timeframe-effect, not param-and-timeframe co-variation.
+def _build_strategies(timeframe: str) -> tuple[StrategySpec, ...]:
+    """Return StrategySpec tuple bound to ``timeframe`` (e.g. ``"M5"``).
+
+    The bar-type suffix is derived via :func:`timeframe_to_bar_suffix`,
+    so passing an unsupported timeframe raises before any runner is
+    spun up.
+    """
+    suffix = timeframe_to_bar_suffix(timeframe)
+    return (
+        StrategySpec(
+            name="supertrend",
+            timeframe=timeframe,
+            bar_type_suffix=suffix,
+            params={
+                "period": 10,
+                "multiplier": 3.0,
+                "atr_period": 14,
+                "sl_atr_mult": "1.5",
+                "tp_atr_mult": "3.0",
+                "risk_percent": "0.5",
+                "pip_size": "0.01",
+                "pip_value_per_lot": "1.0",
+            },
+        ),
+        StrategySpec(
+            name="donchian_breakout",
+            timeframe=timeframe,
+            bar_type_suffix=suffix,
+            params={
+                "channel_period": 20,
+                "atr_period": 14,
+                "sl_atr_mult": "2.0",
+                "tp_atr_mult": "4.0",
+                "risk_percent": "0.5",
+                "pip_size": "0.01",
+                "pip_value_per_lot": "1.0",
+            },
+        ),
+        StrategySpec(
+            name="ma_crossover",
+            timeframe=timeframe,
+            bar_type_suffix=suffix,
+            params={
+                "fast_period": 20,
+                "slow_period": 50,
+                "trade_size": "0.1",
+            },
+        ),
+        StrategySpec(
+            name="bollinger_mean_reversion",
+            timeframe=timeframe,
+            bar_type_suffix=suffix,
+            params={
+                "period": 20,
+                "num_std": 2.0,
+                "atr_period": 14,
+                "sl_atr_mult": "1.0",
+                "tp_atr_mult": "2.0",
+                "risk_percent": "0.5",
+                "pip_size": "0.01",
+                "pip_value_per_lot": "1.0",
+            },
+        ),
+        StrategySpec(
+            name="rsi_mean_reversion",
+            timeframe=timeframe,
+            bar_type_suffix=suffix,
+            params={
+                "rsi_period": 14,
+                "oversold": 0.3,
+                "overbought": 0.7,
+                "exit_neutral": 0.5,
+                "atr_period": 14,
+                "sl_atr_mult": "1.0",
+                "tp_atr_mult": "2.0",
+                "risk_percent": "0.5",
+                "pip_size": "0.01",
+                "pip_value_per_lot": "1.0",
+            },
+        ),
+        StrategySpec(
+            name="orb",
+            timeframe=timeframe,
+            bar_type_suffix=suffix,
+            params={
+                "session_open_hour": 8,
+                "session_open_minute": 0,
+                "session_close_hour": 16,
+                "session_close_minute": 30,
+                "session_tz": "Europe/London",
+                "opening_range_minutes": 30,
+                "atr_period": 14,
+                "sl_atr_mult": "1.0",
+                "tp_atr_mult": "2.0",
+                "risk_percent": "0.5",
+                "pip_size": "0.01",
+                "pip_value_per_lot": "1.0",
+            },
+        ),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -151,6 +163,11 @@ def main(argv: list[str] | None = None) -> int:
         "--window-name",
         default="in_sample",
         help="DatasetManifest window to backtest (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--timeframe",
+        default="M5",
+        help="Bar timeframe (MT-style code: M5, M15, etc.) — must match a manifest entry (default: %(default)s)",
     )
     parser.add_argument(
         "--ftmo-preset",
@@ -210,16 +227,18 @@ def main(argv: list[str] | None = None) -> int:
         max_drawdown_method="equity_peak",
     )
 
+    strategies = _build_strategies(args.timeframe)
+    run_label = f"epic-12a-baseline-{manifest.symbol.lower()}-{args.timeframe.lower()}"
     config = BaselineConfig(
-        run_label="epic-12a-baseline-xauusd-m5",
+        run_label=run_label,
         manifest=manifest,
         window_name=args.window_name,
         venue=venue,
-        strategies=_STRATEGIES,
+        strategies=strategies,
         prop_firm=prop_firm,
     )
 
-    print(f"\nrunning {len(_STRATEGIES)} strategies on {manifest.symbol} {args.window_name}…")
+    print(f"\nrunning {len(strategies)} strategies on {manifest.symbol} {args.window_name} {args.timeframe}…")
     results = run_baseline(config)
     print(f"  done. {len(results)} BacktestResults captured.\n")
 
