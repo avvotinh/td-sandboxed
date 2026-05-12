@@ -226,6 +226,28 @@ def main(argv: list[str] | None = None) -> int:
         help="Apply Epic 13 Phase 1 scale-out overlay on eligible trend-followers (supertrend + donchian_breakout)",
     )
     parser.add_argument(
+        "--pip-size",
+        default=None,
+        help="Override pip_size for all strategies (default: XAUUSD-tuned 0.01). FX symbols need 0.0001.",
+    )
+    parser.add_argument(
+        "--pip-value-per-lot",
+        default=None,
+        help="Override pip_value_per_lot for all strategies (default: XAUUSD-tuned 1.0). FX standard-lot pip value is typically 10.",
+    )
+    parser.add_argument(
+        "--max-lot-size",
+        default=None,
+        help=(
+            "Override RiskBasedSizerConfig.max_lot_size default (10.0) at "
+            "runtime. Needed when Nautilus quantities are interpreted as "
+            "base-currency units (default_fx_ccy: 1 unit = 1 EUR/USD/etc.) "
+            "rather than as broker lots — sizer's 10-unit cap then blocks "
+            "every order via min_quantity=1000. Operator escape hatch for "
+            "the multi-symbol exploration; not a production change."
+        ),
+    )
+    parser.add_argument(
         "--ftmo-preset",
         type=Path,
         default=Path("src/backtesting/presets/ftmo.yaml"),
@@ -257,6 +279,19 @@ def main(argv: list[str] | None = None) -> int:
     if not args.verbose:
         logging.disable(logging.CRITICAL)
 
+    if args.max_lot_size is not None:
+        # Operator escape hatch: override the sizer's max_lot_size default
+        # before any strategy spins up. Pydantic frozen, so we patch the
+        # default via the field's `default` attribute on the model's
+        # FieldInfo entry. New strategies instantiated after this point
+        # pick up the new ceiling; nothing pre-existing is touched.
+        from src.strategies.risk_based_position_sizer import RiskBasedSizerConfig
+
+        RiskBasedSizerConfig.model_fields["max_lot_size"].default = Decimal(
+            args.max_lot_size
+        )
+        RiskBasedSizerConfig.model_rebuild(force=True)
+
     if not args.manifest.exists():
         print(f"manifest not found: {args.manifest}", file=sys.stderr)
         return 1
@@ -284,6 +319,23 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     strategies = _build_strategies(args.timeframe, scale_out=args.scale_out)
+    # Per-symbol pip economics: XAUUSD defaults baked into _build_strategies,
+    # FX (and other symbols) override via --pip-size / --pip-value-per-lot.
+    if args.pip_size is not None or args.pip_value_per_lot is not None:
+        overrides = {}
+        if args.pip_size is not None:
+            overrides["pip_size"] = args.pip_size
+        if args.pip_value_per_lot is not None:
+            overrides["pip_value_per_lot"] = args.pip_value_per_lot
+        strategies = tuple(
+            StrategySpec(
+                name=s.name,
+                timeframe=s.timeframe,
+                bar_type_suffix=s.bar_type_suffix,
+                params={**dict(s.params), **overrides},
+            )
+            for s in strategies
+        )
     suffix = "-scaleout" if args.scale_out else ""
     run_label = (
         f"epic-12a-baseline-{manifest.symbol.lower()}-{args.timeframe.lower()}{suffix}"

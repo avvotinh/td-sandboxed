@@ -39,6 +39,14 @@ _SUPPORTED_SYMBOLS: frozenset[str] = frozenset(
         "USD/JPY",
         "USD/CAD",
         "AUD/USD",
+        # No-slash variants for symbols produced by the tv-cli fetcher
+        # (filesystem paths can't carry `/`). Same Nautilus instrument
+        # — default_fx_ccy accepts either format.
+        "EURUSD",
+        "GBPUSD",
+        "USDJPY",
+        "USDCAD",
+        "AUDUSD",
         "XAUUSD",
     }
 )

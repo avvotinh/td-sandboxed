@@ -84,11 +84,62 @@ def _build_instrument(symbol: str) -> tuple[Instrument, BarType]:
     """
     if symbol == "XAUUSD":
         instrument = _build_xauusd_instrument()
+    elif symbol in {"EURUSD", "GBPUSD", "AUDUSD"}:
+        instrument = _build_fx_pair_instrument(symbol)
     else:
         instrument = TestInstrumentProvider.default_fx_ccy(symbol)
     # Second tuple entry preserved for backward-compat of the signature
     # only; callers read instrument directly.
     return instrument, str(instrument.id)
+
+
+def _build_fx_pair_instrument(symbol: str) -> Instrument:
+    """FX-pair CurrencyPair with MT5-broker conventions + zero fees.
+
+    Nautilus's stock ``default_fx_ccy`` ships with non-zero
+    ``maker_fee``/``taker_fee`` (2 bps) which, on multi-million-unit
+    positions a 0.5%-risk sizer produces for FX, eat the account
+    via fee burn before strategy edge matters. This builder mirrors
+    the XAUUSD custom pattern with FX-pair tweaks:
+
+    * ``size_precision=0`` / ``size_increment=1`` — treat each unit
+      as 1 unit of base currency (MT5 micro-lot of 1000 still works
+      via ``lot_size=1000`` but the engine accepts smaller).
+    * ``price_precision=5`` for non-JPY pairs (Nautilus default).
+    * ``maker_fee=taker_fee=0`` — fee model comes from the venue
+      ``commission_per_lot_usd`` instead, so the operator can opt in
+      to realistic broker fees from a single place.
+
+    Pre-existing instrument-fee handling for XAUUSD already follows
+    this no-instrument-fee pattern; this just extends the same
+    discipline to the FX whitelist used by the multi-symbol baseline.
+    """
+    venue = Venue("SIM")
+    base_currency = symbol[:3]
+    quote_currency = symbol[-3:]
+    return CurrencyPair(
+        instrument_id=InstrumentId(symbol=Symbol(symbol), venue=venue),
+        raw_symbol=Symbol(symbol),
+        base_currency=Currency.from_str(base_currency),
+        quote_currency=Currency.from_str(quote_currency),
+        price_precision=5,
+        size_precision=0,
+        price_increment=Price(Decimal("0.00001"), 5),
+        size_increment=Quantity.from_int(1),
+        lot_size=Quantity.from_str("1000"),
+        max_quantity=Quantity.from_str("100000000"),
+        min_quantity=Quantity.from_str("1"),
+        max_price=None,
+        min_price=None,
+        max_notional=Money(50_000_000.00, USD),
+        min_notional=Money(1.00, USD),
+        margin_init=Decimal("0.03"),
+        margin_maint=Decimal("0.03"),
+        maker_fee=Decimal("0"),
+        taker_fee=Decimal("0"),
+        ts_event=0,
+        ts_init=0,
+    )
 
 
 def _build_xauusd_instrument() -> Instrument:
