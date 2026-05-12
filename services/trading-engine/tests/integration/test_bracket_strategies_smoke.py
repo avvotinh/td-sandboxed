@@ -452,3 +452,120 @@ def test_donchian_scale_out_e2e_synthetic_bars() -> None:
         )
     finally:
         runner.dispose()
+
+
+def test_ma_crossover_scale_out_e2e_synthetic_bars() -> None:
+    """Story 13.11 mirror of the Supertrend/Donchian scale-out e2e test.
+
+    Drives ``MACrossoverStrategy`` with ``scale_out_enabled`` +
+    ``trailing_enabled`` on a synthetic series rich enough to produce
+    EMA crossovers and at least one +1R favourable move so the partial-
+    close path fires. Smoking-gun: at least one reduce-only MARKET
+    order (the standalone scale-out partial).
+    """
+    from datetime import UTC, datetime
+
+    from nautilus_trader.model.currencies import USD
+    from nautilus_trader.model.data import BarType
+    from nautilus_trader.model.enums import AccountType, OmsType, OrderType
+    from nautilus_trader.model.objects import Money
+    from nautilus_trader.test_kit.providers import TestInstrumentProvider
+
+    from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
+    from src.backtesting.synthetic_bars import generate_bars
+    from src.strategies.ma_crossover import (
+        MACrossoverConfig,
+        MACrossoverStrategy,
+    )
+
+    instrument = TestInstrumentProvider.btcusdt_binance()
+    bar_type = BarType.from_str(f"{instrument.id}-1-MINUTE-LAST-EXTERNAL")
+
+    start_ts = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1_000_000_000)
+    bars = generate_bars(
+        pattern="mean_reverting",
+        count=500,
+        start_price=50000.0,
+        seed=42,
+        start_ts=start_ts,
+        price_precision=instrument.price_precision,
+        volume_precision=instrument.size_precision,
+        bar_type=bar_type,
+        drift_scale=10.0,
+        noise_scale=200.0,
+    )
+
+    runner = BacktestRunner(
+        config=BacktestRunnerConfig(
+            strategy_name="ma_crossover",
+            initial_balance=Decimal("100000"),
+            currency="USD",
+        )
+    )
+
+    try:
+        runner.add_venue(
+            venue=instrument.id.venue,
+            oms_type=OmsType.NETTING,
+            account_type=AccountType.MARGIN,
+            starting_balances=[Money(100000, USD)],
+            base_currency=USD,
+        )
+        runner.add_instrument(instrument)
+        runner.add_data(bars)
+
+        config = MACrossoverConfig(
+            instrument_id=instrument.id,
+            bar_type=bar_type,
+            trade_size=Decimal("0.1"),
+            fast_period=20,
+            slow_period=50,
+            atr_period=14,
+            sl_atr_mult=Decimal("1.5"),
+            tp_atr_mult=Decimal("3.0"),
+            risk_percent=Decimal("1.0"),
+            pip_size=Decimal("1.0"),
+            pip_value_per_lot=Decimal("1.0"),
+            # Phase 1 fields — feature flags ON.
+            scale_out_enabled=True,
+            scale_out_r_trigger=Decimal("1.0"),
+            scale_out_close_fraction=Decimal("0.5"),
+            breakeven_at_r=Decimal("1.0"),
+            trailing_enabled=True,
+            trailing_atr_period=7,
+            trailing_atr_multiplier=Decimal("2.1"),
+        )
+        strategy = MACrossoverStrategy(config=config)
+        runner.add_strategy(strategy)
+
+        t0 = time.monotonic()
+        runner.run()
+        elapsed = time.monotonic() - t0
+        assert elapsed < 15.0, f"Backtest took {elapsed:.1f}s"
+
+        assert strategy._supertrend_trail is not None
+
+        all_orders = list(runner._engine.cache.orders())
+        scale_out_partials = [
+            o
+            for o in all_orders
+            if o.is_reduce_only and o.order_type == OrderType.MARKET
+        ]
+        bracket_entries = [
+            o
+            for o in all_orders
+            if not o.is_reduce_only and o.order_type == OrderType.MARKET
+        ]
+
+        assert len(scale_out_partials) >= 1, (
+            "No scale-out partial-close orders found. Expected at least "
+            "one reduce-only MARKET (not STOP_MARKET / LIMIT). "
+            f"Total orders={len(all_orders)}, "
+            f"bracket entries={len(bracket_entries)}."
+        )
+        assert len(bracket_entries) >= 1, (
+            "No bracket entry MARKET orders — MA crossover produced "
+            "zero signals on the synthetic series."
+        )
+    finally:
+        runner.dispose()

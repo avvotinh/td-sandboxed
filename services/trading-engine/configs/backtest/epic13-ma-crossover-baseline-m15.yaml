@@ -1,0 +1,24 @@
+# Story 13.11 — MA crossover baseline on M15 (ATR bracket, no scale-out).
+strategy: ma_crossover
+instrument_symbol: XAUUSD
+bar_type_suffix: 15-MINUTE-LAST-EXTERNAL
+venue:
+  name: SIM
+  starting_balance: "100000"
+  currency: USD
+  commission_per_lot_usd: "0"
+  oms_type: HEDGING
+strategy_params:
+  fast_period: 20
+  slow_period: 50
+  atr_period: 14
+  sl_atr_mult: "1.5"
+  tp_atr_mult: "3.0"
+  risk_percent: "0.5"
+  pip_size: "0.01"
+  pip_value_per_lot: "1.0"
+  scale_out_enabled: false
+  trailing_enabled: false
+data:
+  kind: parquet
+  path: /home/hopdev/Dev/Sandboxed/data/historical/XAUUSD/M15/in_sample.parquet

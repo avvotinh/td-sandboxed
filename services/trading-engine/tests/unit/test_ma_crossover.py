@@ -14,6 +14,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from src.indicators.supertrend import Supertrend
 from src.orders.signal import SignalType
 from src.strategies.ma_crossover import MACrossoverConfig, MACrossoverStrategy
 from src.strategies.registry import StrategyRegistry
@@ -562,3 +563,252 @@ class TestSequenceOfBars:
             prev_slow=prev_slow,
         )
         assert result == SignalType.SELL
+
+
+# ---------------------------------------------------------------------------
+# Story 13.11 — BracketScaleOutMixin integration into MACrossoverStrategy
+# (mirrors Story 13.5 Supertrend + Story 13.10 Donchian wiring)
+# ---------------------------------------------------------------------------
+
+
+from nautilus_trader.model.data import BarType  # noqa: E402
+from nautilus_trader.model.enums import OrderSide  # noqa: E402
+from nautilus_trader.model.identifiers import InstrumentId  # noqa: E402
+
+
+def _make_real_config(**overrides) -> MACrossoverConfig:
+    defaults = dict(
+        instrument_id=InstrumentId.from_str("XAUUSD.BROKER"),
+        bar_type=BarType.from_str("XAUUSD.BROKER-1-HOUR-LAST-EXTERNAL"),
+        trade_size=Decimal("0.1"),
+        fast_period=20,
+        slow_period=50,
+        atr_period=14,
+        sl_atr_mult=Decimal("1.5"),
+        tp_atr_mult=Decimal("3.0"),
+        risk_percent=Decimal("1.0"),
+        pip_size=Decimal("0.01"),
+        pip_value_per_lot=Decimal("1.0"),
+    )
+    defaults.update(overrides)
+    return MACrossoverConfig(**defaults)
+
+
+def _make_real_strategy(**overrides) -> MACrossoverStrategy:
+    return MACrossoverStrategy(_make_real_config(**overrides))
+
+
+def _mock_bar(close: float) -> Mock:
+    bar = Mock()
+    bar.close = Mock()
+    bar.close.as_double = Mock(return_value=close)
+    return bar
+
+
+@pytest.mark.unit
+class TestScaleOutMRO:
+    """Mixin composes into MA crossover's MRO without breaking existing init."""
+
+    def test_scale_state_initialized_to_none(self) -> None:
+        strategy = _make_real_strategy()
+        assert strategy._scale_state is None
+
+    def test_legacy_attributes_still_present(self) -> None:
+        strategy = _make_real_strategy()
+        assert strategy.fast_ema is not None
+        assert strategy.slow_ema is not None
+        assert strategy._atr is not None
+        assert strategy._prev_fast is None
+        assert strategy._prev_slow is None
+
+
+@pytest.mark.unit
+class TestDispatchScaleOutEvent:
+    """on_event hook → _init_scale_state / _clear_scale_state."""
+
+    def _stub_position(self, side, entry: float, qty: float) -> Mock:
+        from nautilus_trader.model.enums import PositionSide
+
+        pos = Mock()
+        pos.side = PositionSide.LONG if side == OrderSide.BUY else PositionSide.SHORT
+        pos.avg_px_open = entry
+        qty_mock = Mock()
+        qty_mock.as_double = Mock(return_value=qty)
+        pos.quantity = qty_mock
+        return pos
+
+    def _stub_sl_order(self, trigger: float) -> Mock:
+        trigger_mock = Mock()
+        trigger_mock.as_double = Mock(return_value=trigger)
+        order = Mock()
+        order.trigger_price = trigger_mock
+        return order
+
+    def test_position_opened_inits_state_when_enabled(self) -> None:
+        from nautilus_trader.model.events import PositionOpened
+
+        strategy = _make_real_strategy(scale_out_enabled=True)
+        strategy._position = self._stub_position(OrderSide.BUY, 2000.0, 1.0)
+        strategy._find_active_sl_order = Mock(
+            return_value=self._stub_sl_order(1990.0)
+        )
+        strategy._init_scale_state = Mock()
+
+        strategy._dispatch_scale_out_event(Mock(spec=PositionOpened))
+
+        strategy._init_scale_state.assert_called_once_with(
+            side=OrderSide.BUY,
+            entry_price=Decimal("2000.0"),
+            sl_price=Decimal("1990.0"),
+            qty=Decimal("1.0"),
+        )
+
+    def test_position_opened_short_maps_position_side_to_sell(self) -> None:
+        from nautilus_trader.model.events import PositionOpened
+
+        strategy = _make_real_strategy(scale_out_enabled=True)
+        strategy._position = self._stub_position(OrderSide.SELL, 2000.0, 1.0)
+        strategy._find_active_sl_order = Mock(
+            return_value=self._stub_sl_order(2010.0)
+        )
+        strategy._init_scale_state = Mock()
+
+        strategy._dispatch_scale_out_event(Mock(spec=PositionOpened))
+
+        kwargs = strategy._init_scale_state.call_args.kwargs
+        assert kwargs["side"] == OrderSide.SELL
+
+    def test_position_opened_skipped_when_disabled(self) -> None:
+        from nautilus_trader.model.events import PositionOpened
+
+        strategy = _make_real_strategy(scale_out_enabled=False)
+        strategy._position = self._stub_position(OrderSide.BUY, 2000.0, 1.0)
+        strategy._init_scale_state = Mock()
+
+        strategy._dispatch_scale_out_event(Mock(spec=PositionOpened))
+        strategy._init_scale_state.assert_not_called()
+
+    def test_position_opened_skipped_when_position_missing(self) -> None:
+        from nautilus_trader.model.events import PositionOpened
+
+        strategy = _make_real_strategy(scale_out_enabled=True)
+        strategy._position = None
+        strategy._init_scale_state = Mock()
+        strategy._dispatch_scale_out_event(Mock(spec=PositionOpened))
+        strategy._init_scale_state.assert_not_called()
+
+    def test_position_opened_skipped_when_no_sl_order(self) -> None:
+        from nautilus_trader.model.events import PositionOpened
+
+        strategy = _make_real_strategy(scale_out_enabled=True)
+        strategy._position = self._stub_position(OrderSide.BUY, 2000.0, 1.0)
+        strategy._find_active_sl_order = Mock(return_value=None)
+        strategy._init_scale_state = Mock()
+        strategy._dispatch_scale_out_event(Mock(spec=PositionOpened))
+        strategy._init_scale_state.assert_not_called()
+
+    def test_position_closed_clears_state(self) -> None:
+        from nautilus_trader.model.events import PositionClosed
+
+        strategy = _make_real_strategy(scale_out_enabled=True)
+        strategy._clear_scale_state = Mock()
+        strategy._dispatch_scale_out_event(Mock(spec=PositionClosed))
+        strategy._clear_scale_state.assert_called_once()
+
+    def test_position_closed_skipped_when_disabled(self) -> None:
+        from nautilus_trader.model.events import PositionClosed
+
+        strategy = _make_real_strategy(scale_out_enabled=False)
+        strategy._clear_scale_state = Mock()
+        strategy._dispatch_scale_out_event(Mock(spec=PositionClosed))
+        strategy._clear_scale_state.assert_not_called()
+
+    def test_unrelated_event_no_op(self) -> None:
+        strategy = _make_real_strategy(scale_out_enabled=True)
+        strategy._init_scale_state = Mock()
+        strategy._clear_scale_state = Mock()
+        strategy._dispatch_scale_out_event(Mock())
+        strategy._init_scale_state.assert_not_called()
+        strategy._clear_scale_state.assert_not_called()
+
+
+@pytest.mark.unit
+class TestEvaluateScaleOutForBar:
+    """on_bar hook → evaluate_scale_out(bar.close)."""
+
+    def test_evaluates_when_enabled_and_in_position(self) -> None:
+        from nautilus_trader.model.enums import PositionSide
+
+        strategy = _make_real_strategy(scale_out_enabled=True)
+        pos = Mock()
+        pos.side = PositionSide.LONG
+        strategy._position = pos
+        strategy._scale_state = Mock(name="ScaleOutTradeState")
+        strategy.evaluate_scale_out = Mock()
+
+        strategy._evaluate_scale_out_for_bar(_mock_bar(2010.0))
+        strategy.evaluate_scale_out.assert_called_once_with(Decimal("2010.0"))
+
+    def test_init_retry_when_state_none(self) -> None:
+        from nautilus_trader.model.enums import PositionSide
+
+        strategy = _make_real_strategy(scale_out_enabled=True)
+        pos = Mock()
+        pos.side = PositionSide.LONG
+        strategy._position = pos
+        strategy._scale_state = None
+        strategy._try_init_scale_state = Mock()
+        strategy.evaluate_scale_out = Mock()
+
+        strategy._evaluate_scale_out_for_bar(_mock_bar(2010.0))
+        strategy._try_init_scale_state.assert_called_once()
+        strategy.evaluate_scale_out.assert_not_called()
+
+    def test_skipped_when_disabled(self) -> None:
+        from nautilus_trader.model.enums import PositionSide
+
+        strategy = _make_real_strategy(scale_out_enabled=False)
+        pos = Mock()
+        pos.side = PositionSide.LONG
+        strategy._position = pos
+        strategy.evaluate_scale_out = Mock()
+        strategy._evaluate_scale_out_for_bar(_mock_bar(2010.0))
+        strategy.evaluate_scale_out.assert_not_called()
+
+    def test_skipped_when_flat(self) -> None:
+        strategy = _make_real_strategy(scale_out_enabled=True)
+        strategy._position = None
+        strategy.evaluate_scale_out = Mock()
+        strategy._evaluate_scale_out_for_bar(_mock_bar(2010.0))
+        strategy.evaluate_scale_out.assert_not_called()
+
+
+@pytest.mark.unit
+class TestTrailIndicatorWiring:
+    """``_supertrend_trail`` only constructed when trailing_enabled."""
+
+    def test_trail_indicator_created_when_enabled(self) -> None:
+        strategy = _make_real_strategy(
+            scale_out_enabled=True,
+            trailing_enabled=True,
+            trailing_atr_period=7,
+            trailing_atr_multiplier=Decimal("2.1"),
+        )
+        assert isinstance(strategy._supertrend_trail, Supertrend)
+        assert strategy._supertrend_trail.period == 7
+        assert strategy._supertrend_trail.multiplier == 2.1
+
+    def test_trail_indicator_none_when_disabled(self) -> None:
+        strategy = _make_real_strategy()
+        assert strategy._supertrend_trail is None
+
+    def test_signal_indicators_unaffected_by_trail(self) -> None:
+        strategy = _make_real_strategy(
+            scale_out_enabled=True,
+            trailing_enabled=True,
+            trailing_atr_period=7,
+            trailing_atr_multiplier=Decimal("2.1"),
+        )
+        assert strategy.fast_ema is not None
+        assert strategy.slow_ema is not None
+        assert strategy._atr is not None

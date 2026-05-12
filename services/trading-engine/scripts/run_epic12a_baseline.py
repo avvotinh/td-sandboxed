@@ -50,12 +50,10 @@ from src.backtesting.job_config import PropFirmSpec, VenueSpec
 # defaults are used on M5 and M15 so the comparison shows pure
 # timeframe-effect, not param-and-timeframe co-variation.
 # Epic 13 Phase 1 scale-out overlay applied to trend-followers that
-# inherit ``BracketScaleOutMixin``. Mean-reversion strategies are
-# intentionally excluded (per Story 13.8 firm-config wiring — natural
-# target exits, scale-out + uncapped trail is wrong shape).
-# MA crossover is also excluded today: its Config inherits
-# ``BaseStrategyConfig`` (not ``BracketStrategyConfig``) and the mixin
-# is not yet wired into the strategy class (Story 13.11 follow-up).
+# inherit ``BracketScaleOutMixin`` (Supertrend story 13.5, Donchian
+# story 13.10, MA crossover story 13.11). Mean-reversion strategies
+# are intentionally excluded per Story 13.8 firm-config wiring —
+# natural target exits, scale-out + uncapped trail is the wrong shape.
 _SCALE_OUT_OVERLAY: dict[str, object] = {
     "scale_out_enabled": True,
     "scale_out_r_trigger": "1.0",
@@ -71,7 +69,9 @@ _SCALE_OUT_OVERLAY: dict[str, object] = {
     # uncapped trail can run.
     "tp_atr_mult": "6.0",
 }
-_SCALE_OUT_STRATEGIES: frozenset[str] = frozenset({"supertrend", "donchian_breakout"})
+_SCALE_OUT_STRATEGIES: frozenset[str] = frozenset(
+    {"supertrend", "donchian_breakout", "ma_crossover"}
+)
 
 
 def _build_strategies(timeframe: str, *, scale_out: bool = False) -> tuple[StrategySpec, ...]:
@@ -134,11 +134,19 @@ def _build_strategies(timeframe: str, *, scale_out: bool = False) -> tuple[Strat
             name="ma_crossover",
             timeframe=timeframe,
             bar_type_suffix=suffix,
-            params={
-                "fast_period": 20,
-                "slow_period": 50,
-                "trade_size": "0.1",
-            },
+            params=_maybe_overlay(
+                "ma_crossover",
+                {
+                    "fast_period": 20,
+                    "slow_period": 50,
+                    "atr_period": 14,
+                    "sl_atr_mult": "1.5",
+                    "tp_atr_mult": "3.0",
+                    "risk_percent": "0.5",
+                    "pip_size": "0.01",
+                    "pip_value_per_lot": "1.0",
+                },
+            ),
         ),
         StrategySpec(
             name="bollinger_mean_reversion",

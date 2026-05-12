@@ -218,11 +218,13 @@ class TestStrategyRoster:
         "rsi_mean_reversion.py",
         "bollinger_mean_reversion.py",
         "orb.py",
-    }
-
-    EXPECTED_NON_BRACKET_STRATEGIES = {
+        # Story 13.11 migrated MA crossover from plain submit_order to
+        # _submit_bracket_for_entry so the Epic 13 scale-out mixin can
+        # compose. It joins the bracket bucket.
         "ma_crossover.py",
     }
+
+    EXPECTED_NON_BRACKET_STRATEGIES: set[str] = set()
 
     def test_bracket_strategies_use_mixin_helper(self) -> None:
         """Every bracket strategy goes through ``_submit_bracket_for_entry``."""
