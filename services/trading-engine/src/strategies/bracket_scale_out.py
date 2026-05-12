@@ -20,9 +20,13 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from nautilus_trader.model.enums import OrderSide
+from nautilus_trader.core.message import Event
+from nautilus_trader.model.enums import OrderSide, PositionSide
+from nautilus_trader.model.events import PositionClosed, PositionOpened
 
 if TYPE_CHECKING:
+    from nautilus_trader.model.data import Bar
+
     from src.strategies.bracket_strategy import BracketStrategyConfig
 
 
@@ -263,3 +267,96 @@ class BracketScaleOutMixin:
         the host strategy class is annotated to expose ``config``.
         """
         return self.config  # type: ignore[attr-defined,no-any-return]
+
+    # --- Host wiring ------------------------------------------------------
+    #
+    # Stories 13.5 / 13.10 / 13.11 each shipped copy-equivalent versions
+    # of the five methods below directly on their host strategy class
+    # (Supertrend, Donchian, MA crossover). Once the third user landed,
+    # the rule of three hit and the methods were lifted here so the
+    # mixin is the single source of truth for the scale-out lifecycle.
+    # Hosts only need to (a) prepend ``BracketScaleOutMixin`` in their
+    # MRO, (b) expose a ``_supertrend_trail`` attribute (set in their
+    # own ``__init__``), and (c) optionally override these methods if
+    # they need behaviour beyond the standard wiring.
+
+    def on_event(self, event: "Event") -> None:
+        """Extend the host's ``on_event`` to feed the scale-out mixin.
+
+        ``super().on_event`` updates ``self._position`` from the cache;
+        we then dispatch the event into the scale-out state machine.
+        """
+        super().on_event(event)  # type: ignore[misc]
+        self._dispatch_scale_out_event(event)
+
+    def _dispatch_scale_out_event(self, event: "Event") -> None:
+        """Forward position lifecycle events into the state machine.
+
+        Handles ``PositionOpened`` (best-effort init — the bracket's
+        SL leg may still be in PENDING state at that exact tick, in
+        which case ``_try_init_scale_state`` no-ops cleanly and the
+        bar evaluator retries) and ``PositionClosed`` (clear state).
+        Unrelated events are ignored.
+        """
+        if not self._cfg().scale_out_enabled:
+            return
+        if isinstance(event, PositionOpened):
+            self._try_init_scale_state()
+        elif isinstance(event, PositionClosed):
+            self._clear_scale_state()
+
+    def _try_init_scale_state(self) -> None:
+        """Best-effort scale-out init from the live position + SL leg.
+
+        Returns silently when ``_scale_state`` is already set, the host
+        has no ``_position``, or the bracket's SL is not yet in cache
+        (PENDING after a fresh ``PositionOpened``). Retried each bar
+        by ``_evaluate_scale_out_for_bar`` until the bracket's SL is
+        visible — at which point init completes and the state machine
+        becomes active for the rest of the trade.
+        """
+        if self._scale_state is not None:
+            return
+        position = self._position  # type: ignore[attr-defined]
+        if position is None:
+            return
+        sl_order = self._find_active_sl_order()  # type: ignore[attr-defined]
+        if sl_order is None:
+            return
+        side = (
+            OrderSide.BUY
+            if position.side == PositionSide.LONG
+            else OrderSide.SELL
+        )
+        self._init_scale_state(
+            side=side,
+            entry_price=Decimal(str(position.avg_px_open)),
+            sl_price=Decimal(str(sl_order.trigger_price.as_double())),
+            qty=Decimal(str(position.quantity.as_double())),
+        )
+
+    def on_bar(self, bar: "Bar") -> None:
+        """Extend the host's ``on_bar`` to drive the scale-out evaluator.
+
+        ``super().on_bar`` runs the existing signal logic (generate +
+        execute). The scale-out evaluator runs AFTER signals so a flip
+        signal that closes the position clears state via the resulting
+        ``PositionClosed`` event before the next bar's evaluator runs.
+        """
+        super().on_bar(bar)  # type: ignore[misc]
+        self._evaluate_scale_out_for_bar(bar)
+
+    def _evaluate_scale_out_for_bar(self, bar: "Bar") -> None:
+        """Drive the scale-out state machine off the latest bar close.
+
+        No-op when scale-out is disabled or the host is flat. When in
+        position but ``_scale_state`` is None, retry init — covers the
+        PositionOpened-vs-SL-leg race documented in Story 13.7.
+        """
+        if not self._cfg().scale_out_enabled or self.is_flat:  # type: ignore[attr-defined]
+            return
+        if self._scale_state is None:
+            self._try_init_scale_state()
+            if self._scale_state is None:
+                return
+        self.evaluate_scale_out(Decimal(str(bar.close.as_double())))

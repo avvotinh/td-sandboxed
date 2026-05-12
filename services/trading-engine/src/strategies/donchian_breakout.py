@@ -16,11 +16,8 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
-from nautilus_trader.core.message import Event
 from nautilus_trader.indicators.volatility import AverageTrueRange
 from nautilus_trader.model.data import Bar
-from nautilus_trader.model.enums import OrderSide, PositionSide
-from nautilus_trader.model.events import PositionClosed, PositionOpened
 
 from src.indicators import Donchian
 from src.indicators.supertrend import Supertrend
@@ -168,87 +165,9 @@ class DonchianBreakoutStrategy(
         atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)
 
-    # --- Story 13.10: scale-out lifecycle wiring --------------------------
-    #
-    # The four methods below are intentionally copy-equivalent to the
-    # Story 13.5 wiring in ``supertrend.py``. Extracting them into a
-    # shared host-side helper is queued for after Story 13.11 lands a
-    # third user (MA crossover) — the rule of three.
-
-    def on_event(self, event: Event) -> None:
-        """Extend BaseStrategy.on_event to feed the scale-out mixin.
-
-        ``super().on_event`` updates ``self._position`` from the cache;
-        we then dispatch the event into the scale-out state machine via
-        the testable seam ``_dispatch_scale_out_event``.
-        """
-        super().on_event(event)
-        self._dispatch_scale_out_event(event)
-
-    def _dispatch_scale_out_event(self, event: Event) -> None:
-        """Forward position lifecycle events into the scale-out mixin.
-
-        See ``supertrend.py`` for the race note on PositionOpened firing
-        before the bracket's SL leg lands in cache; ``_try_init_scale_state``
-        no-ops cleanly and the bar evaluator retries.
-        """
-        if not self.config.scale_out_enabled:
-            return
-        if isinstance(event, PositionOpened):
-            self._try_init_scale_state()
-        elif isinstance(event, PositionClosed):
-            self._clear_scale_state()
-
-    def _try_init_scale_state(self) -> None:
-        """Best-effort scale-out init from the live position + SL leg.
-
-        Skips silently when ``_scale_state`` is already set, ``_position``
-        is missing, or the SL leg is not yet in cache (PENDING after a
-        fresh PositionOpened). Retried each bar by
-        ``_evaluate_scale_out_for_bar`` until the bracket's SL is visible.
-        """
-        if self._scale_state is not None:
-            return
-        position = self._position
-        if position is None:
-            return
-        sl_order = self._find_active_sl_order()
-        if sl_order is None:
-            return
-        side = (
-            OrderSide.BUY
-            if position.side == PositionSide.LONG
-            else OrderSide.SELL
-        )
-        self._init_scale_state(
-            side=side,
-            entry_price=Decimal(str(position.avg_px_open)),
-            sl_price=Decimal(str(sl_order.trigger_price.as_double())),
-            qty=Decimal(str(position.quantity.as_double())),
-        )
-
-    def on_bar(self, bar: Bar) -> None:
-        """Extend BaseStrategy.on_bar to drive the scale-out evaluator.
-
-        ``super().on_bar`` runs the existing signal logic (generate +
-        execute). The scale-out evaluator runs AFTER signals so a flip
-        signal that closes the position clears state via the resulting
-        PositionClosed event before the next bar's evaluator runs.
-        """
-        super().on_bar(bar)
-        self._evaluate_scale_out_for_bar(bar)
-
-    def _evaluate_scale_out_for_bar(self, bar: Bar) -> None:
-        """Drive the scale-out state machine off the latest bar close.
-
-        No-op when scale-out is disabled or the strategy is flat. When
-        in position but ``_scale_state`` is None, retry init — covers
-        the PositionOpened-vs-SL-leg race.
-        """
-        if not self.config.scale_out_enabled or self.is_flat:
-            return
-        if self._scale_state is None:
-            self._try_init_scale_state()
-            if self._scale_state is None:
-                return
-        self.evaluate_scale_out(Decimal(str(bar.close.as_double())))
+    # Story 13.10 originally inlined the scale-out wiring here per the
+    # 13.5 Supertrend template. After Story 13.11 made Donchian the
+    # third user, the five wiring methods were lifted into
+    # ``BracketScaleOutMixin`` (see ``bracket_scale_out.py``). The
+    # mixin is prepended in the MRO above so the inherited methods
+    # are reachable unchanged.

@@ -17,12 +17,9 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
-from nautilus_trader.core.message import Event
 from nautilus_trader.indicators import ExponentialMovingAverage
 from nautilus_trader.indicators.volatility import AverageTrueRange
 from nautilus_trader.model.data import Bar
-from nautilus_trader.model.enums import OrderSide, PositionSide
-from nautilus_trader.model.events import PositionClosed, PositionOpened
 
 from src.indicators.supertrend import Supertrend
 from src.orders.signal import SignalType
@@ -214,60 +211,8 @@ class MACrossoverStrategy(
         atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)
 
-    # --- Story 13.11: scale-out lifecycle wiring -------------------------
-    #
-    # The four methods below are copy-equivalent to the Story 13.5
-    # (Supertrend) and Story 13.10 (Donchian) wirings. Extraction of
-    # this boilerplate into a shared host-side helper is queued now
-    # that the rule of three has been satisfied — see Epic 13 memory.
-
-    def on_event(self, event: Event) -> None:
-        """Extend BaseStrategy.on_event to feed the scale-out mixin."""
-        super().on_event(event)
-        self._dispatch_scale_out_event(event)
-
-    def _dispatch_scale_out_event(self, event: Event) -> None:
-        """Forward position lifecycle events into the scale-out mixin."""
-        if not self.config.scale_out_enabled:
-            return
-        if isinstance(event, PositionOpened):
-            self._try_init_scale_state()
-        elif isinstance(event, PositionClosed):
-            self._clear_scale_state()
-
-    def _try_init_scale_state(self) -> None:
-        """Best-effort scale-out init; retried by the bar evaluator."""
-        if self._scale_state is not None:
-            return
-        position = self._position
-        if position is None:
-            return
-        sl_order = self._find_active_sl_order()
-        if sl_order is None:
-            return
-        side = (
-            OrderSide.BUY
-            if position.side == PositionSide.LONG
-            else OrderSide.SELL
-        )
-        self._init_scale_state(
-            side=side,
-            entry_price=Decimal(str(position.avg_px_open)),
-            sl_price=Decimal(str(sl_order.trigger_price.as_double())),
-            qty=Decimal(str(position.quantity.as_double())),
-        )
-
-    def on_bar(self, bar: Bar) -> None:
-        """Extend BaseStrategy.on_bar to drive the scale-out evaluator."""
-        super().on_bar(bar)
-        self._evaluate_scale_out_for_bar(bar)
-
-    def _evaluate_scale_out_for_bar(self, bar: Bar) -> None:
-        """Drive the scale-out state machine off the latest bar close."""
-        if not self.config.scale_out_enabled or self.is_flat:
-            return
-        if self._scale_state is None:
-            self._try_init_scale_state()
-            if self._scale_state is None:
-                return
-        self.evaluate_scale_out(Decimal(str(bar.close.as_double())))
+    # Story 13.11 originally inlined the scale-out wiring here. Once it
+    # made MA crossover the third user, the five wiring methods were
+    # lifted into ``BracketScaleOutMixin`` (see ``bracket_scale_out.py``).
+    # The mixin is prepended in the MRO above so the inherited methods
+    # are reachable unchanged.

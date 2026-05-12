@@ -17,10 +17,7 @@ import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from nautilus_trader.core.message import Event
 from nautilus_trader.model.data import Bar
-from nautilus_trader.model.enums import OrderSide, PositionSide
-from nautilus_trader.model.events import PositionClosed, PositionOpened
 
 from src.indicators.supertrend import Supertrend
 from src.orders.signal import SignalType
@@ -190,110 +187,10 @@ class SupertrendStrategy(
         atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)
 
-    # --- Story 13.5: scale-out lifecycle wiring ---------------------------
-
-    def on_event(self, event: Event) -> None:
-        """Extend BaseStrategy.on_event to feed the scale-out mixin.
-
-        ``super().on_event`` updates ``self._position`` from the cache;
-        we then dispatch the event into the scale-out state machine via
-        the testable seam ``_dispatch_scale_out_event``.
-        """
-        super().on_event(event)
-        self._dispatch_scale_out_event(event)
-
-    def _dispatch_scale_out_event(self, event: Event) -> None:
-        """Forward position lifecycle events into the scale-out mixin.
-
-        Separated from ``on_event`` so unit tests can drive the dispatch
-        logic with stubbed ``_position`` / ``_find_active_sl_order``
-        without booting a Nautilus cache (super().on_event reads
-        ``self.cache.position(...)`` which is read-only on Actor).
-
-        Handles both PositionOpened (best-effort init: the bracket's
-        SL leg may not be in cache yet — see race note below) and
-        PositionClosed (clear state). When init at PositionOpened
-        skips, ``_evaluate_scale_out_for_bar`` retries on each bar
-        until the SL leg is visible.
-        """
-        if not self.config.scale_out_enabled:
-            return
-        if isinstance(event, PositionOpened):
-            # Best-effort init. PositionOpened fires the moment the
-            # entry MARKET fills, but the bracket's STOP_MARKET (SL)
-            # child can still be in PENDING state at that exact tick —
-            # it's only visible in cache.orders_open() after Nautilus
-            # transitions it to ACCEPTED. _try_init_scale_state no-ops
-            # cleanly in that case; the bar evaluator retries.
-            self._try_init_scale_state()
-        elif isinstance(event, PositionClosed):
-            self._clear_scale_state()
-
-    def _try_init_scale_state(self) -> None:
-        """Best-effort scale-out init from the live position + SL leg.
-
-        Returns silently when:
-
-        - ``_scale_state`` is already set (avoid clobbering an active
-          state machine — would zero ``scaled_out``/``breakeven_moved``
-          mid-trade if the retry loop and the PositionOpened path both
-          succeed).
-        - ``_position`` is not set (cache race).
-        - ``_find_active_sl_order`` cannot find the SL (the bracket SL
-          may still be in PENDING state after a fresh PositionOpened).
-
-        Retried each bar by ``_evaluate_scale_out_for_bar`` until the
-        bracket's SL is visible — at which point init completes and
-        the state machine becomes active for the rest of the trade.
-        """
-        if self._scale_state is not None:
-            return  # Already initialised; do not clobber live state.
-        position = self._position
-        if position is None:
-            return
-        sl_order = self._find_active_sl_order()
-        if sl_order is None:
-            return
-        side = (
-            OrderSide.BUY
-            if position.side == PositionSide.LONG
-            else OrderSide.SELL
-        )
-        # .as_double() for Nautilus Price / Quantity types matches
-        # the project pattern in bracket_strategy.py:154,207.
-        self._init_scale_state(
-            side=side,
-            entry_price=Decimal(str(position.avg_px_open)),
-            sl_price=Decimal(str(sl_order.trigger_price.as_double())),
-            qty=Decimal(str(position.quantity.as_double())),
-        )
-
-    def on_bar(self, bar: Bar) -> None:
-        """Extend BaseStrategy.on_bar to drive the scale-out evaluator.
-
-        ``super().on_bar`` runs the existing signal logic (generate +
-        execute). The scale-out evaluator runs AFTER signals so a flip
-        signal that closes the position clears state via the resulting
-        PositionClosed event before the next bar's evaluator runs.
-        """
-        super().on_bar(bar)
-        self._evaluate_scale_out_for_bar(bar)
-
-    def _evaluate_scale_out_for_bar(self, bar: Bar) -> None:
-        """Drive the scale-out state machine off the latest bar close.
-
-        No-op when scale_out is disabled or the strategy is flat. When
-        in position but ``_scale_state`` is None, retry init — covers
-        the PositionOpened-vs-SL-leg race.
-        """
-        if not self.config.scale_out_enabled or self.is_flat:
-            return
-        if self._scale_state is None:
-            # Init raced ahead of the bracket's SL leg at PositionOpened
-            # time — retry now. By bar N+1 the SL is in cache. If it's
-            # still not visible (closed-position trades flush fast in
-            # synthetic data), skip this bar.
-            self._try_init_scale_state()
-            if self._scale_state is None:
-                return
-        self.evaluate_scale_out(Decimal(str(bar.close.as_double())))
+    # Story 13.5: scale-out lifecycle wiring lived here per-strategy
+    # until Story 13.11 hit the rule of three. The five wiring methods
+    # (``on_event`` / ``_dispatch_scale_out_event`` / ``_try_init_scale_state``
+    # / ``on_bar`` / ``_evaluate_scale_out_for_bar``) now live on
+    # ``BracketScaleOutMixin`` — see ``bracket_scale_out.py``. The mixin
+    # is prepended in the MRO above so the methods are reachable
+    # unchanged; override here only if a strategy needs custom dispatch.
