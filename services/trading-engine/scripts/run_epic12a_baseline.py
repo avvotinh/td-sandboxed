@@ -49,43 +49,86 @@ from src.backtesting.job_config import PropFirmSpec, VenueSpec
 # Parameters are timeframe-independent except where noted: the same
 # defaults are used on M5 and M15 so the comparison shows pure
 # timeframe-effect, not param-and-timeframe co-variation.
-def _build_strategies(timeframe: str) -> tuple[StrategySpec, ...]:
+# Epic 13 Phase 1 scale-out overlay applied to trend-followers that
+# inherit ``BracketScaleOutMixin``. Mean-reversion strategies are
+# intentionally excluded (per Story 13.8 firm-config wiring — natural
+# target exits, scale-out + uncapped trail is wrong shape).
+# MA crossover is also excluded today: its Config inherits
+# ``BaseStrategyConfig`` (not ``BracketStrategyConfig``) and the mixin
+# is not yet wired into the strategy class (Story 13.11 follow-up).
+_SCALE_OUT_OVERLAY: dict[str, object] = {
+    "scale_out_enabled": True,
+    "scale_out_r_trigger": "1.0",
+    "scale_out_close_fraction": "0.5",
+    "breakeven_at_r": "1.0",
+    "trailing_enabled": True,
+    "trailing_method": "supertrend",
+    "trailing_atr_period": 7,
+    "trailing_atr_multiplier": "2.1",
+    "safety_tp_atr_mult": "6.0",
+    # When scale-out is active, the hard TP becomes an anti-runaway
+    # cap rather than an exit target — bump it to 6 × ATR so the
+    # uncapped trail can run.
+    "tp_atr_mult": "6.0",
+}
+_SCALE_OUT_STRATEGIES: frozenset[str] = frozenset({"supertrend", "donchian_breakout"})
+
+
+def _build_strategies(timeframe: str, *, scale_out: bool = False) -> tuple[StrategySpec, ...]:
     """Return StrategySpec tuple bound to ``timeframe`` (e.g. ``"M5"``).
+
+    When ``scale_out=True``, the Epic 13 Phase 1 overlay is applied to
+    strategies in ``_SCALE_OUT_STRATEGIES``; other strategies keep their
+    defaults so the comparison isolates the tactic effect on the
+    eligible trend-followers without mixing in tactic-incompatible
+    strategies (mean-reversion + MA crossover).
 
     The bar-type suffix is derived via :func:`timeframe_to_bar_suffix`,
     so passing an unsupported timeframe raises before any runner is
     spun up.
     """
     suffix = timeframe_to_bar_suffix(timeframe)
+
+    def _maybe_overlay(name: str, params: dict[str, object]) -> dict[str, object]:
+        if scale_out and name in _SCALE_OUT_STRATEGIES:
+            return {**params, **_SCALE_OUT_OVERLAY}
+        return params
+
     return (
         StrategySpec(
             name="supertrend",
             timeframe=timeframe,
             bar_type_suffix=suffix,
-            params={
-                "period": 10,
-                "multiplier": 3.0,
-                "atr_period": 14,
-                "sl_atr_mult": "1.5",
-                "tp_atr_mult": "3.0",
-                "risk_percent": "0.5",
-                "pip_size": "0.01",
-                "pip_value_per_lot": "1.0",
-            },
+            params=_maybe_overlay(
+                "supertrend",
+                {
+                    "period": 10,
+                    "multiplier": 3.0,
+                    "atr_period": 14,
+                    "sl_atr_mult": "1.5",
+                    "tp_atr_mult": "3.0",
+                    "risk_percent": "0.5",
+                    "pip_size": "0.01",
+                    "pip_value_per_lot": "1.0",
+                },
+            ),
         ),
         StrategySpec(
             name="donchian_breakout",
             timeframe=timeframe,
             bar_type_suffix=suffix,
-            params={
-                "channel_period": 20,
-                "atr_period": 14,
-                "sl_atr_mult": "2.0",
-                "tp_atr_mult": "4.0",
-                "risk_percent": "0.5",
-                "pip_size": "0.01",
-                "pip_value_per_lot": "1.0",
-            },
+            params=_maybe_overlay(
+                "donchian_breakout",
+                {
+                    "channel_period": 20,
+                    "atr_period": 14,
+                    "sl_atr_mult": "2.0",
+                    "tp_atr_mult": "4.0",
+                    "risk_percent": "0.5",
+                    "pip_size": "0.01",
+                    "pip_value_per_lot": "1.0",
+                },
+            ),
         ),
         StrategySpec(
             name="ma_crossover",
@@ -170,6 +213,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Bar timeframe (MT-style code: M5, M15, etc.) — must match a manifest entry (default: %(default)s)",
     )
     parser.add_argument(
+        "--scale-out",
+        action="store_true",
+        help="Apply Epic 13 Phase 1 scale-out overlay on eligible trend-followers (supertrend + donchian_breakout)",
+    )
+    parser.add_argument(
         "--ftmo-preset",
         type=Path,
         default=Path("src/backtesting/presets/ftmo.yaml"),
@@ -227,8 +275,11 @@ def main(argv: list[str] | None = None) -> int:
         max_drawdown_method="equity_peak",
     )
 
-    strategies = _build_strategies(args.timeframe)
-    run_label = f"epic-12a-baseline-{manifest.symbol.lower()}-{args.timeframe.lower()}"
+    strategies = _build_strategies(args.timeframe, scale_out=args.scale_out)
+    suffix = "-scaleout" if args.scale_out else ""
+    run_label = (
+        f"epic-12a-baseline-{manifest.symbol.lower()}-{args.timeframe.lower()}{suffix}"
+    )
     config = BaselineConfig(
         run_label=run_label,
         manifest=manifest,
@@ -238,7 +289,11 @@ def main(argv: list[str] | None = None) -> int:
         prop_firm=prop_firm,
     )
 
-    print(f"\nrunning {len(strategies)} strategies on {manifest.symbol} {args.window_name} {args.timeframe}…")
+    overlay_tag = " [scale-out overlay applied to supertrend + donchian_breakout]" if args.scale_out else ""
+    print(
+        f"\nrunning {len(strategies)} strategies on {manifest.symbol} {args.window_name} "
+        f"{args.timeframe}{overlay_tag}…"
+    )
     results = run_baseline(config)
     print(f"  done. {len(results)} BacktestResults captured.\n")
 
