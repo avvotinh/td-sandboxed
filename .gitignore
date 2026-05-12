@@ -67,6 +67,12 @@ benchmark_results/
 compliance-report-*.json
 services/trading-engine/compliance-report-*.json
 
+# Stitched dataset manifests are operator-generated artifacts
+# referencing absolute parquet paths under data/ (already gitignored).
+# Regenerate with scripts/stitch_chunks_to_window.py per
+# docs/runbooks/backtest-data-fetch.md.
+services/trading-engine/manifests/
+
 # Docker
 docker-compose.override.yml
 
