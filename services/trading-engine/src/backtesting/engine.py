@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from nautilus_trader.backtest.engine import BacktestEngine, BacktestEngineConfig
 from nautilus_trader.model.currencies import USD
 from nautilus_trader.model.enums import PositionSide
-from nautilus_trader.model.objects import Currency
+from nautilus_trader.model.objects import Currency, Money
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.backtesting.prop_firm_actor import PropFirmComplianceActor
@@ -31,6 +31,25 @@ if TYPE_CHECKING:
     from nautilus_trader.model.identifiers import Venue
 
     from src.rules.engine import RuleEngine
+
+
+def _pos_pnl_decimal(pnl: Any) -> Decimal:
+    """Coerce a Nautilus ``Money`` (or compatible) into ``Decimal``.
+
+    ``str(Money(123.45, USD))`` is ``"123.45 USD"`` which ``Decimal``
+    can't parse. ``Money`` exposes ``.as_decimal()``; we type-check
+    explicitly so a future Nautilus version that drops ``as_decimal``
+    or a third-party object that happens to expose the same name
+    cannot silently return garbage. We fall through to
+    ``Decimal(str(...))`` for ints / floats / Decimals already in
+    decimal-stringifiable shape, and treat ``None`` as zero PnL (the
+    position closed with no realised cash flow).
+    """
+    if pnl is None:
+        return Decimal("0")
+    if isinstance(pnl, Money):
+        return pnl.as_decimal()
+    return Decimal(str(pnl))
 
 
 class BacktestRunnerConfig(BaseModel):
@@ -238,7 +257,7 @@ class BacktestRunner:
                     entry_price=Decimal(str(pos.avg_px_open)),
                     exit_price=Decimal(str(pos.avg_px_close or pos.avg_px_open)),
                     quantity=Decimal(str(pos.quantity)),
-                    pnl=Decimal(str(pos.realized_pnl)) if pos.realized_pnl else Decimal("0"),
+                    pnl=_pos_pnl_decimal(pos.realized_pnl),
                 )
             )
         return records

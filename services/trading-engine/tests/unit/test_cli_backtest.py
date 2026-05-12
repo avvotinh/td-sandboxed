@@ -215,6 +215,87 @@ class TestBacktestWalkForward:
 
 
 @pytest.mark.unit
+class TestBacktestAb:
+    """CLI integration for the Epic 13 A/B comparison subcommand (Story 13.9)."""
+
+    def test_ab_prints_comparison(self, tmp_path: Path) -> None:
+        base_path = tmp_path / "base.yaml"
+        var_path = tmp_path / "variant.yaml"
+        base_path.write_text(_SAMPLE_JOB_YAML)
+        var_path.write_text(_SAMPLE_JOB_YAML)
+
+        with patch.object(
+            backtest_cli, "run_backtest", side_effect=[_fake_result(100500), _fake_result(102000)]
+        ):
+            result = runner.invoke(
+                backtest_cli.backtest_app,
+                [
+                    "ab",
+                    "--baseline",
+                    str(base_path),
+                    "--variant",
+                    str(var_path),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        assert "A/B Comparison" in result.output
+        assert "Winner-R distribution" in result.output
+
+    def test_ab_writes_json_when_out_given(self, tmp_path: Path) -> None:
+        import json as _json
+
+        base_path = tmp_path / "base.yaml"
+        var_path = tmp_path / "variant.yaml"
+        out_path = tmp_path / "ab.json"
+        base_path.write_text(_SAMPLE_JOB_YAML)
+        var_path.write_text(_SAMPLE_JOB_YAML)
+
+        with patch.object(
+            backtest_cli, "run_backtest", side_effect=[_fake_result(100500), _fake_result(102000)]
+        ):
+            result = runner.invoke(
+                backtest_cli.backtest_app,
+                [
+                    "ab",
+                    "--baseline",
+                    str(base_path),
+                    "--variant",
+                    str(var_path),
+                    "--out",
+                    str(out_path),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        assert out_path.exists()
+        payload = _json.loads(out_path.read_text())
+        assert "baseline" in payload
+        assert "variant" in payload
+        assert "metric_deltas" in payload
+
+    def test_ab_baseline_failure_exits_two(self, tmp_path: Path) -> None:
+        base_path = tmp_path / "base.yaml"
+        var_path = tmp_path / "variant.yaml"
+        base_path.write_text(_SAMPLE_JOB_YAML)
+        var_path.write_text(_SAMPLE_JOB_YAML)
+
+        with patch.object(
+            backtest_cli, "run_backtest", side_effect=RuntimeError("baseline boom")
+        ):
+            result = runner.invoke(
+                backtest_cli.backtest_app,
+                [
+                    "ab",
+                    "--baseline",
+                    str(base_path),
+                    "--variant",
+                    str(var_path),
+                ],
+            )
+        assert result.exit_code == 2
+        assert "Baseline backtest failed" in result.output
+
+
+@pytest.mark.unit
 class TestDurationParser:
     def test_days(self) -> None:
         from src.backtesting._cli_utils import parse_duration

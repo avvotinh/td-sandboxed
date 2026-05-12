@@ -123,12 +123,23 @@ class VenueSpec(_Frozen):
     compatibility; firm-bound jobs typically derive this from the
     firm's :class:`CommissionProfile` via
     ``src.backtesting.commission.resolve_commission_profile``.
+
+    ``oms_type`` (Epic 13 13.9) controls Nautilus order-management
+    semantics. ``"NETTING"`` (default) matches the historical Epic 8
+    behaviour where opposite-side fills net into one running position —
+    convenient for net-PnL questions but obscures discrete trade
+    boundaries for strategies that flip frequently (Supertrend on M5
+    XAUUSD: 7k+ fills collapse into 1 closed position). ``"HEDGING"``
+    preserves each entry-to-exit cycle as its own position so trade-
+    by-trade R-multiple analysis is meaningful. The A/B validation
+    harness sets ``"HEDGING"`` explicitly.
     """
 
     name: str = "SIM"
     starting_balance: Decimal = Field(..., gt=0)
     currency: str = "USD"
     commission_per_lot_usd: Decimal = Field(default=Decimal("0"), ge=0)
+    oms_type: Literal["NETTING", "HEDGING"] = "NETTING"
 
 
 class PropFirmSpec(_Frozen):
