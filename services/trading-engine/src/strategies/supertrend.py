@@ -53,16 +53,19 @@ class SupertrendConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     multiplier: float = 3.0
 
     def __post_init__(self) -> None:
+        """Validate config — delegate ATR + Phase 1 invariants to parent.
+
+        ``super().__post_init__()`` enforces the full
+        :class:`BracketStrategyConfig` invariant set (R:R > 1,
+        safety_tp_atr_mult > 0, scale-out / trail cross-field guards).
+        The Supertrend-specific checks below cover the indicator
+        params that the parent doesn't know about.
+        """
+        super().__post_init__()
         if self.period <= 0:
             raise ValueError(f"period must be positive, got {self.period}")
         if self.multiplier <= 0:
             raise ValueError(f"multiplier must be positive, got {self.multiplier}")
-        if self.atr_period <= 0:
-            raise ValueError(f"atr_period must be positive, got {self.atr_period}")
-        if self.sl_atr_mult <= 0:
-            raise ValueError(f"sl_atr_mult must be positive, got {self.sl_atr_mult}")
-        if self.tp_atr_mult <= 0:
-            raise ValueError(f"tp_atr_mult must be positive, got {self.tp_atr_mult}")
 
 
 @register_strategy(

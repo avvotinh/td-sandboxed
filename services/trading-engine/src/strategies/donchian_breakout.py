@@ -51,12 +51,17 @@ class DonchianBreakoutConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     tp_atr_mult: Decimal = Decimal("4.0")
 
     def __post_init__(self) -> None:
+        """Validate config — delegate ATR + Phase 1 invariants to parent.
+
+        ``super().__post_init__()`` enforces the full
+        :class:`BracketStrategyConfig` invariant set (positive ATR /
+        SL / TP, R:R > 1, safety_tp_atr_mult > 0, scale-out / trail
+        cross-field guards). The Donchian-specific check below covers
+        the channel period that the parent doesn't know about.
+        """
+        super().__post_init__()
         if self.channel_period <= 0:
             raise ValueError(f"channel_period must be positive, got {self.channel_period}")
-        if self.atr_period <= 0:
-            raise ValueError(f"atr_period must be positive, got {self.atr_period}")
-        if self.sl_atr_mult <= 0 or self.tp_atr_mult <= 0:
-            raise ValueError("ATR multipliers must be positive")
 
 
 @register_strategy(
