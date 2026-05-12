@@ -1,0 +1,186 @@
+{
+  "baseline": {
+    "strategy_name": "donchian_breakout",
+    "start": "2026-05-12T21:57:44.053844",
+    "end": "2026-05-12T21:57:44.053844",
+    "initial_balance": "100000",
+    "final_balance": "100740.16",
+    "net_pnl": "740.16",
+    "trades": 4445,
+    "breaches": 0,
+    "metrics": {
+      "strategy_name": "donchian_breakout",
+      "pnl": {
+        "gross_pnl": 740.1899999999999,
+        "net_pnl": 740.16,
+        "return_pct": 0.74016,
+        "profit_factor": 1.0501306788051101,
+        "expectancy": 0.16652193475815524,
+        "avg_r_multiple": 143.96947418966613
+      },
+      "drawdown": {
+        "max_overall_dd_pct": 0.0,
+        "max_overall_dd_abs": 0.0,
+        "max_daily_dd_pct": 0.0,
+        "avg_daily_dd_pct": 0.0,
+        "recovery_factor": 0.0
+      },
+      "risk": {
+        "sharpe_ratio": 0.0,
+        "sortino_ratio": 0.0,
+        "calmar_ratio": 0.0,
+        "max_consecutive_losses": 18
+      },
+      "trades": {
+        "total_trades": 4445,
+        "winning_trades": 1573,
+        "losing_trades": 2872,
+        "win_rate": 0.35388076490438697,
+        "avg_win": 9.857215511760966,
+        "avg_loss": -5.14108983286908
+      },
+      "prop_firm_compliance": {
+        "daily_loss_breaches": 0,
+        "max_dd_breach": false,
+        "profit_target_hit": false,
+        "min_trading_days_met": false
+      }
+    }
+  },
+  "variant": {
+    "strategy_name": "donchian_breakout",
+    "start": "2026-05-12T21:58:06.946032",
+    "end": "2026-05-12T21:58:06.946032",
+    "initial_balance": "100000",
+    "final_balance": "100072.75",
+    "net_pnl": "72.75",
+    "trades": 4974,
+    "breaches": 0,
+    "metrics": {
+      "strategy_name": "donchian_breakout",
+      "pnl": {
+        "gross_pnl": 72.73999999999997,
+        "net_pnl": 72.75,
+        "return_pct": 0.07275,
+        "profit_factor": 1.005092468131819,
+        "expectancy": 0.014624045034178135,
+        "avg_r_multiple": 16.094411586800188
+      },
+      "drawdown": {
+        "max_overall_dd_pct": 0.0,
+        "max_overall_dd_abs": 0.0,
+        "max_daily_dd_pct": 0.0,
+        "avg_daily_dd_pct": 0.0,
+        "recovery_factor": 0.0
+      },
+      "risk": {
+        "sharpe_ratio": 0.0,
+        "sortino_ratio": 0.0,
+        "calmar_ratio": 0.0,
+        "max_consecutive_losses": 14
+      },
+      "trades": {
+        "total_trades": 4974,
+        "winning_trades": 1814,
+        "losing_trades": 3160,
+        "win_rate": 0.3646964213912344,
+        "avg_win": 7.914321940463065,
+        "avg_loss": -4.52020253164557
+      },
+      "prop_firm_compliance": {
+        "daily_loss_breaches": 0,
+        "max_dd_breach": false,
+        "profit_target_hit": false,
+        "min_trading_days_met": false
+      }
+    }
+  },
+  "baseline_winners": {
+    "count": 1573,
+    "avg_loss_abs": 5.14108983286908,
+    "p50": 1.9178812898699036,
+    "p75": 1.925661741350106,
+    "p90": 1.9334421928303087,
+    "p95": 1.9373324185704104,
+    "p99": 1.9451128700506124,
+    "largest_winner_r": 2.207703107507445
+  },
+  "variant_winners": {
+    "count": 1814,
+    "avg_loss_abs": 4.52020253164557,
+    "p50": 1.2554747182830388,
+    "p75": 3.2675527029146223,
+    "p90": 3.2830387346819903,
+    "p95": 3.2896756054394336,
+    "p99": 3.3007370567018395,
+    "largest_winner_r": 3.3936532473060463
+  },
+  "metric_deltas": {
+    "calmar_ratio": {
+      "baseline": 0.0,
+      "variant": 0.0,
+      "delta": 0.0,
+      "pct_change": 0.0
+    },
+    "sortino_ratio": {
+      "baseline": 0.0,
+      "variant": 0.0,
+      "delta": 0.0,
+      "pct_change": 0.0
+    },
+    "total_trades": {
+      "baseline": 4445.0,
+      "variant": 4974.0,
+      "delta": 529.0,
+      "pct_change": 11.901012373453318
+    },
+    "max_consecutive_losses": {
+      "baseline": 18.0,
+      "variant": 14.0,
+      "delta": -4.0,
+      "pct_change": -22.22222222222222
+    },
+    "expectancy": {
+      "baseline": 0.16652193475815524,
+      "variant": 0.014624045034178135,
+      "delta": -0.1518978897239771,
+      "pct_change": -91.21794671950151
+    },
+    "max_overall_dd_pct": {
+      "baseline": 0.0,
+      "variant": 0.0,
+      "delta": 0.0,
+      "pct_change": 0.0
+    },
+    "avg_r_multiple": {
+      "baseline": 143.96947418966613,
+      "variant": 16.094411586800188,
+      "delta": -127.87506260286594,
+      "pct_change": -88.82095549949892
+    },
+    "return_pct": {
+      "baseline": 0.74016,
+      "variant": 0.07275,
+      "delta": -0.6674100000000001,
+      "pct_change": -90.17104409857328
+    },
+    "sharpe_ratio": {
+      "baseline": 0.0,
+      "variant": 0.0,
+      "delta": 0.0,
+      "pct_change": 0.0
+    },
+    "win_rate": {
+      "baseline": 0.35388076490438697,
+      "variant": 0.3646964213912344,
+      "delta": 0.010815656486847458,
+      "pct_change": 3.0562996239057183
+    },
+    "profit_factor": {
+      "baseline": 1.0501306788051101,
+      "variant": 1.005092468131819,
+      "delta": -0.04503821067329117,
+      "pct_change": -4.288819628099795
+    }
+  }
+}

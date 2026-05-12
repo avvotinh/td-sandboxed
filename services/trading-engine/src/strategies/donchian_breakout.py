@@ -16,12 +16,17 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
+from nautilus_trader.core.message import Event
 from nautilus_trader.indicators.volatility import AverageTrueRange
 from nautilus_trader.model.data import Bar
+from nautilus_trader.model.enums import OrderSide, PositionSide
+from nautilus_trader.model.events import PositionClosed, PositionOpened
 
 from src.indicators import Donchian
+from src.indicators.supertrend import Supertrend
 from src.orders.signal import SignalType
 from src.strategies.base_strategy import BaseStrategy
+from src.strategies.bracket_scale_out import BracketScaleOutMixin
 from src.strategies.bracket_strategy import (
     BracketStrategyConfig,
     BracketStrategyMixin,
@@ -59,14 +64,40 @@ class DonchianBreakoutConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     regimes=[RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN],
 )
 class DonchianBreakoutStrategy(
-    BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin
+    BracketScaleOutMixin,
+    BaseStrategy,
+    ATRStopMixin,
+    RiskSizedMixin,
+    BracketStrategyMixin,
 ):
-    """Classical Turtle-style channel breakout strategy."""
+    """Classical Turtle-style channel breakout strategy.
+
+    Phase 1 scale-out + trail tactics (Epic 13) compose via
+    ``BracketScaleOutMixin`` — same wiring as ``SupertrendStrategy``
+    (Story 13.5). Default-OFF: when ``scale_out_enabled=False`` the
+    strategy keeps the legacy single-fill + hard-TP behaviour. When
+    enabled, ``_dispatch_scale_out_event`` forwards Nautilus position
+    lifecycle events into the mixin's state machine and
+    ``_evaluate_scale_out_for_bar`` drives per-bar transitions off the
+    latest close.
+    """
 
     def __init__(self, config: DonchianBreakoutConfig) -> None:
         super().__init__(config)
         self._donchian = Donchian(config.channel_period)
         self._atr = AverageTrueRange(config.atr_period)
+        # Phase 1 trail indicator — separate Supertrend instance keyed on
+        # trailing_atr_period / trailing_atr_multiplier so the trail line
+        # can be tuned independently of the Donchian channel. ``None``
+        # when trailing is off so we skip the indicator overhead.
+        self._supertrend_trail: Supertrend | None = (
+            Supertrend(
+                period=config.trailing_atr_period,
+                multiplier=float(config.trailing_atr_multiplier),
+            )
+            if config.trailing_enabled
+            else None
+        )
         self.set_position_sizer(
             RiskBasedPositionSizer(
                 RiskBasedSizerConfig(risk_percent=config.risk_percent)
@@ -79,10 +110,16 @@ class DonchianBreakoutStrategy(
         super().on_start()
         self.register_indicator_for_bars(self.config.bar_type, self._donchian)
         self.register_indicator_for_bars(self.config.bar_type, self._atr)
+        if self._supertrend_trail is not None:
+            self.register_indicator_for_bars(
+                self.config.bar_type, self._supertrend_trail
+            )
 
     def on_reset(self) -> None:
         self._donchian.reset()
         self._atr.reset()
+        if self._supertrend_trail is not None:
+            self._supertrend_trail.reset()
         self._prev_upper = None
         self._prev_lower = None
 
@@ -125,3 +162,88 @@ class DonchianBreakoutStrategy(
             return
         atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)
+
+    # --- Story 13.10: scale-out lifecycle wiring --------------------------
+    #
+    # The four methods below are intentionally copy-equivalent to the
+    # Story 13.5 wiring in ``supertrend.py``. Extracting them into a
+    # shared host-side helper is queued for after Story 13.11 lands a
+    # third user (MA crossover) — the rule of three.
+
+    def on_event(self, event: Event) -> None:
+        """Extend BaseStrategy.on_event to feed the scale-out mixin.
+
+        ``super().on_event`` updates ``self._position`` from the cache;
+        we then dispatch the event into the scale-out state machine via
+        the testable seam ``_dispatch_scale_out_event``.
+        """
+        super().on_event(event)
+        self._dispatch_scale_out_event(event)
+
+    def _dispatch_scale_out_event(self, event: Event) -> None:
+        """Forward position lifecycle events into the scale-out mixin.
+
+        See ``supertrend.py`` for the race note on PositionOpened firing
+        before the bracket's SL leg lands in cache; ``_try_init_scale_state``
+        no-ops cleanly and the bar evaluator retries.
+        """
+        if not self.config.scale_out_enabled:
+            return
+        if isinstance(event, PositionOpened):
+            self._try_init_scale_state()
+        elif isinstance(event, PositionClosed):
+            self._clear_scale_state()
+
+    def _try_init_scale_state(self) -> None:
+        """Best-effort scale-out init from the live position + SL leg.
+
+        Skips silently when ``_scale_state`` is already set, ``_position``
+        is missing, or the SL leg is not yet in cache (PENDING after a
+        fresh PositionOpened). Retried each bar by
+        ``_evaluate_scale_out_for_bar`` until the bracket's SL is visible.
+        """
+        if self._scale_state is not None:
+            return
+        position = self._position
+        if position is None:
+            return
+        sl_order = self._find_active_sl_order()
+        if sl_order is None:
+            return
+        side = (
+            OrderSide.BUY
+            if position.side == PositionSide.LONG
+            else OrderSide.SELL
+        )
+        self._init_scale_state(
+            side=side,
+            entry_price=Decimal(str(position.avg_px_open)),
+            sl_price=Decimal(str(sl_order.trigger_price.as_double())),
+            qty=Decimal(str(position.quantity.as_double())),
+        )
+
+    def on_bar(self, bar: Bar) -> None:
+        """Extend BaseStrategy.on_bar to drive the scale-out evaluator.
+
+        ``super().on_bar`` runs the existing signal logic (generate +
+        execute). The scale-out evaluator runs AFTER signals so a flip
+        signal that closes the position clears state via the resulting
+        PositionClosed event before the next bar's evaluator runs.
+        """
+        super().on_bar(bar)
+        self._evaluate_scale_out_for_bar(bar)
+
+    def _evaluate_scale_out_for_bar(self, bar: Bar) -> None:
+        """Drive the scale-out state machine off the latest bar close.
+
+        No-op when scale-out is disabled or the strategy is flat. When
+        in position but ``_scale_state`` is None, retry init — covers
+        the PositionOpened-vs-SL-leg race.
+        """
+        if not self.config.scale_out_enabled or self.is_flat:
+            return
+        if self._scale_state is None:
+            self._try_init_scale_state()
+            if self._scale_state is None:
+                return
+        self.evaluate_scale_out(Decimal(str(bar.close.as_double())))
