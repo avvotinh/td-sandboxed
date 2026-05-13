@@ -111,3 +111,52 @@ regime_classifier:
         bb_width_high_pct: 0.80
         realized_vol_high: 0.025
         ema_slope_trend_threshold: 0.0005
+
+# Epic 13 — Phase 1 strategy tactics (50/50 + Trail Uncapped).
+# Per-strategy parameter overrides merged into the strategy config at
+# job-assembly time. Default OFF for every entry so the existing
+# behaviour is unchanged on this YAML alone — flip ``scale_out_enabled``
+# / ``trailing_enabled`` to ``true`` after the story 13.9 backtest A/B
+# validation passes for that strategy.
+#
+# Trend-following strategies (Supertrend / Donchian / MA Crossover) are
+# the candidate set for scale-out + trail. Mean-reversion strategies
+# (Bollinger MR / RSI MR / ORB) are intentionally absent — scale-out
+# + trail uncapped is wrong for natural-target exits, and the 13.2
+# config invariants would reject ``scale_out_enabled=true`` on those
+# strategies anyway when used with their typical risk profile.
+# Per-strategy fields are deliberately repeated rather than YAML-anchored:
+# (a) some YAML readers / linters break on anchors, and (b) post-13.9 the
+# tuned values per strategy will diverge anyway, so an anchor would be
+# dropped at that point.
+strategies:
+  supertrend:
+    scale_out_enabled: false
+    scale_out_r_trigger: 1.0
+    scale_out_close_fraction: 0.5
+    breakeven_at_r: 1.0
+    trailing_enabled: false
+    trailing_method: supertrend
+    trailing_atr_period: 7
+    trailing_atr_multiplier: 2.1
+    safety_tp_atr_mult: 6.0
+  donchian_breakout:
+    scale_out_enabled: false
+    scale_out_r_trigger: 1.0
+    scale_out_close_fraction: 0.5
+    breakeven_at_r: 1.0
+    trailing_enabled: false
+    trailing_method: supertrend
+    trailing_atr_period: 7
+    trailing_atr_multiplier: 2.1
+    safety_tp_atr_mult: 6.0
+  ma_crossover:
+    scale_out_enabled: false
+    scale_out_r_trigger: 1.0
+    scale_out_close_fraction: 0.5
+    breakeven_at_r: 1.0
+    trailing_enabled: false
+    trailing_method: supertrend
+    trailing_atr_period: 7
+    trailing_atr_multiplier: 2.1
+    safety_tp_atr_mult: 6.0

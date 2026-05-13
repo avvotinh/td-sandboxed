@@ -11,6 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
 from src.backtesting.job_config import (
@@ -19,6 +20,7 @@ from src.backtesting.job_config import (
     VenueSpec,
 )
 from src.backtesting.result import BacktestResult
+from src.backtesting.runner_facade import _normalise_parquet_index
 
 
 def _base_job(**overrides) -> BacktestJobConfig:
@@ -159,3 +161,52 @@ class TestRunBacktestComposition:
             _, run_kwargs = mock_runner.run.call_args
             assert run_kwargs.get("start") == start
             assert run_kwargs.get("end") == end
+
+
+@pytest.mark.unit
+class TestNormaliseParquetIndex:
+    """``_normalise_parquet_index`` accepts both parquet shapes the repo writes:
+    ``CachedBarLoader``'s tz-aware DatetimeIndex and the stitch script's
+    int64 ``time`` column with ``index=False``. Both must yield the same
+    tz-aware DatetimeIndex shape before ``dataframe_to_bars`` consumes it.
+    """
+
+    def _ohlcv(self) -> dict[str, list[float]]:
+        return {
+            "open": [1.0, 2.0],
+            "high": [1.5, 2.5],
+            "low": [0.5, 1.5],
+            "close": [1.2, 2.2],
+            "volume": [100.0, 110.0],
+        }
+
+    def test_passes_through_tz_aware_index(self) -> None:
+        idx = pd.DatetimeIndex(
+            ["2024-01-01T00:00:00", "2024-01-01T00:05:00"], tz="UTC", name="time"
+        )
+        df = pd.DataFrame(self._ohlcv(), index=idx)
+        out = _normalise_parquet_index(df, source="/tmp/cached.parquet")
+        assert out.index is df.index
+        assert "time" not in out.columns
+
+    def test_converts_int_ms_time_column(self) -> None:
+        rows = self._ohlcv()
+        rows["time"] = [1704067200000, 1704067500000]  # 2024-01-01 00:00, 00:05 UTC ms
+        df = pd.DataFrame(rows)
+        out = _normalise_parquet_index(df, source="/tmp/stitched.parquet")
+        assert isinstance(out.index, pd.DatetimeIndex)
+        assert out.index.tz is not None
+        assert "time" not in out.columns
+        assert out.index[0] == pd.Timestamp("2024-01-01T00:00:00", tz="UTC")
+        assert out.index[1] == pd.Timestamp("2024-01-01T00:05:00", tz="UTC")
+
+    def test_rejects_naive_datetime_index(self) -> None:
+        idx = pd.DatetimeIndex(["2024-01-01", "2024-01-02"], name="time")
+        df = pd.DataFrame(self._ohlcv(), index=idx)
+        with pytest.raises(ValueError, match="naive DatetimeIndex"):
+            _normalise_parquet_index(df, source="/tmp/bad.parquet")
+
+    def test_rejects_missing_time(self) -> None:
+        df = pd.DataFrame(self._ohlcv())  # default RangeIndex, no time column
+        with pytest.raises(ValueError, match="neither a DatetimeIndex nor a 'time' column"):
+            _normalise_parquet_index(df, source="/tmp/no-time.parquet")

@@ -52,9 +52,3 @@ func (c *Credentials) Validate() error {
 
 	return nil
 }
-
-// GenAuthCookies generates a cookie string for HTTP requests.
-// Format: "sessionid=<SESSION_ID>; sessionid_sign=<SESSION_SIGN>"
-func (c *Credentials) GenAuthCookies() string {
-	return fmt.Sprintf("sessionid=%s; sessionid_sign=%s", c.SessionID, c.SessionSign)
-}

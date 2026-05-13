@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from src.backtesting.metrics.schema import PropFirmMetricsSchema
@@ -39,7 +39,15 @@ class BreachEvent:
 
 @dataclass(frozen=True)
 class BacktestResult:
-    """Aggregated backtest output."""
+    """Aggregated backtest output.
+
+    ``config_snapshot`` (Epic 12 Decision §7) carries provenance the
+    validation report needs to be reproducible — typically dataset
+    fingerprint(s), strategy params, and venue/fee settings as captured
+    at run time. The field is optional; only the validation-campaign
+    harness populates it. Backtests that don't care can leave it at the
+    default ``None`` and read it as such.
+    """
 
     strategy_name: str
     start: datetime
@@ -50,3 +58,4 @@ class BacktestResult:
     trades: list[TradeRecord] = field(default_factory=list)
     breaches: list[BreachEvent] = field(default_factory=list)
     metrics: PropFirmMetricsSchema | None = None
+    config_snapshot: dict[str, Any] | None = None

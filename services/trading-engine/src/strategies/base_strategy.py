@@ -377,3 +377,152 @@ class BaseStrategy(Strategy):
         order_list = self.order_factory.bracket(**args)
         self.submit_order_list(order_list)
         return order_list
+
+    # --- Epic 13 helpers (Phase 1: scale-out + trail) ---------------------
+    #
+    # Seam parameters (`Any` on Order / Quantity / Price) are intentional:
+    # Nautilus Cython types do not participate in mypy's type graph, and
+    # importing them just for annotation noise here adds no safety. When
+    # mypy is wired into CI a follow-up can replace `Any` with Protocol
+    # stubs covering the .order_type / .as_double / etc. surfaces we use.
+    # TODO(mypy): replace Any with Protocol stubs once mypy is on.
+
+    def _close_partial(self, fraction: Decimal) -> Any | None:
+        """Close ``fraction`` of the current position via reduce-only market.
+
+        Defensive cap: ``min(qty * fraction, qty - lot_step)`` prevents
+        over-close caused by lot-rounding edges (e.g., target=0.999*1.0
+        rounds up to a full close on coarse instruments). Implementation
+        plan §2.2.
+
+        Returns:
+            The submitted Order, or ``None`` if flat / position too small
+            for the cap to leave anything open.
+
+        Raises:
+            ValueError: if ``fraction`` is not in ``(0, 1)`` — closing 0
+                is a no-op disguised as an order, closing >= 1 belongs in
+                ``_close_position`` which uses the bracket-aware path.
+        """
+        if not (Decimal("0") < fraction < Decimal("1")):
+            raise ValueError(
+                f"fraction must be in (0, 1), got {fraction}"
+            )
+        if self._position is None:
+            self._log.warning("_close_partial called while flat — no-op")
+            return None
+
+        current_qty = Decimal(str(self._position.quantity.as_double()))
+        lot_step = Decimal(str(self._instrument.size_increment.as_double()))
+
+        target_qty = current_qty * fraction
+        # Subtract one lot step so the partial close cannot over-shoot
+        # the position when the instrument's volume_step coarsens
+        # ``target_qty`` upward at make_qty time.
+        safe_max = current_qty - lot_step
+        qty_to_close = min(target_qty, safe_max)
+
+        if qty_to_close <= 0:
+            self._log.warning(
+                f"_close_partial skipped — current_qty={current_qty} "
+                f"below lot_step={lot_step}; nothing to close partially"
+            )
+            return None
+
+        side = (
+            OrderSide.SELL
+            if self._position.side == PositionSide.LONG
+            else OrderSide.BUY
+        )
+        quantity = self._instrument.make_qty(qty_to_close)
+        order = self._submit_market_reduce_only_via_factory(
+            side=side, quantity=quantity
+        )
+        self._log.info(
+            f"Partial close {fraction} of {current_qty} → {qty_to_close} "
+            f"({side.name}, reduce_only=True)"
+        )
+        return order
+
+    def _submit_market_reduce_only_via_factory(
+        self, *, side: OrderSide, quantity: Any
+    ) -> Any:
+        """Build + submit a reduce-only market order. Tests patch this seam.
+
+        Wraps the two Nautilus Cython calls (``order_factory.market`` +
+        ``submit_order``) so unit tests can patch this single Python
+        method instead of mocking ``Actor.cache`` (read-only).
+        """
+        order = self.order_factory.market(
+            instrument_id=self.config.instrument_id,
+            order_side=side,
+            quantity=quantity,
+            reduce_only=True,
+        )
+        self.submit_order(order)
+        return order
+
+    def _query_open_orders(self) -> list[Any]:
+        """Return open orders for this strategy's instrument. Test seam.
+
+        ``self.cache`` is read-only on Nautilus Actor — tests cannot
+        replace it. Delegating through this helper lets tests stub a
+        deterministic order list while the live path queries the cache.
+        """
+        return list(
+            self.cache.orders_open(instrument_id=self.config.instrument_id)
+        )
+
+    def _find_active_sl_order(self) -> Any | None:
+        """Locate the active STOP_MARKET (SL) order on this instrument.
+
+        Returns the first match. Phase 1 strategies are single-fill, so
+        a strategy should never be in a state with two SL orders active
+        for the same position simultaneously — if that ever happens, the
+        first-match policy keeps Phase 1 deterministic and the WARNING
+        log leaves a breadcrumb for Phase 2 (multi-leg / scaled-in)
+        debugging.
+        """
+        matches = [
+            o for o in self._query_open_orders()
+            if o.order_type == OrderType.STOP_MARKET
+        ]
+        if len(matches) > 1:
+            self._log.warning(
+                f"_find_active_sl_order: {len(matches)} STOP_MARKET orders "
+                "found on instrument; taking first (Phase 1 single-fill "
+                "should never produce multiple SLs)"
+            )
+        return matches[0] if matches else None
+
+    def _modify_sl(self, new_sl_price: Decimal) -> bool:
+        """Atomic SL modify via Nautilus ``Strategy.modify_order``.
+
+        Backtest path: ``BacktestExecutionClient`` updates the order
+        in-memory atomically. Live path: routes through
+        ``ZmqExecutionClient._modify_order`` which currently raises
+        ``NotImplementedError`` — Epic 14 unblocks this; until then,
+        Epic 13 ships backtest-only.
+
+        Returns:
+            ``True`` if an SL was found and the modify request was
+            issued; ``False`` if no STOP_MARKET order exists on this
+            instrument.
+        """
+        sl_order = self._find_active_sl_order()
+        if sl_order is None:
+            self._log.warning("_modify_sl: no active SL order found")
+            return False
+
+        new_price = self._instrument.make_price(new_sl_price)
+        self._modify_sl_order_via_strategy(
+            sl_order=sl_order, trigger_price=new_price
+        )
+        self._log.info(f"Modified SL trigger to {new_sl_price}")
+        return True
+
+    def _modify_sl_order_via_strategy(
+        self, *, sl_order: Any, trigger_price: Any
+    ) -> None:
+        """Call Nautilus ``Strategy.modify_order``. Tests patch this seam."""
+        self.modify_order(order=sl_order, trigger_price=trigger_price)

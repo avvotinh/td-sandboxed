@@ -1,26 +1,56 @@
 """Moving Average Crossover strategy.
 
-This module implements a Moving Average Crossover strategy using
-Exponential Moving Averages (EMA). The strategy generates BUY signals
-on bullish crossovers (fast > slow) and SELL signals on bearish
-crossovers (fast < slow).
+EMA-based trend-following: BUY on bullish cross (fast crosses above slow),
+SELL on bearish cross. Position reversal is supported — an opposite
+signal closes the open position and submits a fresh bracket in the
+new direction on the same bar.
+
+Story 13.11 upgraded the strategy from fixed-size market orders to
+ATR-based bracket orders + Epic 13 Phase 1 scale-out + Supertrend
+trail. ``scale_out_enabled`` defaults False so the legacy single-fill
+behaviour (just without the explicit SL / TP previously missing) is
+preserved when the operator hasn't opted in.
 """
 
 from __future__ import annotations
 
-from nautilus_trader.indicators import ExponentialMovingAverage
-from nautilus_trader.model.data import Bar
-from nautilus_trader.model.enums import OrderSide
+import logging
+from decimal import Decimal
 
+from nautilus_trader.indicators import ExponentialMovingAverage
+from nautilus_trader.indicators.volatility import AverageTrueRange
+from nautilus_trader.model.data import Bar
+
+from src.indicators.supertrend import Supertrend
 from src.orders.signal import SignalType
 from src.strategies.base_strategy import BaseStrategy
-from src.strategies.config import BaseStrategyConfig
+from src.strategies.bracket_scale_out import BracketScaleOutMixin
+from src.strategies.bracket_strategy import (
+    BracketStrategyConfig,
+    BracketStrategyMixin,
+    is_atr_unsafe,
+)
+from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
+from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
 from src.regime.states import RegimeState
 from src.strategies.registry import register_strategy
+from src.strategies.risk_based_position_sizer import (
+    RiskBasedPositionSizer,
+    RiskBasedSizerConfig,
+)
+
+logger = logging.getLogger(__name__)
 
 
-class MACrossoverConfig(BaseStrategyConfig, frozen=True, kw_only=True):
+class MACrossoverConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     """Configuration for MA Crossover strategy.
+
+    Inherits the full ATR-bracket + Phase 1 scale-out field set from
+    :class:`BracketStrategyConfig` (Story 13.11 migration from
+    ``BaseStrategyConfig``). The legacy ``trade_size`` field is
+    preserved on the inherited surface but is unused by the new
+    bracket flow — position size now comes from
+    :class:`RiskBasedPositionSizer` keyed on ``risk_percent``.
 
     Attributes:
         fast_period: Period for fast EMA (default 20)
@@ -33,9 +63,16 @@ class MACrossoverConfig(BaseStrategyConfig, frozen=True, kw_only=True):
     def __post_init__(self) -> None:
         """Validate configuration after initialization.
 
-        Raises:
-            ValueError: If periods are non-positive or slow_period <= fast_period.
+        Calls ``super().__post_init__()`` so the full
+        :class:`BracketStrategyConfig` invariants (including the
+        Phase 1 cross-field guards ``breakeven_at_r ≤
+        scale_out_r_trigger`` and "trailing requires scale_out") are
+        enforced for MA crossover configs. Supertrend / Donchian
+        configs do NOT yet make this call — that's an outstanding
+        consistency gap tracked as a follow-up; fixing it on all
+        three at once is the natural next refactor.
         """
+        super().__post_init__()
         if self.fast_period <= 0:
             raise ValueError(
                 f"fast_period must be positive, got {self.fast_period}"
@@ -54,80 +91,70 @@ class MACrossoverConfig(BaseStrategyConfig, frozen=True, kw_only=True):
     "ma_crossover",
     regimes=[RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN],
 )
-class MACrossoverStrategy(BaseStrategy):
-    """Moving Average Crossover strategy.
+class MACrossoverStrategy(
+    BracketScaleOutMixin,
+    BaseStrategy,
+    ATRStopMixin,
+    RiskSizedMixin,
+    BracketStrategyMixin,
+):
+    """Moving Average Crossover with ATR brackets + Phase 1 scale-out.
 
     Generates BUY signal on bullish crossover (fast crosses above slow),
-    SELL signal on bearish crossover (fast crosses below slow).
+    SELL signal on bearish crossover. Position reversal is preserved
+    from the pre-13.11 implementation: an opposite signal closes the
+    open position before submitting a new bracket entry on the same bar.
 
-    This strategy includes position reversal support - when a signal is
-    generated in the opposite direction of an existing position, the
-    existing position is closed and a new position is immediately opened.
-
-    Example:
-        config = MACrossoverConfig(
-            instrument_id=instrument_id,
-            bar_type=bar_type,
-            fast_period=20,
-            slow_period=50,
-        )
-        strategy = MACrossoverStrategy(config)
+    Phase 1 scale-out + trail tactics (Epic 13) compose via
+    ``BracketScaleOutMixin`` — same Story 13.5 wiring as Supertrend
+    and Story 13.10 Donchian. Default-OFF.
     """
 
     def __init__(self, config: MACrossoverConfig) -> None:
-        """Initialize the MA Crossover strategy.
-
-        Args:
-            config: Strategy configuration with EMA periods
-        """
         super().__init__(config)
-        # Initialize EMA indicators
         self.fast_ema = ExponentialMovingAverage(config.fast_period)
         self.slow_ema = ExponentialMovingAverage(config.slow_period)
-        # Track previous values for crossover detection
+        self._atr = AverageTrueRange(config.atr_period)
+        self._supertrend_trail: Supertrend | None = (
+            Supertrend(
+                period=config.trailing_atr_period,
+                multiplier=float(config.trailing_atr_multiplier),
+            )
+            if config.trailing_enabled
+            else None
+        )
+        self.set_position_sizer(
+            RiskBasedPositionSizer(
+                RiskBasedSizerConfig(risk_percent=config.risk_percent)
+            )
+        )
         self._prev_fast: float | None = None
         self._prev_slow: float | None = None
 
     def on_start(self) -> None:
-        """Called when strategy starts.
-
-        Sets up instrument reference, subscribes to bars, and registers
-        EMA indicators for automatic updates.
-        """
-        super().on_start()  # Sets instrument, subscribes to bars
-
-        # Register indicators BEFORE requesting data
+        super().on_start()
         self.register_indicator_for_bars(self.config.bar_type, self.fast_ema)
         self.register_indicator_for_bars(self.config.bar_type, self.slow_ema)
-
+        self.register_indicator_for_bars(self.config.bar_type, self._atr)
+        if self._supertrend_trail is not None:
+            self.register_indicator_for_bars(
+                self.config.bar_type, self._supertrend_trail
+            )
         self._log.info(
             f"MACrossover started: fast={self.config.fast_period}, "
             f"slow={self.config.slow_period}"
         )
 
     def on_reset(self) -> None:
-        """Reset strategy state.
-
-        Resets both EMA indicators and previous value tracking.
-        Called when strategy needs to be reset to initial state.
-        """
         self.fast_ema.reset()
         self.slow_ema.reset()
+        self._atr.reset()
+        if self._supertrend_trail is not None:
+            self._supertrend_trail.reset()
         self._prev_fast = None
         self._prev_slow = None
 
     def generate_signal(self, bar: Bar) -> SignalType:
-        """Generate signal based on EMA crossover.
-
-        Args:
-            bar: The incoming bar data
-
-        Returns:
-            SignalType.BUY on bullish crossover,
-            SignalType.SELL on bearish crossover,
-            SignalType.NONE otherwise
-        """
-        # Wait for indicators to warm up
         if not self.fast_ema.initialized or not self.slow_ema.initialized:
             return SignalType.NONE
 
@@ -136,69 +163,56 @@ class MACrossoverStrategy(BaseStrategy):
 
         signal = SignalType.NONE
 
-        # Check for crossover (requires previous values)
         if self._prev_fast is not None and self._prev_slow is not None:
-            # Bullish crossover: fast crosses above slow
             if self._prev_fast <= self._prev_slow and fast > slow:
                 signal = SignalType.BUY
-                self._log.info(f"Bullish crossover: fast={fast:.5f} > slow={slow:.5f}")
-            # Bearish crossover: fast crosses below slow
+                self._log.info(
+                    f"Bullish crossover: fast={fast:.5f} > slow={slow:.5f}"
+                )
             elif self._prev_fast >= self._prev_slow and fast < slow:
                 signal = SignalType.SELL
-                self._log.info(f"Bearish crossover: fast={fast:.5f} < slow={slow:.5f}")
+                self._log.info(
+                    f"Bearish crossover: fast={fast:.5f} < slow={slow:.5f}"
+                )
 
-        # Update previous values
         self._prev_fast = fast
         self._prev_slow = slow
 
         return signal
 
     def _execute_signal(self, signal: SignalType) -> None:
-        """Execute signal with position reversal support.
+        """Execute signal: reversal-on-cross via bracket entries.
 
-        Handles position reversal by closing existing position and
-        immediately entering in the opposite direction on the same bar.
-
-        Args:
-            signal: The signal to execute
+        Pattern mirrors SupertrendStrategy._execute_signal: an opposite
+        signal closes the live position before submitting the new
+        bracket entry. The bracket helper skips when ATR is unsafe so
+        a single flat-bar can't take trading offline.
         """
-        if signal == SignalType.BUY:
-            if self.is_short:
-                self._log.info("Reversing: closing short, entering long")
-                self._close_position()
-            self._go_long()  # Immediate entry
-        elif signal == SignalType.SELL:
-            if self.is_long:
-                self._log.info("Reversing: closing long, entering short")
-                self._close_position()
-            self._go_short()  # Immediate entry
-        elif signal == SignalType.CLOSE:
+        if signal == SignalType.NONE:
+            return
+        if signal == SignalType.CLOSE:
+            self._close_position()
+            return
+
+        if signal == SignalType.BUY and self.is_short:
+            self._log.info("Reversing: closing short, entering long")
+            self._close_position()
+        elif signal == SignalType.SELL and self.is_long:
+            self._log.info("Reversing: closing long, entering short")
             self._close_position()
 
-    def _go_long(self) -> None:
-        """Enter long position.
+        atr_raw = self._atr.value
+        if is_atr_unsafe(atr_raw):
+            logger.warning(
+                "MA crossover skipping signal: ATR=%s is non-positive or non-finite",
+                atr_raw,
+            )
+            return
+        atr_value = Decimal(str(atr_raw))
+        self._submit_bracket_for_entry(signal, atr_value)
 
-        Overrides base to allow entry even when not flat (for reversals).
-        Creates and submits a market buy order.
-        """
-        order = self.order_factory.market(
-            instrument_id=self.config.instrument_id,
-            order_side=OrderSide.BUY,
-            quantity=self._instrument.make_qty(self.get_position_size(SignalType.BUY)),
-        )
-        self.submit_order(order)
-        self._log.info(f"Going LONG with {self.config.trade_size}")
-
-    def _go_short(self) -> None:
-        """Enter short position.
-
-        Overrides base to allow entry even when not flat (for reversals).
-        Creates and submits a market sell order.
-        """
-        order = self.order_factory.market(
-            instrument_id=self.config.instrument_id,
-            order_side=OrderSide.SELL,
-            quantity=self._instrument.make_qty(self.get_position_size(SignalType.SELL)),
-        )
-        self.submit_order(order)
-        self._log.info(f"Going SHORT with {self.config.trade_size}")
+    # Story 13.11 originally inlined the scale-out wiring here. Once it
+    # made MA crossover the third user, the five wiring methods were
+    # lifted into ``BracketScaleOutMixin`` (see ``bracket_scale_out.py``).
+    # The mixin is prepended in the MRO above so the inherited methods
+    # are reachable unchanged.

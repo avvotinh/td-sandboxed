@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"net/http"
+	"net/url"
 	"regexp"
 	"testing"
 
@@ -64,46 +66,6 @@ func TestCredentials_Validate(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-		})
-	}
-}
-
-func TestCredentials_GenAuthCookies(t *testing.T) {
-	tests := []struct {
-		name        string
-		credentials *Credentials
-		expected    string
-	}{
-		{
-			name: "normal credentials",
-			credentials: &Credentials{
-				SessionID:   "abc123",
-				SessionSign: "xyz789",
-			},
-			expected: "sessionid=abc123; sessionid_sign=xyz789",
-		},
-		{
-			name: "credentials with special characters",
-			credentials: &Credentials{
-				SessionID:   "test_id_with_underscore",
-				SessionSign: "test-sign-with-dash",
-			},
-			expected: "sessionid=test_id_with_underscore; sessionid_sign=test-sign-with-dash",
-		},
-		{
-			name: "empty credentials",
-			credentials: &Credentials{
-				SessionID:   "",
-				SessionSign: "",
-			},
-			expected: "sessionid=; sessionid_sign=",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := tt.credentials.GenAuthCookies()
-			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -395,4 +357,78 @@ func TestGetUser_InvalidCredentials(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, user)
 	assert.Contains(t, err.Error(), "invalid credentials")
+}
+
+// TestBuildAuthCookieJar_CarriesCookiesAcrossSubdomainRedirect locks in
+// the geo-redirect fix from commit 29ca9b0. Before the fix the auth
+// client attached cookies via req.Header.Set("Cookie", ...), which Go
+// drops on follow-up redirects — a VN-region operator hitting
+// www.tradingview.com gets bounced to vn.tradingview.com and arrived
+// anonymous. After the fix the cookies live in a jar with
+// Domain="tradingview.com", which scopes them to every subdomain. This
+// test asserts the jar's contract directly: a request to a different
+// subdomain still receives the same two cookies, byte for byte.
+func TestBuildAuthCookieJar_CarriesCookiesAcrossSubdomainRedirect(t *testing.T) {
+	creds := &Credentials{SessionID: "abc123", SessionSign: "v3:xyz789"}
+
+	jar, err := buildAuthCookieJar(creds)
+	require.NoError(t, err)
+
+	subdomains := []string{
+		"https://www.tradingview.com",
+		"https://vn.tradingview.com", // the regional bounce that broke before 29ca9b0
+		"https://tradingview.com",
+	}
+	for _, raw := range subdomains {
+		t.Run(raw, func(t *testing.T) {
+			u, err := url.Parse(raw)
+			require.NoError(t, err)
+			cookies := jar.Cookies(u)
+			require.Len(t, cookies, 2,
+				"jar must serve both cookies for any tradingview subdomain")
+			byName := map[string]*http.Cookie{}
+			for _, c := range cookies {
+				byName[c.Name] = c
+			}
+			require.Contains(t, byName, "sessionid")
+			require.Contains(t, byName, "sessionid_sign")
+			assert.Equal(t, "abc123", byName["sessionid"].Value)
+			assert.Equal(t, "v3:xyz789", byName["sessionid_sign"].Value)
+		})
+	}
+}
+
+// TestCheckRedirectStaysOnTradingView covers the SSRF-adjacent guard
+// added alongside the cookie fix. The CheckRedirect predicate must
+// admit any subdomain of tradingview.com (so the geo-redirect path
+// works) while refusing every other host — even one that *contains*
+// the substring, which a naive strings.Contains would let through.
+func TestCheckRedirectStaysOnTradingView(t *testing.T) {
+	cases := []struct {
+		name      string
+		host      string
+		shouldErr bool
+	}{
+		{"apex", "tradingview.com", false},
+		{"www subdomain", "www.tradingview.com", false},
+		{"vn subdomain", "vn.tradingview.com", false},
+		{"deeper subdomain", "static.cdn.tradingview.com", false},
+		// Negative cases — host either fully different or only a substring match.
+		{"unrelated host", "evil.com", true},
+		{"loopback", "127.0.0.1", true},
+		{"substring impostor", "tradingview.com.evil.example", true},
+		{"prefix impostor", "fakeradingview.com", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &http.Request{URL: &url.URL{Scheme: "https", Host: tc.host, Path: "/"}}
+			err := checkRedirectStaysOnTradingView(req, nil)
+			if tc.shouldErr {
+				require.Error(t, err, "host %q must be refused", tc.host)
+				assert.Contains(t, err.Error(), tc.host)
+			} else {
+				assert.NoError(t, err, "host %q must be admitted", tc.host)
+			}
+		})
+	}
 }

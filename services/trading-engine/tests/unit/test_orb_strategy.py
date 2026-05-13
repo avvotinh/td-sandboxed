@@ -213,4 +213,26 @@ class TestSessionReset:
         assert strategy._or_low == 2480
 
 
+class TestAtrZeroGuard:
+    """A flat-bar (H=L=C) collapses ATR to zero; the bracket helper must
+    short-circuit rather than crash the bar-processing loop. Mirrors the
+    Supertrend / Bollinger / RSI guard added under story 12.8.
+    """
+
+    @pytest.mark.parametrize("bad_atr", [0.0, None, -5.0, float("nan")])
+    def test_unsafe_atr_skips_bracket_submission(self, bad_atr) -> None:
+        strategy = _make_strategy()
+        strategy._atr = Mock(initialized=True, value=bad_atr)
+        strategy._submit_bracket_for_entry = Mock()
+        strategy._execute_signal(SignalType.BUY)
+        strategy._submit_bracket_for_entry.assert_not_called()
+
+    def test_positive_atr_still_submits(self) -> None:
+        strategy = _make_strategy()
+        strategy._atr = Mock(initialized=True, value=5.0)
+        strategy._submit_bracket_for_entry = Mock()
+        strategy._execute_signal(SignalType.BUY)
+        strategy._submit_bracket_for_entry.assert_called_once()
+
+
 # Registry verified by successful import (decorator registered at load).

@@ -1,0 +1,3 @@
+# RANGING: bb_width_pct <= bb_width_low_pct (0.30) AND adx < adx_trend_min (25.0) AND realized_vol < realized_vol_high (0.025).
+adx,plus_di,minus_di,bb_width_pct,realized_vol,ema_slope,is_warmed_up
+15.0,18.0,18.0,0.20,0.008,0.0,True

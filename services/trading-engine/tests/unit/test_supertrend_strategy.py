@@ -222,3 +222,283 @@ class TestAtrZeroGuard:
 # which would leave our strategies unregistered by the time this test
 # runs in the full suite. Import-time registration is exercised by the
 # decorator itself: if the module imports, `@register_strategy` ran.
+
+
+# ---------------------------------------------------------------------------
+# Story 13.5 — BracketScaleOutMixin integration into SupertrendStrategy
+# ---------------------------------------------------------------------------
+
+
+class TestScaleOutMRO:
+    """Mixin must compose without breaking existing init."""
+
+    def test_scale_state_initialized_to_none(self) -> None:
+        # BracketScaleOutMixin.__init__ must run via super() chain so
+        # _scale_state is set before any event arrives.
+        strategy = _make_strategy()
+        assert strategy._scale_state is None
+
+    def test_legacy_attributes_still_present(self) -> None:
+        # Regression: prepending the mixin must not break the existing
+        # init chain that builds _supertrend / _atr / _prev_trend.
+        strategy = _make_strategy()
+        assert strategy._supertrend is not None
+        assert strategy._atr is not None
+        assert strategy._prev_trend is None
+
+
+class TestDispatchScaleOutEvent:
+    """on_event hook → _init_scale_state / _clear_scale_state."""
+
+    def _stub_position(self, side, entry: float, qty: float) -> Mock:
+        from nautilus_trader.model.enums import PositionSide
+
+        pos = Mock()
+        pos.side = PositionSide.LONG if side == OrderSide.BUY else PositionSide.SHORT
+        pos.avg_px_open = entry
+        qty_mock = Mock()
+        qty_mock.as_double = Mock(return_value=qty)
+        pos.quantity = qty_mock
+        return pos
+
+    def _stub_sl_order(self, trigger: float) -> Mock:
+        # Mirror the Nautilus Price surface: trigger_price.as_double()
+        # is what supertrend.py:_dispatch_scale_out_event reads.
+        trigger_mock = Mock()
+        trigger_mock.as_double = Mock(return_value=trigger)
+        order = Mock()
+        order.trigger_price = trigger_mock
+        return order
+
+    def test_position_opened_inits_state_when_enabled(self) -> None:
+        from nautilus_trader.model.events import PositionOpened
+
+        strategy = _make_strategy(scale_out_enabled=True)
+        strategy._position = self._stub_position(OrderSide.BUY, 2000.0, 1.0)
+        strategy._find_active_sl_order = Mock(
+            return_value=self._stub_sl_order(1990.0)
+        )
+        strategy._init_scale_state = Mock()
+
+        event = Mock(spec=PositionOpened)
+        strategy._dispatch_scale_out_event(event)
+
+        strategy._init_scale_state.assert_called_once_with(
+            side=OrderSide.BUY,
+            entry_price=Decimal("2000.0"),
+            sl_price=Decimal("1990.0"),
+            qty=Decimal("1.0"),
+        )
+
+    def test_position_opened_short_maps_position_side_to_sell(self) -> None:
+        from nautilus_trader.model.events import PositionOpened
+
+        strategy = _make_strategy(scale_out_enabled=True)
+        strategy._position = self._stub_position(OrderSide.SELL, 2000.0, 1.0)
+        strategy._find_active_sl_order = Mock(
+            return_value=self._stub_sl_order(2010.0)
+        )
+        strategy._init_scale_state = Mock()
+
+        event = Mock(spec=PositionOpened)
+        strategy._dispatch_scale_out_event(event)
+
+        kwargs = strategy._init_scale_state.call_args.kwargs
+        assert kwargs["side"] == OrderSide.SELL
+
+    def test_position_opened_skipped_when_disabled(self) -> None:
+        from nautilus_trader.model.events import PositionOpened
+
+        strategy = _make_strategy(scale_out_enabled=False)
+        strategy._position = self._stub_position(OrderSide.BUY, 2000.0, 1.0)
+        strategy._init_scale_state = Mock()
+
+        event = Mock(spec=PositionOpened)
+        strategy._dispatch_scale_out_event(event)
+
+        strategy._init_scale_state.assert_not_called()
+
+    def test_position_opened_skipped_when_position_missing(self) -> None:
+        # Cache miss / race: super().on_event could not resolve the
+        # position. Helper must skip rather than raise on None.
+        # (Nautilus Component._log is read-only at runtime, so the
+        # WARNING side-effect is verified via integration tests rather
+        # than asserted here.)
+        from nautilus_trader.model.events import PositionOpened
+
+        strategy = _make_strategy(scale_out_enabled=True)
+        strategy._position = None
+        strategy._init_scale_state = Mock()
+
+        event = Mock(spec=PositionOpened)
+        strategy._dispatch_scale_out_event(event)
+
+        strategy._init_scale_state.assert_not_called()
+
+    def test_position_opened_skipped_when_no_sl_order(self) -> None:
+        # SL leg may not be registered yet at fill time on some Nautilus
+        # paths — skip so we don't pass None as sl_price.
+        from nautilus_trader.model.events import PositionOpened
+
+        strategy = _make_strategy(scale_out_enabled=True)
+        strategy._position = self._stub_position(OrderSide.BUY, 2000.0, 1.0)
+        strategy._find_active_sl_order = Mock(return_value=None)
+        strategy._init_scale_state = Mock()
+
+        event = Mock(spec=PositionOpened)
+        strategy._dispatch_scale_out_event(event)
+
+        strategy._init_scale_state.assert_not_called()
+
+    def test_position_closed_clears_state(self) -> None:
+        from nautilus_trader.model.events import PositionClosed
+
+        strategy = _make_strategy(scale_out_enabled=True)
+        strategy._clear_scale_state = Mock()
+
+        event = Mock(spec=PositionClosed)
+        strategy._dispatch_scale_out_event(event)
+
+        strategy._clear_scale_state.assert_called_once()
+
+    def test_position_closed_skipped_when_disabled(self) -> None:
+        from nautilus_trader.model.events import PositionClosed
+
+        strategy = _make_strategy(scale_out_enabled=False)
+        strategy._clear_scale_state = Mock()
+
+        event = Mock(spec=PositionClosed)
+        strategy._dispatch_scale_out_event(event)
+
+        strategy._clear_scale_state.assert_not_called()
+
+    def test_unrelated_event_no_op(self) -> None:
+        strategy = _make_strategy(scale_out_enabled=True)
+        strategy._init_scale_state = Mock()
+        strategy._clear_scale_state = Mock()
+
+        # Pass a generic event that's neither PositionOpened nor Closed.
+        strategy._dispatch_scale_out_event(Mock())
+
+        strategy._init_scale_state.assert_not_called()
+        strategy._clear_scale_state.assert_not_called()
+
+
+class TestEvaluateScaleOutForBar:
+    """on_bar hook → evaluate_scale_out(bar.close)."""
+
+    def _stub_bar(self, close: float) -> Mock:
+        bar = Mock()
+        close_mock = Mock()
+        close_mock.as_double = Mock(return_value=close)
+        bar.close = close_mock
+        return bar
+
+    def test_evaluates_when_enabled_and_in_position(self) -> None:
+        from nautilus_trader.model.enums import PositionSide
+
+        strategy = _make_strategy(scale_out_enabled=True)
+        # is_flat reads self._position; set a stub so it returns False.
+        pos = Mock()
+        pos.side = PositionSide.LONG
+        strategy._position = pos
+        # Pre-set _scale_state so the bar evaluator skips the init-retry
+        # path (story 13.7 added bar-driven init recovery for the SL
+        # race; that path is exercised in TestDispatchScaleOutEvent).
+        strategy._scale_state = Mock(name="ScaleOutTradeState")
+        strategy.evaluate_scale_out = Mock()
+
+        strategy._evaluate_scale_out_for_bar(self._stub_bar(2010.0))
+
+        strategy.evaluate_scale_out.assert_called_once_with(Decimal("2010.0"))
+
+    def test_init_retry_when_state_none(self) -> None:
+        # Story 13.7 — bar-driven init retry for the PositionOpened-vs-SL
+        # race. When the bar evaluator sees scale_out enabled + in
+        # position + state is None, it calls _try_init_scale_state.
+        from nautilus_trader.model.enums import PositionSide
+
+        strategy = _make_strategy(scale_out_enabled=True)
+        pos = Mock()
+        pos.side = PositionSide.LONG
+        strategy._position = pos
+        strategy._scale_state = None
+        strategy._try_init_scale_state = Mock()
+        strategy.evaluate_scale_out = Mock()
+
+        strategy._evaluate_scale_out_for_bar(self._stub_bar(2010.0))
+
+        strategy._try_init_scale_state.assert_called_once()
+        # _try_init_scale_state was mocked → state stays None → bar
+        # evaluator must skip evaluate_scale_out for this bar.
+        strategy.evaluate_scale_out.assert_not_called()
+
+    def test_skipped_when_disabled(self) -> None:
+        from nautilus_trader.model.enums import PositionSide
+
+        strategy = _make_strategy(scale_out_enabled=False)
+        pos = Mock()
+        pos.side = PositionSide.LONG
+        strategy._position = pos
+        strategy.evaluate_scale_out = Mock()
+
+        strategy._evaluate_scale_out_for_bar(self._stub_bar(2010.0))
+
+        strategy.evaluate_scale_out.assert_not_called()
+
+    def test_skipped_when_flat(self) -> None:
+        # is_flat returns True when _position is None — no in-flight
+        # state for the evaluator to act on.
+        strategy = _make_strategy(scale_out_enabled=True)
+        strategy._position = None
+        strategy.evaluate_scale_out = Mock()
+
+        strategy._evaluate_scale_out_for_bar(self._stub_bar(2010.0))
+
+        strategy.evaluate_scale_out.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Story 13.6 — Supertrend trail indicator wiring
+# ---------------------------------------------------------------------------
+
+
+class TestTrailIndicatorWiring:
+    """``_supertrend_trail`` only constructed when trailing_enabled."""
+
+    def test_trail_indicator_created_when_enabled(self) -> None:
+        strategy = _make_strategy(
+            scale_out_enabled=True,
+            trailing_enabled=True,
+            trailing_atr_period=7,
+            trailing_atr_multiplier=Decimal("2.1"),
+        )
+
+        from src.indicators.supertrend import Supertrend
+
+        assert isinstance(strategy._supertrend_trail, Supertrend)
+        # Indicator picks up the Phase 1 trailing-specific params, not
+        # the signal-line params (period=10, multiplier=3.0 default).
+        assert strategy._supertrend_trail.period == 7
+        # Decimal → float conversion: indicator accepts float, config
+        # holds Decimal for invariant checks (story 13.2).
+        assert strategy._supertrend_trail.multiplier == 2.1
+
+    def test_trail_indicator_none_when_disabled(self) -> None:
+        # Default: trailing_enabled=False — skip the indicator overhead.
+        strategy = _make_strategy()
+
+        assert strategy._supertrend_trail is None
+
+    def test_signal_indicator_unaffected_by_trail(self) -> None:
+        # Regression: prepending the trail indicator must not affect
+        # the signal-line Supertrend (period=10, multiplier=3.0).
+        strategy = _make_strategy(
+            scale_out_enabled=True,
+            trailing_enabled=True,
+            trailing_atr_period=7,
+            trailing_atr_multiplier=Decimal("2.1"),
+        )
+
+        assert strategy._supertrend.period == 10
+        assert strategy._supertrend.multiplier == 3.0

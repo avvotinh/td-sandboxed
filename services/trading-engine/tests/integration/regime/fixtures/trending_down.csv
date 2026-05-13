@@ -1,0 +1,4 @@
+# TRENDING_DOWN: adx >= adx_trend_min (25.0) AND minus_di > plus_di AND ema_slope < -ema_slope_trend_threshold (0.0005).
+# bb_width_pct must NOT exceed bb_width_high_pct (0.80) — otherwise HIGH_VOLATILITY fires first.
+adx,plus_di,minus_di,bb_width_pct,realized_vol,ema_slope,is_warmed_up
+35.0,10.0,35.0,0.50,0.012,-0.002,True

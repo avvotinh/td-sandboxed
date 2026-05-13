@@ -122,6 +122,32 @@ class TestBacktestJobConfig:
         assert job2.prop_firm is not None
         assert job2.prop_firm.account_id == "a"
 
+    def test_prop_firm_spec_compliance_defaults(self) -> None:
+        # Pre-12.4 jobs that don't set the new fields keep the safe
+        # defaults (UTC reset, no consistency rule, equity_peak DD).
+        spec = PropFirmSpec(preset_path=Path("preset.yaml"), account_id="a")
+        assert spec.session_timezone == "UTC"
+        assert spec.consistency_block_at is None
+        assert spec.max_drawdown_method == "equity_peak"
+
+    def test_prop_firm_spec_rejects_invalid_dd_method(self) -> None:
+        with pytest.raises((ValueError, ValidationError)) as exc:
+            PropFirmSpec(
+                preset_path=Path("preset.yaml"),
+                account_id="a",
+                max_drawdown_method="weird",
+            )
+        assert "max_drawdown_method" in str(exc.value)
+
+    def test_prop_firm_spec_rejects_invalid_consistency(self) -> None:
+        with pytest.raises((ValueError, ValidationError)) as exc:
+            PropFirmSpec(
+                preset_path=Path("preset.yaml"),
+                account_id="a",
+                consistency_block_at=150.0,
+            )
+        assert "consistency_block_at" in str(exc.value)
+
     def test_window_override_narrows_date_range(self) -> None:
         start = datetime(2024, 1, 5, tzinfo=UTC)
         end = datetime(2024, 1, 20, tzinfo=UTC)

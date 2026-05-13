@@ -180,6 +180,122 @@ class TestLoadSuccess:
 
 
 # ---------------------------------------------------------------------------
+# Story 13.8 — Phase 1 strategy_overrides per-firm wiring
+# ---------------------------------------------------------------------------
+
+
+_STRATEGY_OVERRIDES_YAML = dedent(
+    """
+    firm_id: with_overrides
+    name: "WithOverrides"
+    version: "2026.5"
+    session:
+      timezone: "UTC"
+      reset_time: "00:00"
+    products:
+      challenge:
+        product_id: challenge
+        name: "Challenge"
+        rules:
+          - type: daily_loss_limit
+            threshold_percent: 5.0
+            timezone: "UTC"
+        phases:
+          - phase_id: evaluation
+            name: Evaluation
+    strategies:
+      supertrend:
+        scale_out_enabled: true
+        scale_out_r_trigger: 1.0
+        scale_out_close_fraction: 0.5
+        breakeven_at_r: 1.0
+        trailing_enabled: true
+        trailing_method: supertrend
+        trailing_atr_period: 7
+        trailing_atr_multiplier: 2.1
+        safety_tp_atr_mult: 6.0
+      donchian_breakout:
+        scale_out_enabled: false
+    """
+).strip()
+
+
+class TestStrategyOverrides:
+    """Story 13.8 — strategies block on firm YAML loads into FirmProfile."""
+
+    def test_default_empty_when_strategies_absent(
+        self, firms_dir: Path
+    ) -> None:
+        # The fixture FTMO_YAML doesn't declare a strategies block — the
+        # profile must still load and expose strategy_overrides as an
+        # empty mapping (legacy ftmo.yaml callers must keep working).
+        registry = FirmRegistry(firms_dir)
+        registry.load()
+        ftmo = registry.get("ftmo")
+        assert dict(ftmo.strategy_overrides) == {}
+
+    def test_strategies_block_loaded(self, tmp_path: Path) -> None:
+        d = tmp_path / "firms"
+        d.mkdir()
+        (d / "with_overrides.yaml").write_text(_STRATEGY_OVERRIDES_YAML)
+
+        registry = FirmRegistry(d)
+        registry.load()
+        firm = registry.get("with_overrides")
+
+        assert "supertrend" in firm.strategy_overrides
+        assert "donchian_breakout" in firm.strategy_overrides
+
+        st_overrides = firm.strategy_overrides["supertrend"]
+        assert st_overrides["scale_out_enabled"] is True
+        assert st_overrides["scale_out_r_trigger"] == 1.0
+        assert st_overrides["trailing_atr_multiplier"] == 2.1
+        assert st_overrides["safety_tp_atr_mult"] == 6.0
+
+        dc_overrides = firm.strategy_overrides["donchian_breakout"]
+        assert dc_overrides["scale_out_enabled"] is False
+
+    def test_strategy_overrides_immutable(self, tmp_path: Path) -> None:
+        # Profile-side overrides must be read-only — a caller can't
+        # mutate the registry's view by mutating the dict reference.
+        d = tmp_path / "firms"
+        d.mkdir()
+        (d / "with_overrides.yaml").write_text(_STRATEGY_OVERRIDES_YAML)
+
+        registry = FirmRegistry(d)
+        registry.load()
+        firm = registry.get("with_overrides")
+
+        with pytest.raises(TypeError):
+            firm.strategy_overrides["new_strategy"] = {}  # type: ignore[index]
+        with pytest.raises(TypeError):
+            firm.strategy_overrides["supertrend"]["scale_out_enabled"] = False  # type: ignore[index]
+
+    def test_real_ftmo_yaml_strategies_block_loads(self) -> None:
+        # Smoke: the real configs/firms/ftmo.yaml carries a strategies
+        # block (supertrend / donchian_breakout / ma_crossover, all
+        # default-OFF). Verify the registry parses it without crashing
+        # and the entries are present with expected default values.
+        # __file__ → services/trading-engine/tests/unit/test_firm_registry.py
+        # parents[2] = services/trading-engine/, parents[4] = repo root.
+        repo_root = Path(__file__).resolve().parents[4]
+        firms_dir_real = repo_root / "configs" / "firms"
+        registry = FirmRegistry(firms_dir_real)
+        registry.load()
+        ftmo = registry.get("ftmo")
+
+        for strategy_id in ("supertrend", "donchian_breakout", "ma_crossover"):
+            assert strategy_id in ftmo.strategy_overrides, (
+                f"Phase 1 entry missing for {strategy_id}"
+            )
+            overrides = ftmo.strategy_overrides[strategy_id]
+            # Default-OFF safety: never ship the YAML with the feature
+            # flipped on before story 13.9 backtest validation passes.
+            assert overrides["scale_out_enabled"] is False
+            assert overrides["trailing_enabled"] is False
+
+
+# ---------------------------------------------------------------------------
 # Error paths
 # ---------------------------------------------------------------------------
 

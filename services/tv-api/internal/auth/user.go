@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -61,9 +64,14 @@ func GetUser(credentials *Credentials) (*User, error) {
 		return nil, fmt.Errorf("invalid credentials: %w", err)
 	}
 
-	// Create HTTP client
+	jar, err := buildAuthCookieJar(credentials)
+	if err != nil {
+		return nil, fmt.Errorf("auth.GetUser: %w", err)
+	}
 	client := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout:       30 * time.Second,
+		Jar:           jar,
+		CheckRedirect: checkRedirectStaysOnTradingView,
 	}
 
 	// Create request
@@ -72,8 +80,6 @@ func GetUser(credentials *Credentials) (*User, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Add cookie header
-	req.Header.Set("Cookie", credentials.GenAuthCookies())
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; TradingView-Go-API/1.0)")
 
 	// Execute request
@@ -113,6 +119,40 @@ func GetUser(credentials *Credentials) (*User, error) {
 	}
 
 	return user, nil
+}
+
+// buildAuthCookieJar returns a jar with sessionid + sessionid_sign scoped
+// to ``tradingview.com`` so they survive geo-redirects (e.g. www →
+// vn.tradingview.com). Browsers set the cookies on the .tradingview.com
+// effective domain after login; mirror that here so a Go-side request
+// behaves the same as a browser session.
+func buildAuthCookieJar(credentials *Credentials) (http.CookieJar, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
+	}
+	tvURL, err := url.Parse(TradingViewURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse tradingview URL: %w", err)
+	}
+	jar.SetCookies(tvURL, []*http.Cookie{
+		{Name: "sessionid", Value: credentials.SessionID, Domain: "tradingview.com", Path: "/", Secure: true},
+		{Name: "sessionid_sign", Value: credentials.SessionSign, Domain: "tradingview.com", Path: "/", Secure: true},
+	})
+	return jar, nil
+}
+
+// checkRedirectStaysOnTradingView is the redirect policy used by the auth
+// client. It blocks any redirect whose target host isn't
+// ``tradingview.com`` or one of its subdomains, so a misconfigured or
+// compromised redirect chain cannot pull the auth request into an
+// unrelated host.
+func checkRedirectStaysOnTradingView(req *http.Request, _ []*http.Request) error {
+	host := req.URL.Hostname()
+	if host != "tradingview.com" && !strings.HasSuffix(host, ".tradingview.com") {
+		return fmt.Errorf("auth: refusing redirect to non-tradingview host %q", host)
+	}
+	return nil
 }
 
 // extractAuthToken extracts the auth_token from HTML content.

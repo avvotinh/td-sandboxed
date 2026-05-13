@@ -1,0 +1,30 @@
+# Story 13.10 — Donchian scale-out on M5 (50/50 + Supertrend ATR(7)x2.1 trail).
+strategy: donchian_breakout
+instrument_symbol: XAUUSD
+bar_type_suffix: 5-MINUTE-LAST-EXTERNAL
+venue:
+  name: SIM
+  starting_balance: "100000"
+  currency: USD
+  commission_per_lot_usd: "0"
+  oms_type: HEDGING
+strategy_params:
+  channel_period: 20
+  atr_period: 14
+  sl_atr_mult: "2.0"
+  tp_atr_mult: "6.0"  # raised — TP becomes anti-runaway cap.
+  risk_percent: "0.5"
+  pip_size: "0.01"
+  pip_value_per_lot: "1.0"
+  scale_out_enabled: true
+  scale_out_r_trigger: "1.0"
+  scale_out_close_fraction: "0.5"
+  breakeven_at_r: "1.0"
+  trailing_enabled: true
+  trailing_method: supertrend
+  trailing_atr_period: 7
+  trailing_atr_multiplier: "2.1"
+  safety_tp_atr_mult: "6.0"
+data:
+  kind: parquet
+  path: /home/hopdev/Dev/Sandboxed/data/historical/XAUUSD/M5/in_sample.parquet

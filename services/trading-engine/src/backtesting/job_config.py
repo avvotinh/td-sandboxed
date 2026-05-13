@@ -39,6 +39,14 @@ _SUPPORTED_SYMBOLS: frozenset[str] = frozenset(
         "USD/JPY",
         "USD/CAD",
         "AUD/USD",
+        # No-slash variants for symbols produced by the tv-cli fetcher
+        # (filesystem paths can't carry `/`). Same Nautilus instrument
+        # — default_fx_ccy accepts either format.
+        "EURUSD",
+        "GBPUSD",
+        "USDJPY",
+        "USDCAD",
+        "AUDUSD",
         "XAUUSD",
     }
 )
@@ -123,19 +131,45 @@ class VenueSpec(_Frozen):
     compatibility; firm-bound jobs typically derive this from the
     firm's :class:`CommissionProfile` via
     ``src.backtesting.commission.resolve_commission_profile``.
+
+    ``oms_type`` (Epic 13 13.9) controls Nautilus order-management
+    semantics. ``"NETTING"`` (default) matches the historical Epic 8
+    behaviour where opposite-side fills net into one running position —
+    convenient for net-PnL questions but obscures discrete trade
+    boundaries for strategies that flip frequently (Supertrend on M5
+    XAUUSD: 7k+ fills collapse into 1 closed position). ``"HEDGING"``
+    preserves each entry-to-exit cycle as its own position so trade-
+    by-trade R-multiple analysis is meaningful. The A/B validation
+    harness sets ``"HEDGING"`` explicitly.
     """
 
     name: str = "SIM"
     starting_balance: Decimal = Field(..., gt=0)
     currency: str = "USD"
     commission_per_lot_usd: Decimal = Field(default=Decimal("0"), ge=0)
+    oms_type: Literal["NETTING", "HEDGING"] = "NETTING"
 
 
 class PropFirmSpec(_Frozen):
-    """Optional prop-firm compliance wiring."""
+    """Optional prop-firm compliance wiring.
+
+    ``session_timezone`` and ``consistency_block_at`` are Epic 12 12.4
+    additions. ``session_timezone`` flows into both the
+    :class:`DailyLossLimitRule` reset (Epic 9.5) and the
+    :class:`PropFirmComplianceActor`'s daily-session boundary so dedup
+    keys match the configured trading day. ``consistency_block_at``
+    enables Epic 9.7 :class:`ConsistencyRule` when set; ``None`` keeps
+    backward compatibility with pre-12.4 jobs (rule omitted).
+    """
 
     preset_path: Path
     account_id: str
+    session_timezone: str = "UTC"
+    consistency_block_at: float | None = None
+    # FTMO Challenge requires ``"balance_based"`` (Epic 9.6 — DD from
+    # static initial balance, not running peak). Default
+    # ``"equity_peak"`` is the conservative no-op for non-FTMO callers.
+    max_drawdown_method: str = "equity_peak"
 
     @field_validator("preset_path")
     @classmethod
@@ -143,6 +177,25 @@ class PropFirmSpec(_Frozen):
         if ".." in v.parts:
             raise ValueError(
                 f"Path traversal via '..' not allowed in PropFirmSpec.preset_path: {v}"
+            )
+        return v
+
+    @field_validator("consistency_block_at")
+    @classmethod
+    def _check_consistency_block(cls, v: float | None) -> float | None:
+        if v is not None and not 0 < v <= 100:
+            raise ValueError(
+                f"consistency_block_at must be in (0, 100], got {v}"
+            )
+        return v
+
+    @field_validator("max_drawdown_method")
+    @classmethod
+    def _check_dd_method(cls, v: str) -> str:
+        valid = {"equity_peak", "balance_based"}
+        if v not in valid:
+            raise ValueError(
+                f"max_drawdown_method must be one of {sorted(valid)}, got {v!r}"
             )
         return v
 

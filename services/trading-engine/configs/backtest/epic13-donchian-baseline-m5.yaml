@@ -1,0 +1,23 @@
+# Story 13.10 — Donchian baseline on M5 (no scale-out, no trail).
+strategy: donchian_breakout
+instrument_symbol: XAUUSD
+bar_type_suffix: 5-MINUTE-LAST-EXTERNAL
+venue:
+  name: SIM
+  starting_balance: "100000"
+  currency: USD
+  commission_per_lot_usd: "0"
+  oms_type: HEDGING
+strategy_params:
+  channel_period: 20
+  atr_period: 14
+  sl_atr_mult: "2.0"
+  tp_atr_mult: "4.0"
+  risk_percent: "0.5"
+  pip_size: "0.01"
+  pip_value_per_lot: "1.0"
+  scale_out_enabled: false
+  trailing_enabled: false
+data:
+  kind: parquet
+  path: /home/hopdev/Dev/Sandboxed/data/historical/XAUUSD/M5/in_sample.parquet

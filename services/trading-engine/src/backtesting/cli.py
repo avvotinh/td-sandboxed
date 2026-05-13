@@ -27,6 +27,11 @@ from src.backtesting._cli_utils import (
     result_to_json_dict,
     write_json,
 )
+from src.backtesting.ab_compare import (
+    ABComparisonResult,
+    compare_ab,
+    winner_distribution_to_dict,
+)
 from src.backtesting.job_config import BacktestJobConfig
 from src.backtesting.parameter_sweep import (
     EarlyStopConfig,
@@ -382,4 +387,105 @@ def _walkforward_to_json(wf_result: WalkForwardResult) -> dict[str, Any]:
             }
             for fr in wf_result.folds
         ],
+    }
+
+
+# --- `backtest ab` -----------------------------------------------------
+
+
+@backtest_app.command("ab")
+def ab_cmd(
+    baseline: Annotated[
+        Path, typer.Option("--baseline", "-b", help="Baseline job YAML")
+    ],
+    variant: Annotated[
+        Path, typer.Option("--variant", "-v", help="Variant job YAML")
+    ],
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out",
+            help="Write JSON comparison to this file (always implies machine-readable output)",
+        ),
+    ] = None,
+) -> None:
+    """Run two backtests and emit a side-by-side comparison.
+
+    Both jobs are expected to share dataset + venue; only strategy
+    params (e.g. ``scale_out_enabled``) should differ. The summary
+    table shows baseline vs variant on the headline metrics plus the
+    winner-R-multiple distribution that Epic 13 hinges on (§2.6 of the
+    quant review).
+    """
+    base_cfg = _load_job_or_exit(baseline)
+    var_cfg = _load_job_or_exit(variant)
+
+    try:
+        base_result = run_backtest(base_cfg)
+    except Exception as exc:
+        typer.echo(f"Baseline backtest failed: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        var_result = run_backtest(var_cfg)
+    except Exception as exc:
+        typer.echo(f"Variant backtest failed: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    comparison = compare_ab(baseline=base_result, variant=var_result)
+
+    if out is not None:
+        write_json(out, _ab_to_json(comparison))
+        typer.echo(f"Comparison written to {out}")
+
+    _print_ab_summary(comparison)
+
+
+def _print_ab_summary(comp: ABComparisonResult) -> None:
+    typer.echo("A/B Comparison")
+    typer.echo("=" * 14)
+    typer.echo(f"Baseline:  {comp.baseline.strategy_name}  ({comp.baseline.start} → {comp.baseline.end})")
+    typer.echo(f"Variant:   {comp.variant.strategy_name}  ({comp.variant.start} → {comp.variant.end})")
+    typer.echo("")
+
+    rows: list[list[Any]] = []
+    for metric, payload in sorted(comp.metric_deltas.items()):
+        rows.append(
+            [
+                metric,
+                f"{payload['baseline']:.4f}",
+                f"{payload['variant']:.4f}",
+                f"{payload['delta']:+.4f}",
+                f"{payload['pct_change']:+.2f}%" if payload["baseline"] != 0.0 else "n/a",
+            ]
+        )
+    typer.echo(
+        tabulate(
+            rows,
+            headers=["Metric", "Baseline", "Variant", "Δ", "Δ%"],
+            tablefmt="simple",
+        )
+    )
+    typer.echo("")
+    typer.echo("Winner-R distribution (per-side, R = pnl / |avg_loss|)")
+    win_rows = [
+        ["count", comp.baseline_winners.count, comp.variant_winners.count],
+        ["avg_loss_abs", f"{comp.baseline_winners.avg_loss_abs:.4f}", f"{comp.variant_winners.avg_loss_abs:.4f}"],
+        ["p50", f"{comp.baseline_winners.p50:.4f}", f"{comp.variant_winners.p50:.4f}"],
+        ["p75", f"{comp.baseline_winners.p75:.4f}", f"{comp.variant_winners.p75:.4f}"],
+        ["p90", f"{comp.baseline_winners.p90:.4f}", f"{comp.variant_winners.p90:.4f}"],
+        ["p95", f"{comp.baseline_winners.p95:.4f}", f"{comp.variant_winners.p95:.4f}"],
+        ["p99", f"{comp.baseline_winners.p99:.4f}", f"{comp.variant_winners.p99:.4f}"],
+        ["largest_winner_r", f"{comp.baseline_winners.largest_winner_r:.4f}", f"{comp.variant_winners.largest_winner_r:.4f}"],
+    ]
+    typer.echo(tabulate(win_rows, headers=["Stat", "Baseline", "Variant"], tablefmt="simple"))
+
+
+def _ab_to_json(comp: ABComparisonResult) -> dict[str, Any]:
+    return {
+        "baseline": result_to_json_dict(comp.baseline),
+        "variant": result_to_json_dict(comp.variant),
+        "baseline_winners": winner_distribution_to_dict(comp.baseline_winners),
+        "variant_winners": winner_distribution_to_dict(comp.variant_winners),
+        "metric_deltas": comp.metric_deltas,
     }

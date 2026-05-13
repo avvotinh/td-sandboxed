@@ -15,6 +15,7 @@ Designed for intraday FTMO strategies — London 08:00-16:30 or New York
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, time
 from decimal import Decimal
 
@@ -26,6 +27,7 @@ from src.strategies.base_strategy import BaseStrategy
 from src.strategies.bracket_strategy import (
     BracketStrategyConfig,
     BracketStrategyMixin,
+    is_atr_unsafe,
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
@@ -35,6 +37,8 @@ from src.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
     RiskBasedSizerConfig,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ORBConfig(BracketStrategyConfig, frozen=True, kw_only=True):
@@ -204,5 +208,16 @@ class ORBStrategy(
         if signal == SignalType.CLOSE:
             self._close_position()
             return
-        atr_value = Decimal(str(self._atr.value))
+        # Mirror the supertrend / bollinger / rsi guard: a flat-bar
+        # (H=L=C) collapses ATR to zero, which ATRStopMixin rejects with
+        # ValueError — letting that propagate through the bar callback
+        # would halt the engine. Skip the bar instead.
+        atr_raw = self._atr.value
+        if is_atr_unsafe(atr_raw):
+            logger.warning(
+                "ORB skipping signal: ATR=%s is non-positive or non-finite",
+                atr_raw,
+            )
+            return
+        atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)

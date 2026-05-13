@@ -178,6 +178,15 @@ class _FirmSchema(_StrictModel):
     report_template: _ReportTemplateSchema | None = None
     notification_template: dict[str, Any] = Field(default_factory=dict)
     regime_classifier: _RegimeConfigSchema | None = None
+    # Epic 13 story 13.8 — per-strategy parameter overrides keyed by
+    # strategy registry id. Stored as raw dict[str, Any] because the
+    # consumer (BacktestJobConfig assembly) merges these into the
+    # strategy's own typed config which runs its own invariants.
+    # Pydantic strict mode would reject extra fields the firm wants to
+    # set (e.g., scale_out_enabled, trailing_atr_multiplier) — so we
+    # accept dict[str, Any] here and let strategy __post_init__ catch
+    # bad values at instantiation time.
+    strategies: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +344,7 @@ class FirmRegistry:
             report_template=_report(schema.report_template),
             notification_template=schema.notification_template,
             regime_classifier=_regime_config(schema.regime_classifier),
+            strategy_overrides=schema.strategies,
         )
 
     def _schema_to_product(self, schema: _ProductSchema) -> AccountProduct:

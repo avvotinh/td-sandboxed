@@ -22,6 +22,7 @@ from nautilus_trader.model.data import Bar
 from src.indicators.supertrend import Supertrend
 from src.orders.signal import SignalType
 from src.strategies.base_strategy import BaseStrategy
+from src.strategies.bracket_scale_out import BracketScaleOutMixin
 from src.strategies.bracket_strategy import (
     BracketStrategyConfig,
     BracketStrategyMixin,
@@ -49,16 +50,19 @@ class SupertrendConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     multiplier: float = 3.0
 
     def __post_init__(self) -> None:
+        """Validate config — delegate ATR + Phase 1 invariants to parent.
+
+        ``super().__post_init__()`` enforces the full
+        :class:`BracketStrategyConfig` invariant set (R:R > 1,
+        safety_tp_atr_mult > 0, scale-out / trail cross-field guards).
+        The Supertrend-specific checks below cover the indicator
+        params that the parent doesn't know about.
+        """
+        super().__post_init__()
         if self.period <= 0:
             raise ValueError(f"period must be positive, got {self.period}")
         if self.multiplier <= 0:
             raise ValueError(f"multiplier must be positive, got {self.multiplier}")
-        if self.atr_period <= 0:
-            raise ValueError(f"atr_period must be positive, got {self.atr_period}")
-        if self.sl_atr_mult <= 0:
-            raise ValueError(f"sl_atr_mult must be positive, got {self.sl_atr_mult}")
-        if self.tp_atr_mult <= 0:
-            raise ValueError(f"tp_atr_mult must be positive, got {self.tp_atr_mult}")
 
 
 @register_strategy(
@@ -66,9 +70,22 @@ class SupertrendConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     regimes=[RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN],
 )
 class SupertrendStrategy(
-    BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin
+    BracketScaleOutMixin,
+    BaseStrategy,
+    ATRStopMixin,
+    RiskSizedMixin,
+    BracketStrategyMixin,
 ):
-    """Trend-following strategy driven by the Supertrend indicator."""
+    """Trend-following strategy driven by the Supertrend indicator.
+
+    Phase 1 scale-out + trail tactics (Epic 13) compose via
+    ``BracketScaleOutMixin``. Default-off — strategies built from a
+    config with ``scale_out_enabled=False`` keep the legacy single-fill
+    + hard-TP behaviour. When enabled, ``_dispatch_scale_out_event``
+    forwards Nautilus position-lifecycle events into the mixin's state
+    machine, and ``_evaluate_scale_out_for_bar`` drives the per-bar
+    transitions off the latest close.
+    """
 
     def __init__(self, config: SupertrendConfig) -> None:
         super().__init__(config)
@@ -79,6 +96,18 @@ class SupertrendStrategy(
         from nautilus_trader.indicators.volatility import AverageTrueRange
 
         self._atr: AverageTrueRange = AverageTrueRange(config.atr_period)
+        # Phase 1 trail indicator — separate Supertrend instance with
+        # the trailing_atr_period / trailing_atr_multiplier params so
+        # the trail line can be tuned independently of the signal line.
+        # None when trailing is off so we skip the indicator overhead.
+        self._supertrend_trail: Supertrend | None = (
+            Supertrend(
+                period=config.trailing_atr_period,
+                multiplier=float(config.trailing_atr_multiplier),
+            )
+            if config.trailing_enabled
+            else None
+        )
         self.set_position_sizer(
             RiskBasedPositionSizer(
                 RiskBasedSizerConfig(risk_percent=config.risk_percent)
@@ -90,6 +119,10 @@ class SupertrendStrategy(
         super().on_start()
         self.register_indicator_for_bars(self.config.bar_type, self._supertrend)
         self.register_indicator_for_bars(self.config.bar_type, self._atr)
+        if self._supertrend_trail is not None:
+            self.register_indicator_for_bars(
+                self.config.bar_type, self._supertrend_trail
+            )
         self._log.info(
             f"Supertrend started period={self.config.period} mult={self.config.multiplier}"
         )
@@ -97,6 +130,8 @@ class SupertrendStrategy(
     def on_reset(self) -> None:
         self._supertrend.reset()
         self._atr.reset()
+        if self._supertrend_trail is not None:
+            self._supertrend_trail.reset()
         self._prev_trend = None
 
     def generate_signal(self, bar: Bar) -> SignalType:
@@ -151,3 +186,11 @@ class SupertrendStrategy(
 
         atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)
+
+    # Story 13.5: scale-out lifecycle wiring lived here per-strategy
+    # until Story 13.11 hit the rule of three. The five wiring methods
+    # (``on_event`` / ``_dispatch_scale_out_event`` / ``_try_init_scale_state``
+    # / ``on_bar`` / ``_evaluate_scale_out_for_bar``) now live on
+    # ``BracketScaleOutMixin`` — see ``bracket_scale_out.py``. The mixin
+    # is prepended in the MRO above so the methods are reachable
+    # unchanged; override here only if a strategy needs custom dispatch.
