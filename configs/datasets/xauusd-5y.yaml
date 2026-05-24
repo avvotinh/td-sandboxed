@@ -1,0 +1,42 @@
+# Epic 16 — XAUUSD 5-year multi-timeframe acquisition dataset.
+# Loaded by src.backtesting.dataset.spec.DatasetSpec.from_yaml; consumed
+# by DatasetPipeline → backtest validation (Epic 15) + meta-label / signal
+# -quality training (future epic).
+#
+# DEPTH IS A TARGET, NOT A GUARANTEE (epic-16-context.md Decision 2):
+# TradingView caps ~5500 bars/anchor and has a finite intraday history
+# floor. M5 will likely under-cover the 5y in_sample window (realistic
+# ~2-3y); H1/H4 reach 5y comfortably. Story 16.5 records the ACTUAL depth
+# achieved per timeframe; the in_sample window may be reconciled to that
+# depth in a single deliberate dataset_version bump after the fetch.
+#
+# Bumping dataset_version (or any window boundary) invalidates every
+# downstream comparison report. Do it deliberately.
+
+name: xauusd-5y
+description: >-
+  XAUUSD M5/M15/H1/H4 5-year acquisition dataset for Epic 15 backtest
+  validation and future ML training. Premium ReplayMode fetch.
+dataset_version: "1.0.0"
+
+symbol: XAUUSD
+timeframes:
+  - M5
+  - M15
+  - H1
+  - H4
+
+# Weekend gap ~49h (Fri 21:00 → Sun 22:00). 48h flags anything longer
+# (broker outage, holiday, server downtime, or an intraday history floor
+# that left a leading shortfall on the finer timeframes).
+max_gap_hours: 48.0
+
+windows:
+  - name: in_sample
+    kind: in_sample
+    start: 2021-01-01T00:00:00Z
+    end: 2026-01-01T00:00:00Z
+  - name: oos_reserve
+    kind: oos_reserve
+    start: 2026-01-01T00:00:00Z
+    end: 2026-05-01T00:00:00Z

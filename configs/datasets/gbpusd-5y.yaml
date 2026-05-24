@@ -1,0 +1,33 @@
+# Epic 16 — GBPUSD 5-year multi-timeframe acquisition dataset.
+# See configs/datasets/xauusd-5y.yaml header for the full rationale and
+# the DEPTH-IS-A-TARGET caveat (epic-16-context.md Decision 2): M5 will
+# likely under-cover the 5y window; story 16.5 records actual depth and
+# the in_sample window may be reconciled in a deliberate version bump.
+#
+# Bumping dataset_version (or any window boundary) invalidates every
+# downstream comparison report. Do it deliberately.
+
+name: gbpusd-5y
+description: >-
+  GBPUSD M5/M15/H1/H4 5-year acquisition dataset for Epic 15 backtest
+  validation and future ML training (sample-pooling partner for XAUUSD).
+dataset_version: "1.0.0"
+
+symbol: GBPUSD
+timeframes:
+  - M5
+  - M15
+  - H1
+  - H4
+
+max_gap_hours: 48.0
+
+windows:
+  - name: in_sample
+    kind: in_sample
+    start: 2021-01-01T00:00:00Z
+    end: 2026-01-01T00:00:00Z
+  - name: oos_reserve
+    kind: oos_reserve
+    start: 2026-01-01T00:00:00Z
+    end: 2026-05-01T00:00:00Z
