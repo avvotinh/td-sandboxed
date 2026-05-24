@@ -102,7 +102,7 @@ def _stitch_argv(
     chunks_dir: Path,
     out_parquet: Path,
     spec: DatasetSpec,
-    tv_tf: str,
+    tf_label: str,
     window: WindowSpec,
 ) -> list[str]:
     return [
@@ -114,17 +114,37 @@ def _stitch_argv(
         "--spec-name", spec.name,
         "--dataset-version", spec.dataset_version,
         "--symbol", spec.symbol,
-        # TODO(16.6): the manifest entry carries the tv value ("5","240"),
-        # but the DatasetSpec timeframe label is "M5"/"H4". Verify how
-        # baseline_harness._index_entries keys entries before materialize —
-        # a label-vs-tv mismatch would be a silent lookup miss.
-        "--timeframe", tv_tf,
+        # The manifest entry's timeframe MUST be the MetaTrader label
+        # ("M5"/"H4"), NOT the tv-cli minute value ("5"/"240"):
+        # baseline_harness keys entries by (window_name, label) and
+        # pipeline.timeframe_to_seconds only knows labels. The minute value
+        # is the fetch flag (build_fetch_argv) only. (Resolved TODO 16.6.)
+        "--timeframe", tf_label,
         "--window-name", window.name,
         "--window-kind", window.kind.value,
         "--start", _iso_z(window.start),
         "--end", _iso_z(window.end),
         "--max-gap-hours", str(spec.max_gap_hours),
     ]
+
+
+def _run_stitch(
+    *,
+    chunks_dir: Path,
+    out_parquet: Path,
+    spec: DatasetSpec,
+    tf_label: str,
+    window: WindowSpec,
+) -> None:
+    """Dedupe chunks + write the canonical shard parquet + manifest."""
+    subprocess.run(
+        _stitch_argv(
+            chunks_dir=chunks_dir, out_parquet=out_parquet,
+            spec=spec, tf_label=tf_label, window=window,
+        ),
+        cwd=_TRADING_ENGINE_DIR, check=True,
+    )
+    print(f"  stitched -> {out_parquet}")
 
 
 def _fetch_shard(
@@ -138,6 +158,7 @@ def _fetch_shard(
     fetch_timeout_s: int,
     response_timeout_ms: int,
     dry_run: bool,
+    stitch_only: bool = False,
 ) -> None:
     """Fetch + stitch one (timeframe, window) shard."""
     tv_tf = tv_timeframe(tf_label)
@@ -147,6 +168,19 @@ def _fetch_shard(
 
     print(f"\n=== {spec.symbol} {tf_label} {window.name} "
           f"[{_iso_z(window.start)} -> {_iso_z(window.end)}] ===")
+
+    if stitch_only:
+        # Re-stitch already-fetched chunks (no network) — e.g. to repair
+        # manifests written with a wrong timeframe label before the 16.6 fix.
+        if not chunks_dir.exists() or not any(chunks_dir.glob("*.parquet")):
+            raise RuntimeError(
+                f"--stitch-only: no chunks at {chunks_dir} — fetch first"
+            )
+        _run_stitch(
+            chunks_dir=chunks_dir, out_parquet=out_parquet,
+            spec=spec, tf_label=tf_label, window=window,
+        )
+        return
 
     anchor = window.end
     prev_min: datetime | None = None
@@ -169,7 +203,7 @@ def _fetch_shard(
             print("  [dry-run] fetch:", shlex.join(argv))
             print("  [dry-run] stitch:", shlex.join(_stitch_argv(
                 chunks_dir=chunks_dir, out_parquet=out_parquet,
-                spec=spec, tv_tf=tv_tf, window=window,
+                spec=spec, tf_label=tf_label, window=window,
             )))
             print("  [dry-run] (showing first anchor only; live run steps "
                   "backward until window start or history floor)")
@@ -223,12 +257,10 @@ def _fetch_shard(
         )
 
     # Delegate dedupe + canonical single-entry manifest to the canonical tool.
-    stitch = _stitch_argv(
+    _run_stitch(
         chunks_dir=chunks_dir, out_parquet=out_parquet,
-        spec=spec, tv_tf=tv_tf, window=window,
+        spec=spec, tf_label=tf_label, window=window,
     )
-    subprocess.run(stitch, cwd=_TRADING_ENGINE_DIR, check=True)
-    print(f"  stitched -> {out_parquet}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -254,6 +286,10 @@ def main(argv: list[str] | None = None) -> int:
                              "ReplayMode initial batch).")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print planned commands; no network/filesystem.")
+    parser.add_argument("--stitch-only", action="store_true",
+                        help="Skip fetching; re-stitch existing chunks into "
+                             "the canonical parquet + manifest (no network). "
+                             "Use to repair manifests after a stitch-arg fix.")
     args = parser.parse_args(argv)
 
     spec = DatasetSpec.from_yaml(args.spec)
@@ -265,8 +301,8 @@ def main(argv: list[str] | None = None) -> int:
     timeframes = [t for t in spec.timeframes if not tf_filter or t in tf_filter]
     windows = [w for w in spec.windows if not win_filter or w.name in win_filter]
 
-    cli = Path(args.cli)  # placeholder for dry-run
-    if not args.dry_run:
+    cli = Path(args.cli)  # placeholder; resolved only when actually fetching
+    if not args.dry_run and not args.stitch_only:
         cli = _resolve_cli(tv_api_dir, args.cli)
 
     print(f"campaign: {spec.symbol} v{spec.dataset_version} "
@@ -281,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
                 fetch_timeout_s=args.fetch_timeout_s,
                 response_timeout_ms=args.response_timeout_ms,
                 dry_run=args.dry_run,
+                stitch_only=args.stitch_only,
             )
     return 0
 

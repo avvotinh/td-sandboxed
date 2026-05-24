@@ -51,3 +51,18 @@ class TestFiveYearDatasetSpecs:
         spec = DatasetSpec.from_yaml(_DATASETS_DIR / filename)
         by_name = {w.name: w for w in spec.windows}
         assert by_name["oos_reserve"].start == by_name["in_sample"].end
+
+    def test_timeframes_use_the_shared_label_vocabulary(self, filename: str) -> None:
+        # Resolved-TODO(16.6) regression guard: the manifest entry timeframe
+        # (= spec label) is keyed on by baseline_harness AND fed to
+        # pipeline.timeframe_to_seconds. Every spec timeframe must be a valid
+        # MetaTrader label in BOTH vocabularies, else materialize/lookup
+        # silently misses. (The tv-cli minute value "5"/"240" is the fetch
+        # flag only and must never reach the manifest.)
+        from src.backtesting.dataset.baseline_harness import _TIMEFRAME_BAR_SUFFIX
+        from src.backtesting.dataset.pipeline import _TIMEFRAME_SECONDS
+
+        spec = DatasetSpec.from_yaml(_DATASETS_DIR / filename)
+        for tf in spec.timeframes:
+            assert tf in _TIMEFRAME_BAR_SUFFIX, f"{tf!r} not a baseline_harness label"
+            assert tf in _TIMEFRAME_SECONDS, f"{tf!r} not a pipeline label"
