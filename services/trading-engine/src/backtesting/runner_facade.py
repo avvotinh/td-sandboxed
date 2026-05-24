@@ -84,6 +84,8 @@ def _build_instrument(symbol: str) -> tuple[Instrument, BarType]:
     """
     if symbol == "XAUUSD":
         instrument = _build_xauusd_instrument()
+    elif symbol.endswith("JPY"):
+        instrument = _build_jpy_pair_instrument(symbol)
     elif symbol in {"EURUSD", "GBPUSD", "AUDUSD"}:
         instrument = _build_fx_pair_instrument(symbol)
     else:
@@ -133,6 +135,51 @@ def _build_fx_pair_instrument(symbol: str) -> Instrument:
         min_price=None,
         max_notional=Money(50_000_000.00, USD),
         min_notional=Money(1.00, USD),
+        margin_init=Decimal("0.03"),
+        margin_maint=Decimal("0.03"),
+        maker_fee=Decimal("0"),
+        taker_fee=Decimal("0"),
+        ts_event=0,
+        ts_init=0,
+    )
+
+
+def _build_jpy_pair_instrument(symbol: str) -> Instrument:
+    """JPY-quoted CurrencyPair (e.g. ``USDJPY``) with MT5-broker conventions.
+
+    JPY pairs quote to 3 decimals (e.g. ``156.123``) with a ``0.001``
+    increment and a pip of ``0.01`` — unlike the 5-dp USD-quote pairs from
+    :func:`_build_fx_pair_instrument`. Falling through to Nautilus's stock
+    ``default_fx_ccy`` would apply a non-zero 2 bps instrument fee and is
+    not guaranteed to carry the broker-faithful precision, so JPY pairs get
+    their own builder. Like the USD-quote FX pairs from
+    :func:`_build_fx_pair_instrument` it carries **zero** instrument fees —
+    commission comes from the venue ``commission_per_lot_usd`` fee model
+    instead. (XAUUSD, by contrast, keeps a small non-zero instrument fee.)
+
+    ``base_currency`` / ``quote_currency`` are derived from the ticker so
+    the builder also serves cross-JPY pairs (e.g. ``GBPJPY``) if the
+    whitelist grows. Notional bounds are denominated in the quote currency
+    (JPY) and set loose enough not to bind any realistic backtest.
+    """
+    venue = Venue("SIM")
+    quote = Currency.from_str(symbol[-3:])
+    return CurrencyPair(
+        instrument_id=InstrumentId(symbol=Symbol(symbol), venue=venue),
+        raw_symbol=Symbol(symbol),
+        base_currency=Currency.from_str(symbol[:3]),
+        quote_currency=quote,
+        price_precision=3,
+        size_precision=0,
+        price_increment=Price(Decimal("0.001"), 3),
+        size_increment=Quantity.from_int(1),
+        lot_size=Quantity.from_str("1000"),
+        max_quantity=Quantity.from_str("100000000"),
+        min_quantity=Quantity.from_str("1"),
+        max_price=None,
+        min_price=None,
+        max_notional=Money(5_000_000_000, quote),
+        min_notional=Money(100, quote),
         margin_init=Decimal("0.03"),
         margin_maint=Decimal("0.03"),
         maker_fee=Decimal("0"),

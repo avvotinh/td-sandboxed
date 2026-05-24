@@ -291,7 +291,7 @@ development_status:
   # EXECUTION ORDER: run BEFORE Epic 15 implementation (despite higher number). D0 is credential-free (start now); D1 blocks on operator SESSION_ID/SESSION_SIGN.
   epic-16: contexted
   # Phase D0 — Prerequisites (no credentials needed)
-  16-1-usdjpy-instrument-builder: backlog                  # S — _build_jpy_pair_instrument (precision=3, pip=0.001, fee=0) in runner_facade + tests; USDJPY currently falls to default_fx_ccy (2bps fee + wrong precision). Escape hatch: swap USDJPY→AUDUSD (builder exists) drops this story
+  16-1-usdjpy-instrument-builder: done                     # S — 2026-05-24 _build_jpy_pair_instrument (precision=3, increment=0.001, size unit-granular, fee=0; notional in JPY quote) + endswith("JPY") dispatch (handles USDJPY + USD/JPY) in runner_facade; new tests/unit/test_instrument_builders.py (10 tests). python-reviewer approved (2 MEDIUM fixes applied: docstring XAUUSD-fee accuracy, slash-form + size-precision tests). FX-conversion (JPY PnL→USD acct) deferred to 16.4/16.5 smoke
   16-2-dataset-specs-5y: backlog                           # S — configs/datasets/{xauusd,eurusd,gbpusd,usdjpy}-5y.yaml (M5/M15/H1/H4 × in_sample 5y + oos_reserve 4mo); extend xauusd-validation.yaml; tz-aware windows
   16-3-fetch-campaign-driver: backlog                      # M — scripts/fetch_campaign.py: matrix walk (symbol×tf) + stepped -to anchors + chunk write + go_manifest_loader merge + dedupe (tf,ts) + verify; idempotent; replaces manual per-shard loop
   # Phase D1 — Fetch campaign (needs credentials + tv-cli build)
