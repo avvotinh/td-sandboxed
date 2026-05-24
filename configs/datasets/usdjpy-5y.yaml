@@ -23,7 +23,7 @@ timeframes:
   - H1
   - H4
 
-max_gap_hours: 48.0
+max_gap_hours: 72.0  # ignores ~50h FX weekends; flags genuine outages (16.4 smoke finding)
 
 windows:
   - name: in_sample

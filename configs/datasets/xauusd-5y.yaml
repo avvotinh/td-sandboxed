@@ -26,10 +26,12 @@ timeframes:
   - H1
   - H4
 
-# Weekend gap ~49h (Fri 21:00 → Sun 22:00). 48h flags anything longer
-# (broker outage, holiday, server downtime, or an intraday history floor
-# that left a leading shortfall on the finer timeframes).
-max_gap_hours: 48.0
+# Weekend/holiday closure runs ~51-52h on OANDA H4 (empirical, 16.4 smoke
+# 2026-05-24: 260 weekend gaps, median 52h, max 76h on the Christmas/NY
+# stretch). A 48h threshold flagged every normal weekend as noise; 72h
+# ignores weekends while still surfacing genuine extended outages and the
+# leading shortfall left when a finer timeframe hits the history floor.
+max_gap_hours: 72.0
 
 windows:
   - name: in_sample
