@@ -259,6 +259,41 @@ development_status:
   13-11-ma-crossover-scale-out-wiring: done                # L — 2026-05-12 Migrated MACrossoverConfig BaseStrategyConfig→BracketStrategyConfig + refactored strategy to ATR bracket flow + scale-out mixin. CORRECTIVE: pre-13.11 MA crossover Sharpe 0.137 (Phase 12.A apparent winner) was no-SL artifact; post-refactor Sharpe drops to -0.097 (M15) / -0.017 (M5). Scale-out helps M5 (EV sign-flips -0.056→+0.045) but hurts M15. +17 unit + 1 integration test. Strategy gate moved ma_crossover to bracket bucket. Report: docs/sprint-artifacts/epic13-ma-crossover-scaleout-results.md
   epic-13-retrospective: completed                         # 2026-05-12 docs/sprint-artifacts/epic-13-retrospective.md — 8 action items (3 process changes, 5 backlog tickets). Headline: quant review §2.6 uniform-uplift hypothesis was wrong (tactic is SIGNAL-CONDITIONAL); Phase 12.A apparent winner ma_crossover M15 +0.137 was no-SL artifact; best post-refactor Sharpe across 16 experiments is donchian M5 baseline +0.065. Phase 12.B / 12.7b sweep stays gated until a signal-quality epic ships.
 
+  # Epic 14: MT5 EA + Live Execution Path (21 stories — 4 phases A/B/C/D)
+  # Context: docs/epic-14-context.md  Source outline: docs/research/epic-14-mt5-ea-outline.md
+  # Skills: mql5-zmq-bridge + mql5-patterns. Reviewer: mql5-reviewer. Rules: .claude/rules/mql5/*
+  # Goal: complete the live execution path — write the MT5 EA (MQL5), extend bridge protocol for
+  #   modify/cancel/close, implement engine modify/cancel + reconciliation. Then Sandboxed can trade
+  #   live on an FTMO MT5 account. Independent track; can run parallel to Epic 15/16.
+  # BLOCKER before deploy: HMAC canonical field-order ADR + Python golden vector (14.4).
+  epic-14: contexted
+  # Phase A — MT5 EA foundation (MQL5)
+  14-1-mt5-ea-scaffold: backlog                            # S — Sandboxed_EA.mq5, libzmq Win64 binding (dingmaotu/mql-zmq), config, build setup
+  14-2-ea-heartbeat-client: backlog                        # M — periodic heartbeat publish matching bridge Heartbeat; connectivity test
+  14-3-ea-json-parser-dispatch: backlog                    # S — parse MessageType discriminator → handler; Error on malformed
+  14-4-ea-hmac-verify: backlog                             # M — HMAC-SHA256 RFC2104 on every command; reject unsigned; matches Python golden vector (canonical field order ADR — BLOCKS deploy)
+  14-5-ea-ordersend-market: backlog                        # M — TRADE_ACTION_DEAL BUY/SELL + SL/TP; publish OrderResult (status/fill/slippage/error)
+  14-6-ea-position-snapshot: backlog                       # M — periodic PositionSnapshot (open positions + pending orders) for engine reconciliation
+  # Phase B — Bridge protocol extension (Rust)
+  14-7-bridge-protocol-modify-cancel-close: backlog        # M — protocol.rs MessageType + models structs (modify/cancel/close/results/snapshot) + proptest roundtrip
+  14-8-modify-handler: backlog                             # M — modify_handler.rs: queue for EA delivery, correlation-ID pending acks, timeout
+  14-9-cancel-close-handlers: backlog                      # M — cancel_handler.rs + close_handler.rs
+  14-10-snapshot-handler: backlog                          # M — snapshot_handler.rs: receive PositionSnapshot, expose REQ/REP for engine query
+  14-11-zmq-server-routing: backlog                        # S — route new message types to handlers; integration tests
+  # Phase C — Engine integration (Python)
+  14-12-zmq-models-pydantic: backlog                       # S — ModifyOrder/CancelOrder/ClosePosition req+result models; schema = Rust serde
+  14-13-zmq-adapter-send-wait: backlog                     # M — send_modify/cancel/close_and_wait (mirror send_order_and_wait); pending futures + timeout
+  14-14-validated-adapter-rule-audit: backlog              # M — ValidatedZmqAdapter 3 new entry points: rule check + audit_writer before mutation (FTMO)
+  14-15-order-translator-dispatch: backlog                 # M — dispatch_modify/cancel/close: Nautilus cmd → bridge cmd; emit Nautilus events
+  14-16-execution-client-modify-cancel: backlog            # M — implement modify/cancel (replace NotImplementedError zmq_execution_client.py:234/239/244/249)
+  14-17-execution-client-reconciliation: backlog           # M — real generate_*_reports via snapshot endpoint (replace [] stubs); kill phantom-flat warning (CRITICAL gap)
+  # Phase D — End-to-end + runbook
+  14-18-e2e-mt5-demo: backlog                              # XL — full lifecycle on MT5 demo: submit→fill→modify SL→close; latency/slippage; caveats
+  14-19-operator-runbook: backlog                          # M — docs/runbooks/mt5-ea-deployment.md (install, attach, DLL, FTMO integration); operator-validated
+  14-20-curve-auth-nonloopback: backlog                    # M — CURVE keypairs + config + enable bind beyond 127.0.0.1 (rust/security.md)
+  14-21-sprint-artifacts-retro: backlog                    # S — sprint-status + validation report + architecture.md live-path update
+  epic-14-retrospective: optional
+
   # Epic 15: Regime Backtest-Live Parity (RegimeActor) (13 stories — 4 phases P0–P3)
   # Source design: docs/design/regime-actor-design.md (v1.1, security + database reviewed)
   # Context: docs/epic-15-context.md
