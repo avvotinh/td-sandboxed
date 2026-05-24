@@ -301,8 +301,8 @@ development_status:
   # NUMBERING: Epic 14 stays reserved for the mt5-bridge EA / ZMQ work (CLAUDE.md, mql5-zmq-bridge skill, story map 14.1-14.6/14.19/14.20). This regime-parity epic is 15; independent track, can run in parallel.
   epic-15: contexted
   # Phase P0 — Extraction + state store (no wiring, no runtime change)
-  15-1-lift-build-extractor: backlog                       # S — move _build_extractor (factory.py:54-73) → src/regime/builders.py + re-export; factory still works (avoids actor↔regime_routing cycle)
-  15-2-regime-state-store: backlog                         # S — RegimeStateStore + frozen RegimeSnapshot (src/regime/state_store.py); per-bar_type keyed; publish replaces (immutable); unknown bar_type → None (R-H precondition); optional features field (meta-label forward-compat)
+  15-1-lift-build-extractor: done                          # S — 2026-05-24 src/regime/builders.py build_extractor lifted from factory.py; factory imports it (indicator imports removed); test_builders.py (3 tests: returns FeatureExtractor+bar_type/warmup, wires 4 indicators, per-bar_type isolation); regime router/factory regression green
+  15-2-regime-state-store: done                            # S — 2026-05-24 src/regime/state_store.py RegimeStateStore + frozen RegimeSnapshot (carries features for meta-label seam); per-bar_type keyed, publish replaces (immutable), unknown→None (R-H); test_state_store.py (5 tests: round-trip, unknown→None, isolation, replace-not-mutate, frozen)
   15-3-audit-logs-retention-180: backlog                   # S — Alembic revision: audit_logs retention 90→180 (R-F); remove+add_retention_policy, up+down, NO DROP TABLE; database-reviewer + security-reviewer gate
   # Phase P1 — Actor + factory + attach + gate (default-off = byte-identical)
   15-4-actor-ordering-verification: backlog                # S — ⚠️ DEDICATED spike (do first): prove Nautilus dispatches actor on_bar before strategy on_bar same bar_type; one-bar-lag fallback documented (risk R1); gates 15.7

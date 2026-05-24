@@ -18,12 +18,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from src.config.firm_profile import InstrumentRegimeConfig, RegimeConfig
-from src.indicators.adx import ADX
-from src.indicators.bb_width import BollingerBandWidth
-from src.indicators.ema_slope import EMASlope
-from src.indicators.realized_vol import RealizedVolatility
+from src.config.firm_profile import RegimeConfig
 from src.regime.audit import RegimeAuditAdapter
+from src.regime.builders import build_extractor
 from src.regime.classifier import RuleBasedRegimeClassifier
 from src.regime.features import FeatureExtractor
 from src.regime.hysteresis import HysteresisFilter
@@ -49,28 +46,6 @@ def _symbol_from_bar_type(bar_type: str) -> str:
             f"bar_type {bar_type!r} is not in expected SYMBOL.VENUE-... form"
         )
     return bar_type.split(".", 1)[0]
-
-
-def _build_extractor(
-    bar_type: str, instrument_cfg: InstrumentRegimeConfig, warmup_bars: int
-) -> FeatureExtractor:
-    return FeatureExtractor(
-        bar_type=bar_type,
-        adx=ADX(period=instrument_cfg.adx_period),
-        bb_width=BollingerBandWidth(
-            period=instrument_cfg.bb_period,
-            num_std=instrument_cfg.bb_stddev,
-            baseline_window=instrument_cfg.bb_baseline_window,
-        ),
-        realized_vol=RealizedVolatility(
-            window=instrument_cfg.realized_vol_window
-        ),
-        ema_slope=EMASlope(
-            period=instrument_cfg.ema_slope_period,
-            lookback=instrument_cfg.ema_slope_lookback,
-        ),
-        warmup_bars=warmup_bars,
-    )
 
 
 def build_regime_aware_router(
@@ -131,7 +106,7 @@ def build_regime_aware_router(
     for bt in bar_types:
         symbol = _symbol_from_bar_type(bt)
         instrument_cfg = regime_config.get_instrument(symbol)
-        extractors[bt] = _build_extractor(
+        extractors[bt] = build_extractor(
             bt, instrument_cfg, regime_config.warmup_bars
         )
         hysteresis[bt] = HysteresisFilter(
