@@ -41,7 +41,17 @@ SELECT add_retention_policy('audit_logs', INTERVAL '180 days', if_not_exists => 
 
 
 _DOWNGRADE_SQL = """
--- Restore the revision-007 value (90 days).
+-- Restore the revision-007 value (90 days). Reducing retention is the only
+-- direction that can drop audit rows — emit a server-log NOTICE so a stray
+-- ``alembic downgrade`` against a financial-audit table is observable
+-- (security review F2). Chunks aged 90-180 days become eligible for deletion
+-- on the next TimescaleDB maintenance window.
+DO $$ BEGIN
+    RAISE NOTICE 'SECURITY: audit_logs retention reduced 180 -> 90 days. '
+                 'Chunks aged 90-180 days will be deleted on the next '
+                 'TimescaleDB maintenance window. Ensure a current pg_dump '
+                 'backup exists before proceeding.';
+END $$;
 SELECT remove_retention_policy('audit_logs', if_exists => TRUE);
 SELECT add_retention_policy('audit_logs', INTERVAL '90 days', if_not_exists => TRUE);
 """

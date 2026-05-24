@@ -11,9 +11,18 @@ Active hypertables (per `sandboxed-domain.md`):
 
 | Table | Time column | Chunk interval | Retention |
 |---|---|---|---|
+| `audit_logs` | `timestamp` | 7 days (default) | 180 days |
 | `trade_audit_log` | `ts` | 1 day | 180 days |
 | `rule_check_log` | `ts` | 1 day | 180 days |
 | `account_snapshot` | `ts` | 1 hour | 180 days |
+
+`audit_logs` is the implemented double-entry financial-audit table (see
+`audit.md`); `trade_audit_log` / `rule_check_log` are the architecture-doc
+names for the same audit family. Its 90→180-day retention was set by Alembic
+revision 012 (Epic 15 story 15.3). It also carries a continuous aggregate
+(`audit_daily_summary`, 365-day retention) and a 7-day compression policy from
+revision 007 — retention extension never drops chunks the aggregate still
+needs.
 
 ## Creation Pattern
 
