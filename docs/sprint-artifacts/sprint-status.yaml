@@ -283,3 +283,22 @@ development_status:
   15-12-remove-regime-aware-router: backlog                # S — delete src/strategies/regime_routing.py + build_regime_aware_router (factory.py:76-160) + update src/regime/__init__.py; StrategyDataRouter RETAINED (R6, → refactor-cleaner follow-up)
   15-13-rewrite-obsolete-regime-tests: backlog             # S — retire test_regime_aware_router.py → test_regime_actor.py + test_base_strategy_regime_gate.py; e2e/ablation replacements; reused-component tests unchanged; suite green ≥80% new modules
   epic-15-retrospective: optional
+
+  # Epic 16: Historical Data Acquisition Campaign (8 stories — 3 phases D0/D1/D2)
+  # Context: docs/epic-16-context.md
+  # Runbook: docs/runbooks/backtest-data-fetch.md (Epic 12.7.0 pipeline)
+  # Goal: populate Parquet shards for 4 symbols (XAUUSD/EURUSD/GBPUSD/USDJPY) × 4 timeframes (M5/M15/H1/H4), target 5y, premium ReplayMode. Prereq for Epic 15 backtest validation + future meta-label/signal-quality epic.
+  # EXECUTION ORDER: run BEFORE Epic 15 implementation (despite higher number). D0 is credential-free (start now); D1 blocks on operator SESSION_ID/SESSION_SIGN.
+  epic-16: contexted
+  # Phase D0 — Prerequisites (no credentials needed)
+  16-1-usdjpy-instrument-builder: backlog                  # S — _build_jpy_pair_instrument (precision=3, pip=0.001, fee=0) in runner_facade + tests; USDJPY currently falls to default_fx_ccy (2bps fee + wrong precision). Escape hatch: swap USDJPY→AUDUSD (builder exists) drops this story
+  16-2-dataset-specs-5y: backlog                           # S — configs/datasets/{xauusd,eurusd,gbpusd,usdjpy}-5y.yaml (M5/M15/H1/H4 × in_sample 5y + oos_reserve 4mo); extend xauusd-validation.yaml; tz-aware windows
+  16-3-fetch-campaign-driver: backlog                      # M — scripts/fetch_campaign.py: matrix walk (symbol×tf) + stepped -to anchors + chunk write + go_manifest_loader merge + dedupe (tf,ts) + verify; idempotent; replaces manual per-shard loop
+  # Phase D1 — Fetch campaign (needs credentials + tv-cli build)
+  16-4-build-cli-and-smoke: backlog                        # S — go build tv-cli + wire SESSION_ID/SESSION_SIGN + premium smoke (1 shard XAUUSD H4); surfaces zero-bars-if-not-premium early
+  16-5-run-campaign: backlog                               # L — run driver per symbol coarse→fine (H4→H1→M15→M5); record ACTUAL depth/tf vs 5y target (M5 likely floors ~2-3y, server-bound); mostly rate-limited machine time
+  16-6-merge-materialize: backlog                          # M — go_manifest_loader merge + DatasetPipeline materialize; canonical manifest per symbol; dedupe 5-day overlap by (tf,ts) before canonical
+  # Phase D2 — Quality + integration
+  16-7-quality-gate-report: backlog                        # M — per-shard gate (no dup (tf,ts), gap<threshold, fingerprint match, actual depth) + data-quality report → docs/sprint-artifacts; gate consumed by Epic 15 + ML epic
+  16-8-timescaledb-candles-load: backlog                   # S — (optional/deferred) load candles hypertable for non-backtest consumers; backtest uses Parquet (TimescaleDataSpec not wired)
+  epic-16-retrospective: optional
