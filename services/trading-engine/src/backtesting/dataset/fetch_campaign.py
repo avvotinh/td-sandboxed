@@ -111,6 +111,7 @@ def build_fetch_argv(
     window_name: str,
     window_kind: str,
     replay_mode: bool = True,
+    response_timeout_ms: int = 8000,
 ) -> list[str]:
     """Build the ``tv-cli backtest-fetch`` argv for one stepped chunk.
 
@@ -120,6 +121,12 @@ def build_fetch_argv(
     path is rendered as a string so the caller controls absolute vs
     relative (the driver passes absolute paths because tv-cli runs with
     cwd = ``services/tv-api`` to pick up its ``.env``).
+
+    ``response_timeout_ms`` defaults to 8000 (not tv-cli's own 2000): the
+    ReplayMode initial batch can take 6-8s to materialise at a historical
+    anchor, and 2s intermittently fails with ``fetch_until: no initial
+    batch within 2s`` (observed on H1 windows in the Epic 16 campaign; the
+    runbook flags the same for M1).
     """
     argv = [cli_path, "-command", "backtest-fetch"]
     if replay_mode:
@@ -133,6 +140,7 @@ def build_fetch_argv(
         "-dataset-version", dataset_version,
         "-window-name", window_name,
         "-window-kind", window_kind,
+        "-response-timeout-ms", str(response_timeout_ms),
         "-out", str(out_path),
     ]
     return argv

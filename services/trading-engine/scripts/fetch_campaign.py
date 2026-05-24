@@ -136,6 +136,7 @@ def _fetch_shard(
     data_root: Path,
     tv_api_dir: Path,
     fetch_timeout_s: int,
+    response_timeout_ms: int,
     dry_run: bool,
 ) -> None:
     """Fetch + stitch one (timeframe, window) shard."""
@@ -162,6 +163,7 @@ def _fetch_shard(
             dataset_version=spec.dataset_version,
             window_name=window.name,
             window_kind=window.kind.value,
+            response_timeout_ms=response_timeout_ms,
         )
         if dry_run:
             print("  [dry-run] fetch:", shlex.join(argv))
@@ -210,7 +212,7 @@ def _fetch_shard(
             break
         if prev_min is not None and min_dt >= prev_min:
             print(f"  history floor reached at {_iso_z(min_dt)} "
-                  f"(no progress) — actual depth shallower than target")
+                  f"(no progress) - actual depth shallower than target")
             break
         prev_min = min_dt
         anchor = min_dt
@@ -246,6 +248,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fetch-timeout-s", type=int, default=_FETCH_TIMEOUT_S,
                         help="Per-anchor tv-cli timeout in seconds "
                              f"(default {_FETCH_TIMEOUT_S}).")
+    parser.add_argument("--response-timeout-ms", type=int, default=8000,
+                        help="tv-cli per-batch response wait (default 8000; "
+                             "tv-cli's own default of 2000 flakes on the "
+                             "ReplayMode initial batch).")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print planned commands; no network/filesystem.")
     args = parser.parse_args(argv)
@@ -272,7 +278,9 @@ def main(argv: list[str] | None = None) -> int:
             _fetch_shard(
                 spec=spec, tf_label=tf_label, window=window, cli=cli,
                 data_root=data_root, tv_api_dir=tv_api_dir,
-                fetch_timeout_s=args.fetch_timeout_s, dry_run=args.dry_run,
+                fetch_timeout_s=args.fetch_timeout_s,
+                response_timeout_ms=args.response_timeout_ms,
+                dry_run=args.dry_run,
             )
     return 0
 

@@ -89,6 +89,15 @@ class TestBuildFetchArgv:
         assert argv[argv.index("-out") + 1].endswith("000.parquet")
         assert argv[argv.index("-command") + 1] == "backtest-fetch"
 
+    def test_response_timeout_default_avoids_2s_flake(self) -> None:
+        # tv-cli's own default (2000) intermittently fails on the ReplayMode
+        # initial batch; the builder must pass a generous default + honour
+        # an override.
+        argv = self._argv()
+        assert argv[argv.index("-response-timeout-ms") + 1] == "8000"
+        override = self._argv(response_timeout_ms=12000)
+        assert override[override.index("-response-timeout-ms") + 1] == "12000"
+
     def test_naive_datetime_rejected(self) -> None:
         with pytest.raises(ValueError, match="timezone-aware"):
             self._argv(from_dt=datetime(2021, 1, 1))  # noqa: DTZ001
