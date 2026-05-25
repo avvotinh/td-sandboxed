@@ -114,7 +114,10 @@ class RegimeActor(Actor):
     def on_start(self) -> None:
         """Subscribe to bars so Nautilus dispatches ``on_bar`` (cf prop_firm_actor)."""
         if self._config.audit_to_db and self._audit_hook is None:
-            # A live wiring that sets audit_to_db=True but forgets the hook would
+            # ``build_regime_actor`` (story 15.6) enforces audit_to_db == (hook
+            # is not None), so this state is unreachable for factory-built
+            # actors; the guard is for direct construction (e.g. unit tests). A
+            # live wiring that sets audit_to_db=True but forgets the hook would
             # otherwise drop every regime audit row silently. Surface it once.
             logger.warning(
                 "RegimeActor(%s): audit_to_db=True but no audit hook injected — "
