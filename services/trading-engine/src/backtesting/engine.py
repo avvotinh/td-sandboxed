@@ -28,8 +28,12 @@ from src.backtesting.metrics.calculator import calculate_metrics
 from src.backtesting.result import BacktestResult, TradeRecord
 
 if TYPE_CHECKING:
+    from nautilus_trader.model.data import BarType
     from nautilus_trader.model.identifiers import Venue
 
+    from src.config.firm_profile import RegimeConfig
+    from src.regime.actor import RegimeActor, RegimeAuditHook
+    from src.regime.state_store import RegimeStateStore
     from src.rules.engine import RuleEngine
 
 
@@ -97,6 +101,7 @@ class BacktestRunner:
         self.config = config
         self._engine: BacktestEngine = BacktestEngine(config=BacktestEngineConfig())
         self._prop_firm_actor: PropFirmComplianceActor | None = None
+        self._regime_actor: RegimeActor | None = None
         self._start: datetime | None = None
         self._end: datetime | None = None
 
@@ -107,6 +112,10 @@ class BacktestRunner:
     @property
     def prop_firm_actor(self) -> PropFirmComplianceActor | None:
         return self._prop_firm_actor
+
+    @property
+    def regime_actor(self) -> RegimeActor | None:
+        return self._regime_actor
 
     # ---- Composition ------------------------------------------------------
 
@@ -163,6 +172,51 @@ class BacktestRunner:
         )
         self._engine.add_actor(actor)
         self._prop_firm_actor = actor
+        return actor
+
+    def attach_regime(
+        self,
+        *,
+        regime_config: RegimeConfig,
+        bar_type: BarType,
+        regime_state: RegimeStateStore,
+        audit_hook: RegimeAuditHook | None = None,
+    ) -> RegimeActor | None:
+        """Build + register a ``RegimeActor`` against this engine (story 15.8).
+
+        Mirrors :meth:`attach_prop_firm_compliance`: delegates to
+        :func:`src.engine.actors.build_regime_actor` so backtest and live
+        (stories 15.10/15.11) construct the regime pipeline identically. Returns
+        ``None`` when ``regime_config.enabled`` is ``False`` — no actor is added,
+        so a disabled regime block costs nothing (default-OFF parity).
+
+        The caller owns the shared ``regime_state`` and injects the **same**
+        object into the strategy (``run_backtest``), so the actor's per-bar
+        ``publish`` is exactly what the strategy's entry gate reads.
+
+        ``audit_hook`` stays ``None`` for backtest, so ``build_regime_actor``
+        derives ``audit_to_db=False`` and the run writes **zero** rows to the
+        live ``audit_logs`` hypertable (review R-E). Live (15.11) passes a hook
+        over the existing ``AuditWriter`` queue.
+
+        ``bar_type`` should be the same ``BarType`` passed to ``add_data`` — its
+        symbol leg selects the per-instrument regime calibration.
+        """
+        # Lazy import to break the cycle:
+        #   backtesting.engine → engine.actors → backtesting.prop_firm_actor
+        # would otherwise re-enter backtesting.engine at module load time
+        # (same reason attach_prop_firm_compliance imports locally).
+        from src.engine.actors import build_regime_actor
+
+        actor = build_regime_actor(
+            regime_config=regime_config,
+            bar_type=bar_type,
+            regime_state=regime_state,
+            audit_hook=audit_hook,
+        )
+        if actor is not None:
+            self._engine.add_actor(actor)
+            self._regime_actor = actor
         return actor
 
     # ---- Execution --------------------------------------------------------

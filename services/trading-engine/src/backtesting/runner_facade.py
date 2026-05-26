@@ -39,12 +39,14 @@ from src.backtesting.job_config import (
 )
 from src.backtesting.strategy_registry import resolve_strategy
 from src.backtesting.synthetic_bars import generate_bars
+from src.regime.state_store import RegimeStateStore
 
 if TYPE_CHECKING:
     from nautilus_trader.model.data import Bar
     from nautilus_trader.model.instruments import Instrument
 
     from src.backtesting.result import BacktestResult
+    from src.config.firm_profile import RegimeConfig
     from src.strategies.base_strategy import BaseStrategy
 
 logger = logging.getLogger(__name__)
@@ -371,6 +373,7 @@ def run_backtest(
     job: BacktestJobConfig,
     *,
     strategy_overrides: dict[str, Any] | None = None,
+    regime_config: RegimeConfig | None = None,
 ) -> BacktestResult:
     """Dispatch a single backtest described by ``job``.
 
@@ -379,6 +382,23 @@ def run_backtest(
         strategy_overrides: Extra strategy-param overrides merged on top
             of ``job.strategy_params``. Sweep + walk-forward use this to
             vary parameters without mutating the base job.
+        regime_config: Optional regime-classifier block (story 15.8). When
+            present and ``enabled``, a :class:`RegimeActor` is attached and the
+            shared :class:`RegimeStateStore` + the strategy's declared regime
+            allow-list are injected into the strategy so entries are gated.
+            ``None`` (default) leaves the run byte-identical to pre-epic
+            behaviour. Passed as a call-time argument rather than a ``job``
+            field because :class:`RegimeConfig` is not picklable (frozen
+            ``MappingProxyType`` instruments) and ``BacktestJobConfig`` must
+            cross the ``ProcessPoolExecutor`` boundary.
+
+            Consequence: the **parallel** sweep / walk-forward paths
+            (``parameter_sweep`` / ``walk_forward``) cannot forward a
+            ``regime_config`` across the process boundary, so regime gating is
+            only available on the single-process call path (CLI, the 15.9
+            ablation harness, direct callers). Wiring regime into parallel
+            sweeps needs a serialisable regime form first — deferred (design §5);
+            no caller can pass ``regime_config`` through those harnesses today.
 
     Returns:
         ``BacktestResult`` produced by the underlying ``BacktestRunner``.
@@ -425,6 +445,53 @@ def run_backtest(
         runner.add_instrument(instrument)
         runner.add_data(bars)
 
+        # Add-order: regime actor → strategy → compliance actor (design §3).
+        # The regime actor is attached BEFORE the strategy so its on_bar
+        # publishes the confirmed regime before the strategy reads it for the
+        # same bar (story 15.4 proved actor.on_bar precedes strategy.on_bar
+        # regardless of add-order; we keep this order defensively). The
+        # compliance actor is independent of bar dispatch order and is attached
+        # last.
+        regime_state: RegimeStateStore | None = None
+        if regime_config is not None and regime_config.enabled:
+            regime_state = RegimeStateStore()
+            runner.attach_regime(
+                regime_config=regime_config,
+                bar_type=bar_type,
+                regime_state=regime_state,
+                # audit_hook left None → audit_to_db=False → zero rows to the
+                # live audit_logs hypertable (review R-E).
+            )
+
+        strategy = _build_strategy(
+            strategy_name=job.strategy,
+            instrument=instrument,
+            bar_type=bar_type,
+            params=merged_params,
+        )
+        if regime_state is not None:
+            # Runtime-attr injection (story 15.7 R8): the SAME store the actor
+            # publishes to, plus the strategy's declared regime allow-list from
+            # the production registry — same source the Epic-11 router used.
+            from src.strategies.registry import StrategyRegistry
+
+            if not StrategyRegistry.is_registered(job.strategy):
+                # The allow-list is a property of the strategy *class*, declared
+                # via @register_strategy(regimes=[...]) at import time. If it is
+                # missing the module was never imported, or a test called
+                # StrategyRegistry.clear() and did not repopulate. Fail fast with
+                # context rather than the bare "not registered" from get_regimes
+                # mid-run.
+                raise RuntimeError(
+                    f"Regime gating enabled but strategy {job.strategy!r} has no "
+                    "entry in StrategyRegistry — its @register_strategy decorator "
+                    "has not run. Import the strategy module before run_backtest "
+                    "(or, in tests, repopulate after StrategyRegistry.clear())."
+                )
+            strategy._regime_state = regime_state
+            strategy._allowed_regimes = StrategyRegistry.get_regimes(job.strategy)
+        runner.add_strategy(strategy)
+
         if job.prop_firm is not None:
             preset = load_prop_firm_preset(job.prop_firm.preset_path)
             rule_engine = _build_prop_firm_rule_engine(
@@ -445,14 +512,6 @@ def run_backtest(
                 venue=instrument.id.venue,
                 currency=currency,
             )
-
-        strategy = _build_strategy(
-            strategy_name=job.strategy,
-            instrument=instrument,
-            bar_type=bar_type,
-            params=merged_params,
-        )
-        runner.add_strategy(strategy)
 
         runner.run(start=job.start, end=job.end)
 

@@ -7,6 +7,7 @@ so the test is fast and focuses on composition + override merging.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -16,11 +17,13 @@ import pytest
 
 from src.backtesting.job_config import (
     BacktestJobConfig,
+    PropFirmSpec,
     SyntheticDataSpec,
     VenueSpec,
 )
 from src.backtesting.result import BacktestResult
 from src.backtesting.runner_facade import _normalise_parquet_index
+from src.regime.states import RegimeState
 
 
 def _base_job(**overrides) -> BacktestJobConfig:
@@ -161,6 +164,154 @@ class TestRunBacktestComposition:
             _, run_kwargs = mock_runner.run.call_args
             assert run_kwargs.get("start") == start
             assert run_kwargs.get("end") == end
+
+
+class _StrategyStub:
+    """Stand-in strategy whose regime attributes default to ``None`` — exactly
+    like a freshly-constructed ``BaseStrategy`` (story 15.7 R8) — so the
+    facade's runtime-attr injection (or its absence) is directly observable
+    without standing up a live Nautilus engine.
+    """
+
+    def __init__(self) -> None:
+        self._regime_state = None
+        self._allowed_regimes = None
+
+
+@pytest.mark.unit
+class TestRunBacktestRegimeWiring:
+    """Story 15.8: optional regime actor wiring in ``run_backtest``.
+
+    Default-OFF (no ``regime_config``) must be byte-identical: no
+    ``attach_regime`` call, no store injection. When enabled, the SAME
+    ``RegimeStateStore`` is injected into both the actor (via
+    ``attach_regime``) and the strategy (so the actor's publish is the
+    strategy's read), the strategy's allow-list comes from the production
+    ``StrategyRegistry``, and the add-order is regime → strategy → compliance.
+    """
+
+    @contextmanager
+    def _facade(self, runner_facade, fake_result, strategy):
+        """Patch the Nautilus-touching seams; yield the mock ``BacktestRunner``."""
+        mock_runner = MagicMock()
+        mock_runner.get_result.return_value = fake_result
+        with (
+            patch.object(runner_facade, "BacktestRunner", return_value=mock_runner),
+            patch.object(
+                runner_facade,
+                "_build_instrument",
+                return_value=(MagicMock(id=MagicMock()), "XAUUSD.SIM"),
+            ),
+            patch.object(runner_facade, "_build_bars", return_value=[MagicMock()]),
+            patch.object(runner_facade, "_build_strategy", return_value=strategy),
+            patch.object(
+                runner_facade, "_read_final_balance", return_value=Decimal("100000")
+            ),
+        ):
+            yield mock_runner
+
+    def test_regime_off_by_default(self, fake_result) -> None:
+        from src.backtesting import runner_facade
+
+        strategy = _StrategyStub()
+        with self._facade(runner_facade, fake_result, strategy) as mock_runner:
+            runner_facade.run_backtest(_base_job())
+
+        assert "attach_regime" not in [c[0] for c in mock_runner.method_calls]
+        # Default-OFF parity: the strategy is left un-injected, so its gate is a
+        # no-op (store None → admit) — byte-identical to pre-epic behaviour.
+        assert strategy._regime_state is None
+        assert strategy._allowed_regimes is None
+
+    def test_disabled_config_does_not_attach_or_inject(self, fake_result) -> None:
+        from src.backtesting import runner_facade
+
+        strategy = _StrategyStub()
+        with self._facade(runner_facade, fake_result, strategy) as mock_runner:
+            runner_facade.run_backtest(
+                _base_job(), regime_config=MagicMock(enabled=False)
+            )
+
+        assert "attach_regime" not in [c[0] for c in mock_runner.method_calls]
+        assert strategy._regime_state is None
+        assert strategy._allowed_regimes is None
+
+    def test_regime_enabled_injects_store_and_allowlist_before_strategy(
+        self, fake_result
+    ) -> None:
+        from src.backtesting import runner_facade
+
+        strategy = _StrategyStub()
+        allow = frozenset({RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN})
+        regime_cfg = MagicMock(enabled=True)
+
+        with (
+            self._facade(runner_facade, fake_result, strategy) as mock_runner,
+            patch(
+                "src.strategies.registry.StrategyRegistry.is_registered",
+                return_value=True,
+            ),
+            patch(
+                "src.strategies.registry.StrategyRegistry.get_regimes",
+                return_value=allow,
+            ),
+        ):
+            runner_facade.run_backtest(_base_job(), regime_config=regime_cfg)
+
+        # Actor wired with the enabled config.
+        mock_runner.attach_regime.assert_called_once()
+        _, kwargs = mock_runner.attach_regime.call_args
+        assert kwargs["regime_config"] is regime_cfg
+        store = kwargs["regime_state"]
+
+        # Same store object injected into the strategy + the resolved allow-list.
+        assert strategy._regime_state is store
+        assert strategy._allowed_regimes == allow
+
+        # Add-order: regime actor attached BEFORE the strategy (read-after-write).
+        names = [c[0] for c in mock_runner.method_calls]
+        assert names.index("attach_regime") < names.index("add_strategy")
+
+    def test_enabled_but_strategy_unregistered_raises(self, fake_result) -> None:
+        # HIGH-1 guard: regime on + strategy missing from StrategyRegistry (e.g.
+        # a test cleared it) → fast, contextual failure, not a bare mid-run error.
+        from src.backtesting import runner_facade
+
+        strategy = _StrategyStub()
+        with (
+            self._facade(runner_facade, fake_result, strategy),
+            patch(
+                "src.strategies.registry.StrategyRegistry.is_registered",
+                return_value=False,
+            ),
+            pytest.raises(RuntimeError, match="StrategyRegistry"),
+        ):
+            runner_facade.run_backtest(
+                _base_job(), regime_config=MagicMock(enabled=True)
+            )
+
+    def test_compliance_attached_after_strategy(self, fake_result) -> None:
+        from src.backtesting import runner_facade
+
+        job = _base_job(
+            prop_firm=PropFirmSpec(
+                preset_path="configs/ftmo-presets.yaml",
+                account_id="ftmo-test",
+            )
+        )
+        strategy = _StrategyStub()
+        with (
+            self._facade(runner_facade, fake_result, strategy) as mock_runner,
+            patch.object(runner_facade, "load_prop_firm_preset", return_value=MagicMock()),
+            patch.object(
+                runner_facade, "_build_prop_firm_rule_engine", return_value=MagicMock()
+            ),
+        ):
+            runner_facade.run_backtest(job)
+
+        names = [c[0] for c in mock_runner.method_calls]
+        # Add-order: strategy → compliance (compliance is independent, attached last).
+        assert names.index("add_strategy") < names.index("attach_prop_firm_compliance")
 
 
 @pytest.mark.unit
