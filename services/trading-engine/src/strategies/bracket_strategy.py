@@ -281,12 +281,24 @@ class BracketStrategyMixin:
         Expects the caller to have already handled position-reversal or
         CLOSE semantics — this helper only dispatches new entries when
         ``self.is_flat`` is True. A ``NONE`` signal is a no-op.
+
+        Entry-only regime gate (story 15.7): all six bracket strategies override
+        ``_execute_signal`` to funnel new entries through here and **bypass**
+        ``BaseStrategy._go_long`` / ``_go_short``, so for them THIS is the gate
+        that fires (the ``_go_long`` / ``_go_short`` gate is the safe-by-default
+        cover for future non-bracket strategies — review R-B; do not remove
+        either as "redundant"). Checked after the NONE + ``is_flat`` guards and
+        never on the exit/scale-out paths (review R-A / R-C). ``_regime_admits``
+        lives on the ``BaseStrategy`` host and defaults to "admit" when regime
+        gating is disabled (default-OFF parity).
         """
         from src.orders.signal import SignalType as _SignalType
 
         if signal == _SignalType.NONE:
             return
         if not self.is_flat:  # type: ignore[attr-defined]
+            return
+        if not self._regime_admits(signal):  # type: ignore[attr-defined]
             return
 
         side = OrderSide.BUY if signal == _SignalType.BUY else OrderSide.SELL

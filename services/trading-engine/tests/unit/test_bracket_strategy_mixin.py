@@ -24,6 +24,9 @@ class _Host(BracketStrategyMixin):
         self.cache = cache
         self.portfolio = portfolio
         self.config = MagicMock(bar_type=bar_type)
+        # In production the regime gate lives on BaseStrategy; here the host
+        # is a bare mixin, so stub it open (story 15.7). Gate tests override it.
+        self._regime_admits = MagicMock(return_value=True)
 
 
 @pytest.mark.unit
@@ -381,3 +384,54 @@ class TestSubmitBracketForEntryGuards:
         assert kwargs["side"] == OrderSide.BUY
         assert kwargs["sl_price"] == Decimal("2390")
         assert kwargs["tp_price"] == Decimal("2420")
+
+
+@pytest.mark.unit
+class TestSubmitBracketForEntryRegimeGate:
+    """Story 15.7: the bracket entry seam is gated by the regime admit-check.
+
+    All six production bracket strategies funnel new entries through
+    ``_submit_bracket_for_entry``, so this is the single seam that suppresses
+    disallowed entries when regime gating is enabled. The gate is consulted
+    only after the NONE + ``is_flat`` guards (entry-only) and never on exits.
+    """
+
+    def _entry_host(self, *, regime_admits: bool, last_bar: object) -> "_Host":
+        host = _Host(cache=MagicMock(), portfolio=MagicMock(), bar_type=MagicMock())
+        host.is_flat = True
+        host._regime_admits = MagicMock(return_value=regime_admits)
+        host._last_bar = MagicMock(return_value=last_bar)
+        host._read_account_balance = MagicMock(return_value=Decimal("100000"))
+        host._compute_bracket_params = MagicMock(
+            return_value=(Decimal("1.0"), Decimal("2390"), Decimal("2420"))
+        )
+        host._submit_bracket_order = MagicMock()
+        return host
+
+    def test_suppressed_when_regime_denies(self) -> None:
+        bar = MagicMock()
+        bar.close.as_double.return_value = 2400.0
+        host = self._entry_host(regime_admits=False, last_bar=bar)
+        host._submit_bracket_for_entry(SignalType.BUY, Decimal("5"))
+        host._regime_admits.assert_called_once_with(SignalType.BUY)
+        host._submit_bracket_order.assert_not_called()
+        # Order-of-operations guard (not the semantic contract): the gate fires
+        # before bracket-param computation, so a denied entry costs nothing.
+        host._compute_bracket_params.assert_not_called()
+
+    def test_submits_when_regime_admits(self) -> None:
+        bar = MagicMock()
+        bar.close.as_double.return_value = 2400.0
+        host = self._entry_host(regime_admits=True, last_bar=bar)
+        host._submit_bracket_for_entry(SignalType.SELL, Decimal("5"))
+        host._regime_admits.assert_called_once_with(SignalType.SELL)
+        host._submit_bracket_order.assert_called_once()
+
+    def test_gate_skipped_for_none_signal(self) -> None:
+        # NONE bails before the regime gate — nothing to admit.
+        bar = MagicMock()
+        bar.close.as_double.return_value = 2400.0
+        host = self._entry_host(regime_admits=False, last_bar=bar)
+        host._submit_bracket_for_entry(SignalType.NONE, Decimal("5"))
+        host._regime_admits.assert_not_called()
+        host._submit_bracket_order.assert_not_called()
