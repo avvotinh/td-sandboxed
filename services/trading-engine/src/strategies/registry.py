@@ -182,10 +182,11 @@ class StrategyRegistry:
     ) -> Mapping[str, frozenset[RegimeState] | None]:
         """Read-only snapshot of every registered strategy's regime mapping.
 
-        Consumed by the bootstrap factory in story 11.7 to build the
-        ``strategy_regime_map`` passed to ``RegimeAwareRouter``. The
-        returned proxy wraps a defensive copy taken at call time; later
-        registrations are not reflected in the returned mapping.
+        Was the bulk source for the (removed Epic-15) regime router's
+        ``strategy_regime_map``; the live ``RegimeActor`` path instead injects
+        a single strategy's list via :meth:`get_regimes`. Retained as the
+        whole-registry view. The returned proxy wraps a defensive copy taken at
+        call time; later registrations are not reflected in the returned mapping.
         """
         return MappingProxyType(dict(cls._strategy_regimes))
 

@@ -266,9 +266,9 @@ class BaseStrategy(Strategy):
         * allow-list ``None``   → ``True``  — always-allow strategy.
         * otherwise             → ``state in allowed``.
 
-        The router's ``_dispatch`` (``regime_routing.py:139-145``) only excluded
-        HIGH_VOLATILITY before the allow-list, so an always-allow strategy there
-        would have traded on UNKNOWN bars. Suppressing UNKNOWN here too is a
+        The retired Epic-11 router only excluded HIGH_VOLATILITY before the
+        allow-list, so an always-allow strategy there would have traded on
+        UNKNOWN bars. Suppressing UNKNOWN here too is a
         deliberate, FTMO-safer strengthening that stays parity-neutral in
         practice: ``registry._normalise_regimes`` already rejects UNKNOWN from
         every declared allow-list, and all production strategies declare explicit

@@ -1,12 +1,11 @@
 """Shared constructors for regime components (Epic 15 story 15.1).
 
-``build_extractor`` is lifted here out of :mod:`src.regime.factory` so the
-forthcoming ``build_regime_actor`` (story 15.6) can construct a
-:class:`FeatureExtractor` from an :class:`InstrumentRegimeConfig` **without**
-importing ``factory`` — which pulls in ``strategies.regime_routing`` and would
-create an import cycle through the Nautilus actor wiring. The factory keeps
-calling this same function, so there is exactly one place that knows how a
-``FeatureExtractor`` is assembled from config.
+``build_extractor`` lives here (not beside an actor/router factory) so
+``build_regime_actor`` (story 15.6) can construct a :class:`FeatureExtractor`
+from an :class:`InstrumentRegimeConfig` without dragging in the strategy/actor
+wiring — keeping this the single place that knows how a
+:class:`FeatureExtractor` is assembled from config and avoiding an import
+cycle through the Nautilus actor module.
 """
 
 from __future__ import annotations

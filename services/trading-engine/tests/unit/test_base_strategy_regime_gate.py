@@ -4,10 +4,10 @@ The regime pipeline (RegimeActor, story 15.5) publishes the confirmed regime
 into a shared ``RegimeStateStore``; the strategy reads it at its **entry-only**
 order seam and suppresses disallowed entries. This file pins the gate contract:
 
-- ``_regime_admits`` decision logic — mirrors the Epic-11 router ``_dispatch``
-  (``regime_routing.py:139-145``): store None → allow (default-off parity),
-  snapshot None → suppress (warmup, R-H), HIGH_VOLATILITY → suppress before the
-  allow-list (kill-switch precedence), allow-list match/miss.
+- ``_regime_admits`` decision logic (carries the gate semantics the retired
+  Epic-11 router once applied at dispatch): store None → allow (default-off
+  parity), snapshot None → suppress (warmup, R-H), HIGH_VOLATILITY → suppress
+  before the allow-list (kill-switch precedence), allow-list match/miss.
 - The gate is wired into ``_go_long``/``_go_short`` themselves (R-B
   safe-by-default) and runs only when flat (after the ``is_flat`` guard).
 - Exits are **never** gated (R-A / R-C): a CLOSE routes to ``_close_position``

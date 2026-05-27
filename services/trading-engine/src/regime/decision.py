@@ -2,9 +2,10 @@
 
 Produced by :class:`HysteresisFilter` (story 11.4) on every bar after
 the warmup period; consumed by :class:`RegimeAuditAdapter` (story 11.5)
-and :class:`RegimeAwareRouter` (story 11.7). The classifier itself
-returns a bare :class:`RegimeState`; the surrounding fields here capture
-the transition state and confidence the hysteresis filter computes.
+and published to the shared ``RegimeStateStore`` by the ``RegimeActor``
+(Epic 15). The classifier itself returns a bare :class:`RegimeState`; the
+surrounding fields here capture the transition state and confidence the
+hysteresis filter computes.
 """
 
 from __future__ import annotations
@@ -20,9 +21,10 @@ from src.regime.states import RegimeState
 class RegimeDecision:
     """Snapshot of one bar's regime decision plus hysteresis state.
 
-    ``current_state`` is what :class:`RegimeAwareRouter` matches against
-    ``Strategy.allowed_regimes``; ``raw_state`` is what the classifier
-    actually emitted this bar (may differ during hysteresis confirmation).
+    ``current_state`` is what the strategy entry-gate
+    (``BaseStrategy._regime_admits``) matches against its allowed regimes;
+    ``raw_state`` is what the classifier actually emitted this bar (may
+    differ during hysteresis confirmation).
     ``pending_state`` and ``bars_in_pending`` record the ongoing
     confirmation count: when ``pending_state is None`` the regime is
     stable, otherwise the filter is N bars into a candidate transition.

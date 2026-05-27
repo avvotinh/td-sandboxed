@@ -79,9 +79,12 @@ class StrategyDataRouter:
     def bound_accounts(self) -> list[HasStrategy]:
         """Read-only snapshot of the bound accounts.
 
-        Exposed for :class:`RegimeAwareRouter` (story 11.7) which iterates
-        the same account list to apply regime filtering before delegating
-        per-account dispatch back to :meth:`_route_bar_to_account`.
+        Exposed as a stable contract for a regime-filtering wrapper that
+        iterates the same account list before delegating per-account dispatch
+        back to :meth:`_route_bar_to_account`. (Epic 11's ``RegimeAwareRouter``
+        was that wrapper; it has been removed in Epic 15 — the live regime gate
+        now lives in the strategy entry seam — but this router is retained for a
+        future wrapper, R6.)
         """
         return list(self._accounts)
 
@@ -100,10 +103,11 @@ class StrategyDataRouter:
     def _route_bar_to_account(self, account: HasStrategy, bar: Bar) -> None:
         """Dispatch one bar to a single account's strategy.
 
-        Stable contract for :class:`RegimeAwareRouter` (story 11.7): the
-        wrapper applies regime filtering across accounts and calls this
-        method for each account that should receive the bar, leaving
-        symbol-filter, strategy-instance, and exception handling here.
+        Stable contract for a regime-filtering wrapper: it applies regime
+        filtering across accounts and calls this method for each account that
+        should receive the bar, leaving symbol-filter, strategy-instance, and
+        exception handling here. (Epic 11's ``RegimeAwareRouter`` was that
+        wrapper, removed in Epic 15; the seam is kept for a future one, R6.)
         """
         if not self._should_route_to_account(account, bar.symbol):
             return

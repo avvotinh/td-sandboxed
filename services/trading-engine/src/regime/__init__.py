@@ -17,7 +17,6 @@ from src.regime.actor import RegimeActor, RegimeActorConfig, RegimeAuditHook
 from src.regime.audit import RegimeAuditAdapter, to_audit_entry
 from src.regime.classifier import RuleBasedRegimeClassifier
 from src.regime.decision import RegimeDecision
-from src.regime.factory import build_regime_aware_router
 from src.regime.features import FeatureExtractor, RegimeFeatures
 from src.regime.hysteresis import HysteresisFilter
 from src.regime.state_store import RegimeSnapshot, RegimeStateStore
@@ -36,6 +35,5 @@ __all__ = [
     "RegimeState",
     "RegimeStateStore",
     "RuleBasedRegimeClassifier",
-    "build_regime_aware_router",
     "to_audit_entry",
 ]

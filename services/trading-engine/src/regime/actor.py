@@ -151,8 +151,8 @@ class RegimeActor(Actor):
 
         Sync per the Nautilus contract. During warmup the extractor returns
         ``None`` (no confirmed features) and the bar produces neither an audit
-        row nor a publish — matching the router's warmup skip
-        (``regime_routing.py:97``).
+        row nor a publish — the same warmup skip the retired Epic-11 router
+        applied at dispatch.
         """
         features = self._extractor.update(bar)
         if features is None:
@@ -183,11 +183,11 @@ class RegimeActor(Actor):
 
         Uses the bar's *event* time (its close), the same field the Epic 11
         router fed the hysteresis filter, so audit/decision timestamps match the
-        bar boundary. (The router passed ``bar.ts_event`` as a raw ``int`` —
-        ``regime_routing.py:102`` — which would have failed
-        ``RegimeDecision.__post_init__``'s tz-aware check had that never-wired
-        path run; the actor converts to a ``datetime`` here, fixing it. Do NOT
-        re-introduce a raw-int pass-through to "match" Epic 11.) Integer-second
+        bar boundary. (That never-wired router passed ``bar.ts_event`` as a raw
+        ``int``, which would have failed ``RegimeDecision.__post_init__``'s
+        tz-aware check had it ever run; the actor converts to a ``datetime``
+        here, fixing it. Do NOT re-introduce a raw-int pass-through to "match"
+        Epic 11.) Integer-second
         truncation is exact for boundary-aligned bars (M5+) and mirrors
         ``PropFirmComplianceActor``'s conversion (which uses ``ts_init`` because
         it tracks *when the rule engine ran*, a different semantic).
