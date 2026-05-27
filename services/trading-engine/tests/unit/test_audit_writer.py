@@ -128,6 +128,55 @@ class TestAuditWriterLogAsync:
             await asyncio.wait_for(writer.log_async(_make_entry()), timeout=0.05)
 
 
+class TestAuditWriterEnqueueNowait:
+    """enqueue_nowait — sync, non-blocking enqueue onto the same queue (15.11)."""
+
+    def test_enqueue_nowait_adds_to_queue_without_await(self) -> None:
+        sink: list[list[Any]] = []
+        writer = AuditWriter(_make_session_factory(sink))
+
+        # Pure sync call — no event loop / await needed.
+        writer.enqueue_nowait(_make_entry())
+
+        assert writer.queue_size == 1
+        assert sink == []
+
+    def test_enqueue_nowait_raises_queue_full(self) -> None:
+        sink: list[list[Any]] = []
+        writer = AuditWriter(_make_session_factory(sink), queue_size=1)
+
+        writer.enqueue_nowait(_make_entry())
+        # Telemetry semantics — full queue raises rather than blocking the
+        # synchronous caller (the regime actor's hook swallows + warns).
+        with pytest.raises(asyncio.QueueFull):
+            writer.enqueue_nowait(_make_entry())
+
+    @pytest.mark.asyncio
+    async def test_enqueue_nowait_drained_by_the_same_worker(self) -> None:
+        """R-D — entries land in the existing worker's queue, no extra task."""
+        sink: list[list[Any]] = []
+        writer = AuditWriter(_make_session_factory(sink), batch_timeout=0.02)
+
+        await writer.start()
+        writer.enqueue_nowait(_make_entry())
+        await writer.drain(timeout=2.0)
+        await writer.stop()
+
+        total = sum(len(batch) for batch in sink)
+        assert total == 1
+
+    def test_enqueue_nowait_without_start_emits_warning(self) -> None:
+        sink: list[list[Any]] = []
+        writer = AuditWriter(_make_session_factory(sink))
+
+        with patch("src.audit.audit_writer.logger") as mock_logger:
+            writer.enqueue_nowait(_make_entry())
+
+        mock_logger.warning.assert_called_once()
+        # The entry is still enqueued (it will be drained once start() runs).
+        assert writer.queue_size == 1
+
+
 class TestAuditWriterStartStop:
     """Lifecycle — start spawns worker, stop drains and cancels."""
 

@@ -152,6 +152,32 @@ class AuditWriter:
             )
         await self._queue.put(entry)
 
+    def enqueue_nowait(self, entry: AuditEntry) -> None:
+        """Synchronously enqueue ``entry`` without blocking or awaiting.
+
+        The sync, fire-and-forget counterpart to :meth:`log_async` for callers
+        on a synchronous hot path that cannot ``await`` — notably the regime
+        actor's audit hook (story 15.11), which runs inside the Cython
+        ``on_bar`` contract. Drained by the **same** worker as ``log_async`` —
+        no extra task or queue (review R-D).
+
+        Telemetry semantics (not double-entry): unlike the ``account.*`` write
+        path, a dropped regime-decision row must never block the trading loop.
+        ``asyncio.QueueFull`` is therefore left to propagate so the caller (the
+        actor's guarded hook) can swallow + warn rather than back-pressure the
+        bar handler.
+
+        Raises:
+            asyncio.QueueFull: the bounded queue is full.
+        """
+        if not self._running:
+            logger.warning(
+                "AuditWriter.enqueue_nowait called before start(); entry will "
+                "sit in the queue until start() is called. Queue size: %d",
+                self.queue_size,
+            )
+        self._queue.put_nowait(entry)
+
     async def drain(self, timeout: float | None = None) -> None:
         """Wait until every queued entry is persisted.
 
