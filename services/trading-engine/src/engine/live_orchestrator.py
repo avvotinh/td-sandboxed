@@ -64,8 +64,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Default timeframes a per-account live session subscribes to.
-# Story 10.5e2 may make this firm-configurable.
+# Default timeframes a per-account live session subscribes to. The
+# fallback when an :class:`EngineConfig` does not override it; production
+# operators set ``EngineConfig.bar_timeframes`` to the firm's regime
+# calibration timeframe (``("5m",)`` / ``("15m",)``) so the calibration-
+# timeframe guard in :meth:`_build_regime_components` lets regime engage.
 DEFAULT_BAR_TIMEFRAMES: tuple[str, ...] = ("1m",)
 
 # Maps an ``InstrumentRegimeConfig.timeframe`` label (M5/M15 only) to the
@@ -629,9 +632,9 @@ class LiveOrchestrator:
         # for the firm's configured timeframe (M5/M15). Running them on a live
         # bar of a different timeframe produces miscalibrated decisions on a
         # financial path — fail OFF loudly rather than classify against the
-        # wrong calibration. (The live timeframe is not operator-configurable
-        # yet — see DEFAULT_BAR_TIMEFRAMES; this guard keeps regime safely OFF
-        # until it is.)
+        # wrong calibration. Operators lift the guard by setting
+        # ``EngineConfig.bar_timeframes`` to the firm's calibration timeframe
+        # (e.g. ``("5m",)`` matches ``timeframe: M5``).
         instrument_cfg = regime_config.get_instrument(primary_symbol)
         expected = make_bar_type(
             primary_symbol,
