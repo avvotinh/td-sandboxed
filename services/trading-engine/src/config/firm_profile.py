@@ -355,8 +355,8 @@ class RegimeConfig:
     """Top-level regime-classifier block on a firm profile (Epic 11).
 
     Loaded from the optional ``regime_classifier:`` block in a firm YAML.
-    ``enabled=False`` (the default) means the bootstrap returns the plain
-    :class:`StrategyDataRouter` and no classifier overhead is incurred.
+    ``enabled=False`` (the default) means the orchestrator skips building a
+    :class:`~regime.actor.RegimeActor` and no classifier overhead is incurred.
     """
 
     enabled: bool
