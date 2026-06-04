@@ -338,3 +338,34 @@ development_status:
   16-7-quality-gate-report: done                           # M — 2026-05-24 docs/sprint-artifacts/epic-16-data-quality-report.md: 6 gates PASS (completeness 32/32, MT label, dedup, gaps benign @72h, ~5y depth all tf, baseline_harness consumability). Inventory + price sanity + provenance/caveats (OANDA, spread-modeled, 17:00-NY anchor) + regeneration steps
   16-8-timescaledb-candles-load: backlog                   # S — (optional/deferred) load candles hypertable for non-backtest consumers; backtest uses Parquet (TimescaleDataSpec not wired)
   epic-16-retrospective: optional
+
+  # Epic 17: Meta-Labeling / Signal-Quality Gate (16 stories — 5 phases P0–P4)
+  # Context: docs/epic-17-context.md (2026-06-04)
+  # Source research: docs/research/meta-labeling-corrective-ai.md + docs/research/ml-data-prep-and-training.md
+  # Goal: train a per-(firm, strategy, symbol) calibrated LightGBM gate that consumes RegimeSnapshot.features
+  #   (Epic 15 forward-compat seam) and self-suppresses low-PoP entries via BaseStrategy._meta_label_admits,
+  #   mirroring the entry-only _regime_admits pattern. Default-OFF byte-identical to Epic 15.
+  # Preconditions MET 2026-05-28: Epic 15 (feature stream) + Epic 16 (5y data) both done.
+  epic-17: contexted
+  # Phase P0 — Feature recording (offline data accumulation, default-OFF)
+  17-1-on-publish-hook-state-store: backlog                # S — RegimeStateStore.publish gains optional on_publish callback; default None ⇒ byte-identical; R-Z1
+  17-2-feature-recorder-parquet: backlog                   # M — FeatureRecorder sink + Parquet flush + JSON sidecar (dataset_version, features_fingerprint, code_sha); R-Z2 (no look-ahead, entry_ts only)
+  17-3-backtest-wiring-recorder: backlog                   # S — BacktestRunner.attach_regime gains feature_recorder kw; live path never wires it
+  # Phase P1 — Training pipeline (offline only, no engine touch)
+  17-4-triple-barrier-labeller: backlog                    # M — labels from BacktestResult.trades using bracket tp/sl multiples; max_holding_bars vertical barrier
+  17-5-purged-embargoed-cv: backlog                        # M — wraps skfolio.CombinatorialPurgedCV; groups=exit_ts; H-bar embargo
+  17-6-train-meta-label-cli: backlog                       # L — scripts/train_meta_label.py LGBM+isotonic+CPCV; .joblib + .json sidecar (feature_order, threshold, dataset_fingerprint)
+  # Phase P2 — Online gate (default-OFF byte-identical)
+  17-7-artifact-loader-schema-guard: backlog               # S — MetaLabelArtifact + ConfigError on missing/mismatch; lazy at on_start
+  17-8-meta-label-gate-class: backlog                      # M — MetaLabelGate.should_take(signal, features) → (bool, PoP); R-Z3 ≤1ms inference benchmark
+  17-9-base-strategy-meta-admits: backlog                  # M — _meta_label_admits + entry-only wiring; AFTER _regime_admits; R-Z4 exits ungated, R-Z5 ordering
+  17-10-backtest-wiring-gate: backlog                      # M — BacktestRunner.attach_meta_label_gate; default-OFF byte-identical (15.9 ablation CSV re-run)
+  17-11-live-orchestrator-wiring: backlog                  # M — AccountNodeSpec.meta_label_gate field + LiveOrchestrator load at startup; XOR guard requires regime ON
+  17-12-audit-prediction-logging: backlog                  # S — AuditWriter.enqueue_nowait row kind=meta_label_decision; backtest hook=None ⇒ zero rows
+  # Phase P3 — Validation + drift
+  17-13-ab-evaluation-harness: backlog                     # M — scripts/evaluate_meta_label.py: PSR, Sharpe, max-DD, EV/trade per-fold; go/no-go criteria pinned
+  17-14-drift-monitor: backlog                             # S — MetricsService weekly per-feature mean/std vs training distro; alert-only
+  # Phase P4 — Cleanup
+  17-15-runbook-and-arch-update: backlog                   # S — docs/runbooks/meta-label-training-and-rollout.md + architecture.md MetaLabelGate diagram
+  17-16-default-off-parity-tripwire: backlog               # S — R-Z1 CI tripwire: byte-identical BacktestResult.trades vs Epic 15 baseline (15.9 ablation CSV)
+  epic-17-retrospective: optional
