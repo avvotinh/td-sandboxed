@@ -34,7 +34,8 @@ from ..state.cold_storage_service import ColdStorageService
 from nautilus_trader.model.identifiers import Venue
 
 from .account_session import LiveAccountSession, SessionState
-from .actors import build_compliance_actor
+from .actors import build_compliance_actor, build_regime_actor
+from .clients.bar_translator import make_bar_type
 from .collaborators import LiveServiceBundle
 from .node_factory import (
     DEFAULT_VENUE_NAME,
@@ -43,6 +44,7 @@ from .node_factory import (
 )
 
 if TYPE_CHECKING:
+    from nautilus_trader.common.actor import Actor
     from nautilus_trader.live.node import TradingNode
 
     from ..accounts.account_manager import AccountManager
@@ -51,16 +53,29 @@ if TYPE_CHECKING:
     from ..accounts.risk_registry import RiskStateRegistry
     from ..audit.audit_service import AuditService
     from ..backtesting.prop_firm_actor import LiveEquityProvider
+    from ..config.firm_registry import FirmRegistry
+    from ..rules.audit_logger import AuditEntry
     from ..execution.validated_adapter import ValidatedZmqAdapter
+    from ..regime.actor import RegimeAuditHook
+    from ..regime.state_store import RegimeStateStore
     from ..rules.assignment_service import RuleAssignmentService
     from ..state.redis_state import RedisStateManager
 
 logger = logging.getLogger(__name__)
 
 
-# Default timeframes a per-account live session subscribes to.
-# Story 10.5e2 may make this firm-configurable.
+# Default timeframes a per-account live session subscribes to. The
+# fallback when an :class:`EngineConfig` does not override it; production
+# operators set ``EngineConfig.bar_timeframes`` to the firm's regime
+# calibration timeframe (``("5m",)`` / ``("15m",)``) so the calibration-
+# timeframe guard in :meth:`_build_regime_components` lets regime engage.
 DEFAULT_BAR_TIMEFRAMES: tuple[str, ...] = ("1m",)
+
+# Maps an ``InstrumentRegimeConfig.timeframe`` label (M5/M15 only) to the
+# subscription-string form ``make_bar_type`` parses, so the regime-actor
+# bar_type can be compared against the live subscription's (story 15.11
+# calibration-timeframe guard).
+_REGIME_TF_TO_SUBSCRIPTION: dict[str, str] = {"M5": "5m", "M15": "15m"}
 
 # Health surface — Redis key + cadence (AC7).
 HEALTH_REDIS_KEY = "health:trading-engine"
@@ -112,6 +127,7 @@ class LiveOrchestrator:
         account_manager: "AccountManager | None" = None,
         audit_service: "AuditService | None" = None,
         rule_assignment_service: "RuleAssignmentService | None" = None,
+        firm_registry: "FirmRegistry | None" = None,
         risk_registry: "RiskStateRegistry | None" = None,
         pnl_registry: "PnLTrackerRegistry | None" = None,
         redis_manager: "RedisStateManager | None" = None,
@@ -125,6 +141,7 @@ class LiveOrchestrator:
         self._account_manager = account_manager
         self._audit_service = audit_service
         self._rule_assignment_service = rule_assignment_service
+        self._firm_registry = firm_registry
         self._risk_registry = risk_registry
         self._pnl_registry = pnl_registry
         self._redis_manager = redis_manager
@@ -475,7 +492,14 @@ class LiveOrchestrator:
         # 5. Compute the bar subscriptions for the account's data feed.
         bar_subscriptions = self._compute_bar_subscriptions(account)
 
-        # 6. Build the per-account Nautilus ``TradingNode`` (10.5e2).
+        # 6. Build the per-account RegimeActor + shared store (story 15.11).
+        # Default-OFF (no firm regime block, or disabled) returns (None, None)
+        # so the session is byte-identical to pre-epic behaviour.
+        regime_actor, regime_state = self._build_regime_components(
+            account, bar_subscriptions
+        )
+
+        # 7. Build the per-account Nautilus ``TradingNode`` (10.5e2).
         # Only when the full live-trading deps are wired —
         # ``EngineConfig.empty()`` and 10.5e1-shaped wiring leave it
         # ``None`` so unit tests of the lifecycle skeleton still work.
@@ -483,6 +507,8 @@ class LiveOrchestrator:
             account=account,
             bar_subscriptions=bar_subscriptions,
             compliance_actor=compliance_actor,
+            regime_actor=regime_actor,
+            regime_state=regime_state,
         )
 
         session.attach_components(
@@ -492,6 +518,8 @@ class LiveOrchestrator:
             bar_subscriptions=bar_subscriptions,
             initial_balance=initial_balance,
             trading_node=trading_node,
+            regime_actor=regime_actor,
+            regime_state=regime_state,
         )
 
     def _build_trading_node_if_ready(
@@ -500,6 +528,8 @@ class LiveOrchestrator:
         account: "AccountConfig",
         bar_subscriptions: list[tuple[str, str]],
         compliance_actor: object | None,
+        regime_actor: "Actor | None" = None,
+        regime_state: "RegimeStateStore | None" = None,
     ) -> "TradingNode | None":
         """Construct the per-account Nautilus TradingNode when wired.
 
@@ -529,8 +559,139 @@ class LiveOrchestrator:
             strategy_name=account.strategy,
             strategy_params=dict(account.strategy_params or {}),
             compliance_actor=compliance_actor,
+            regime_actor=regime_actor,
+            regime_state=regime_state,
         )
         return self._node_factory(account=account, spec=spec)
+
+    def _build_regime_components(
+        self,
+        account: "AccountConfig",
+        bar_subscriptions: list[tuple[str, str]],
+    ) -> "tuple[Actor | None, RegimeStateStore | None]":
+        """Build the per-account ``RegimeActor`` + shared store (story 15.11).
+
+        The regime counterpart of the compliance-actor build (step 4). Reads
+        the firm-level ``regime_classifier`` block off the account's
+        :class:`FirmProfile`; returns ``(None, None)`` — the shipped default —
+        unless that block is present and ``enabled``. The store is created here
+        and threaded into the spec so :func:`node_factory.build_account_trading_node`
+        injects the **same** object into the strategy: the actor publishes to
+        it, the strategy's entry gate reads it.
+
+        Regime is strictly additive: any resolution problem (no firm binding,
+        firm not in the registry, no bar subscription) degrades to regime-OFF
+        rather than taking down an otherwise-healthy account.
+
+        Audit goes through the existing ``AuditWriter`` queue via a sync,
+        non-blocking hook (review R-D — no extra drainer task); ``None`` when no
+        audit service is wired, which keeps ``audit_to_db`` off (R-E).
+        """
+        if self._firm_registry is None or not account.firm_id:
+            return None, None
+        if not bar_subscriptions:
+            return None, None
+
+        # Resolve the firm's regime block defensively. A *missing* firm is a
+        # benign regime-OFF (additive: never block an otherwise-healthy
+        # account); a corrupt / unconfigured registry (FirmProfileLoadError,
+        # FirmRegistryNotConfiguredError) is a deployment fault that must
+        # surface, so catch only FirmNotFoundError.
+        from ..config.firm_registry import FirmNotFoundError
+
+        try:
+            profile = self._firm_registry.get(account.firm_id)
+        except FirmNotFoundError:
+            logger.warning(
+                "Account %s firm_id %r not in registry; regime gating OFF",
+                account.id,
+                account.firm_id,
+            )
+            return None, None
+
+        regime_config = profile.regime_classifier
+        if regime_config is None or not regime_config.enabled:
+            return None, None
+
+        primary_symbol, primary_tf = bar_subscriptions[0]
+        if len(bar_subscriptions) > 1:
+            # One actor per bar_type (design §4); multi-symbol = N actors is a
+            # future story. Surface that the extra symbols are unclassified.
+            logger.info(
+                "Account %s: regime actor built for primary symbol %r only; "
+                "subscriptions %r have no regime gating yet",
+                account.id,
+                primary_symbol,
+                [s for s, _ in bar_subscriptions[1:]],
+            )
+        bar_type = make_bar_type(
+            primary_symbol, primary_tf, Venue(DEFAULT_VENUE_NAME)
+        )
+
+        # Calibration-timeframe guard: the regime thresholds/periods are tuned
+        # for the firm's configured timeframe (M5/M15). Running them on a live
+        # bar of a different timeframe produces miscalibrated decisions on a
+        # financial path — fail OFF loudly rather than classify against the
+        # wrong calibration. Operators lift the guard by setting
+        # ``EngineConfig.bar_timeframes`` to the firm's calibration timeframe
+        # (e.g. ``("5m",)`` matches ``timeframe: M5``).
+        instrument_cfg = regime_config.get_instrument(primary_symbol)
+        expected = make_bar_type(
+            primary_symbol,
+            _REGIME_TF_TO_SUBSCRIPTION[instrument_cfg.timeframe],
+            Venue(DEFAULT_VENUE_NAME),
+        )
+        if bar_type.spec != expected.spec:
+            logger.error(
+                "Account %s: live bar timeframe %r does not match firm regime "
+                "calibration timeframe %r; regime gating OFF to avoid "
+                "miscalibrated decisions",
+                account.id,
+                primary_tf,
+                instrument_cfg.timeframe,
+            )
+            return None, None
+
+        # Local import — RegimeStateStore is cheap, but keep the regime module
+        # graph off the hot import path for EngineConfig.empty() unit tests.
+        from ..regime.state_store import RegimeStateStore
+
+        store = RegimeStateStore()
+        actor = build_regime_actor(
+            regime_config=regime_config,
+            bar_type=bar_type,
+            regime_state=store,
+            audit_hook=self._build_regime_audit_hook(),
+        )
+        if actor is None:
+            # Defensive — enabled was True so the factory should have built one;
+            # if not, drop the store too so the spec's regime pair stays coupled.
+            return None, None
+        return actor, store
+
+    def _build_regime_audit_hook(self) -> "RegimeAuditHook | None":
+        """Sync, non-blocking audit sink over the existing ``AuditWriter`` queue.
+
+        Returns ``None`` when no audit service is wired (unit tests /
+        ``EngineConfig.empty()``), which leaves ``audit_to_db`` off so zero
+        rows reach the live ``audit_logs`` hypertable (review R-E). Otherwise the
+        closure enqueues onto the **same** bounded queue the writer's worker
+        already drains (R-D — no new task): a full queue raises ``QueueFull``,
+        which the actor's guarded hook swallows + warns (regime audit is
+        telemetry, not the double-entry path — it must never block ``on_bar``).
+        """
+        if self._audit_service is None:
+            return None
+        # Capture the writer by value: its lifecycle outlives any single
+        # session (unlike the equity provider, which late-binds the per-account
+        # tracker to survive reload). The AuditWriter is a process-singleton, so
+        # there is no swap to re-resolve.
+        writer = self._audit_service.writer
+
+        def _hook(entry: "AuditEntry") -> None:
+            writer.enqueue_nowait(entry)
+
+        return _hook
 
     def _build_equity_provider(
         self, account_id: str

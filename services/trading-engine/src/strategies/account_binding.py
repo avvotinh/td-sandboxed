@@ -1,14 +1,13 @@
 """Account-strategy binding for runtime strategy instantiation.
 
 This module provides the mechanism to bind strategy instances to accounts
-at runtime, enabling the StrategyDataRouter to route market data to the
-correct strategy instances.
+at runtime.
 
 The AccountConfig (from accounts/models.py) defines the strategy as a string
 name. This module bridges the gap by:
 1. Looking up the strategy class from StrategyRegistry
 2. Instantiating the strategy with proper configuration
-3. Returning a BoundAccount that satisfies the HasStrategy protocol
+3. Returning a BoundAccount carrying the live strategy instance
 """
 
 from __future__ import annotations
@@ -28,17 +27,11 @@ if TYPE_CHECKING:
 class BoundAccount:
     """Account with instantiated strategy for runtime use.
 
-    Wraps an AccountConfig with a live strategy instance, satisfying
-    the HasStrategy protocol required by StrategyDataRouter.
+    Wraps an AccountConfig with a live strategy instance.
 
     Attributes:
         config: The underlying account configuration
         strategy_instance: Instantiated strategy (None if not bound)
-
-    Example:
-        bound = bind_strategy_to_account(account_config, strategy_config)
-        router = StrategyDataRouter([bound])
-        redis_adapter.set_bar_callback(router.route_bar)
     """
 
     config: AccountConfig
@@ -78,7 +71,7 @@ def bind_strategy_to_account(
 
     Looks up the strategy class by name from StrategyRegistry,
     creates an instance with the provided configuration, and
-    returns a BoundAccount ready for use with StrategyDataRouter.
+    returns a BoundAccount carrying the live strategy.
 
     Args:
         account: Account configuration with strategy name
@@ -133,7 +126,6 @@ def bind_strategies_to_accounts(
             "ftmo-backup": BaseStrategyConfig(...),
         }
         bound_accounts = bind_strategies_to_accounts(accounts, configs)
-        router = StrategyDataRouter(bound_accounts)
     """
     bound_accounts = []
     for account in accounts:

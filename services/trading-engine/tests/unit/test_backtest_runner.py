@@ -17,9 +17,45 @@ import pytest
 from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
 from src.backtesting.prop_firm_preset import PropFirmPreset
 from src.backtesting.result import BacktestResult
+from src.config.firm_profile import (
+    InstrumentRegimeConfig,
+    RegimeConfig,
+    RegimeThresholds,
+)
+from src.regime.state_store import RegimeStateStore
 
 
 pytestmark = pytest.mark.unit
+
+
+def _enabled_regime_config() -> RegimeConfig:
+    """A minimal enabled RegimeConfig (real, for fidelity in delegation)."""
+    thresholds = RegimeThresholds(
+        adx_trend_min=25.0,
+        adx_strong_trend=40.0,
+        bb_width_low_pct=0.30,
+        bb_width_high_pct=0.80,
+        realized_vol_high=0.025,
+        ema_slope_trend_threshold=0.0005,
+    )
+    instrument = InstrumentRegimeConfig(
+        timeframe="M5",
+        thresholds=thresholds,
+        adx_period=14,
+        bb_period=20,
+        bb_stddev=2.0,
+        bb_baseline_window=200,
+        realized_vol_window=20,
+        ema_slope_period=20,
+        ema_slope_lookback=5,
+    )
+    return RegimeConfig(
+        enabled=True,
+        confirmation_bars=2,
+        warmup_bars=50,
+        feature_window=200,
+        instruments={"XAUUSD": instrument},
+    )
 
 
 @pytest.fixture
@@ -117,6 +153,69 @@ class TestAttachPropFirmCompliance:
     def test_without_attach_actor_is_none(self, runner_config) -> None:
         runner = BacktestRunner(config=runner_config)
         assert runner.prop_firm_actor is None
+
+
+class TestAttachRegime:
+    """Story 15.8: attach_regime mirrors attach_prop_firm_compliance.
+
+    Delegates to ``build_regime_actor`` so backtest + live construct the
+    actor identically; ``enabled=False`` yields ``None`` (no actor added).
+    """
+
+    def test_attaches_actor_when_enabled(self, runner_config) -> None:
+        runner = BacktestRunner(config=runner_config)
+        mock_engine = Mock()
+        runner._engine = mock_engine
+        store = RegimeStateStore()
+        sentinel = Mock()
+        with patch(
+            "src.engine.actors.build_regime_actor", return_value=sentinel
+        ) as build:
+            actor = runner.attach_regime(
+                regime_config=_enabled_regime_config(),
+                bar_type="XAUUSD.SIM-5-MINUTE-LAST-EXTERNAL",
+                regime_state=store,
+            )
+        assert actor is sentinel
+        mock_engine.add_actor.assert_called_once_with(sentinel)
+        assert runner.regime_actor is sentinel
+        # R-E: backtest passes NO audit hook → build derives audit_to_db=False
+        # → zero rows to the live audit_logs hypertable.
+        _, kwargs = build.call_args
+        assert kwargs["audit_hook"] is None
+        # The caller's store is passed straight through (same object the
+        # strategy is injected with, so publish == read).
+        assert kwargs["regime_state"] is store
+
+    def test_no_actor_when_disabled(self, runner_config) -> None:
+        runner = BacktestRunner(config=runner_config)
+        mock_engine = Mock()
+        runner._engine = mock_engine
+        # build_regime_actor returns None for a disabled config.
+        with patch("src.engine.actors.build_regime_actor", return_value=None):
+            actor = runner.attach_regime(
+                regime_config=Mock(enabled=False),
+                bar_type="XAUUSD.SIM-5-MINUTE-LAST-EXTERNAL",
+                regime_state=RegimeStateStore(),
+            )
+        assert actor is None
+        mock_engine.add_actor.assert_not_called()
+        assert runner.regime_actor is None
+
+    def test_regime_actor_defaults_none(self, runner_config) -> None:
+        assert BacktestRunner(config=runner_config).regime_actor is None
+
+    def test_regime_config_is_not_picklable(self) -> None:
+        """Pins the constraint that forces ``regime_config`` to be a
+        ``run_backtest`` call-time kwarg instead of a (serializable)
+        ``BacktestJobConfig`` field: ``RegimeConfig.instruments`` is a frozen
+        ``MappingProxyType`` which pickle cannot handle. If this ever stops
+        raising, revisit the wiring in ``runner_facade.run_backtest``.
+        """
+        import pickle
+
+        with pytest.raises((TypeError, pickle.PicklingError)):
+            pickle.dumps(_enabled_regime_config())
 
 
 class TestRun:

@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 
     from ..accounts.models import AccountConfig
     from ..execution.validated_adapter import ValidatedZmqAdapter
+    from ..regime.state_store import RegimeStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,18 @@ class AccountNodeSpec:
         strategy_params: Extra kwargs merged into the strategy config.
         compliance_actor: Optional pre-built actor (10.5e1). When set,
             the factory attaches it to the trader.
+        regime_actor: Optional pre-built :class:`RegimeActor` (story 15.11
+            builds it via ``build_regime_actor``). When set, the factory
+            attaches it **before** the strategy so its ``on_bar`` publishes
+            the confirmed regime before the strategy reads it on the same
+            bar (story 15.4 — the add-order is defensive; dispatch order is
+            actor-before-strategy regardless).
+        regime_state: The shared :class:`RegimeStateStore` the ``regime_actor``
+            publishes to. The factory injects the **same** object into the
+            strategy (runtime attribute, R8) so the entry gate reads exactly
+            what the actor wrote. Must be supplied together with
+            ``regime_actor`` (both set = regime gating on; both ``None`` =
+            default-OFF, byte-identical to pre-epic behaviour).
     """
 
     account_id: str
@@ -104,6 +117,26 @@ class AccountNodeSpec:
     strategy_name: str
     strategy_params: dict[str, Any]
     compliance_actor: "Actor | None" = None
+    regime_actor: "Actor | None" = None
+    regime_state: "RegimeStateStore | None" = None
+
+    def __post_init__(self) -> None:
+        # Validation only (no field mutation), so object.__setattr__ is not
+        # needed despite frozen=True. Couple the regime pair: an actor with no
+        # store publishes to nothing the strategy reads; a store with no actor
+        # leaves the strategy reading a never-written store (snapshot always
+        # None ⇒ every entry gated). The factory must never produce either
+        # silent misconfiguration — fail loud here (cf. the audit_to_db
+        # derivation guard in 15.6).
+        if (self.regime_actor is None) != (self.regime_state is None):
+            actor_state = "set" if self.regime_actor is not None else "None"
+            store_state = "set" if self.regime_state is not None else "None"
+            raise ValueError(
+                "regime_actor and regime_state must be set together or both "
+                "None (the actor publishes to the same store the strategy "
+                f"reads); got regime_actor={actor_state}, "
+                f"regime_state={store_state}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +171,9 @@ def build_account_trading_node(
         ValueError: ``spec.bar_subscriptions`` is empty (the strategy
             cannot start without at least one subscription).
         UnknownStrategyError: ``spec.strategy_name`` is not registered.
+        RuntimeError: regime gating is on (``spec.regime_state`` set) but the
+            strategy has no ``StrategyRegistry`` entry (see
+            :func:`_inject_regime_state`).
     """
     if not spec.bar_subscriptions:
         raise ValueError(
@@ -165,12 +201,20 @@ def build_account_trading_node(
     instrument_id = _build_instrument_id(primary_symbol, spec.venue)
     bar_type = _build_bar_type(primary_symbol, primary_tf, spec.venue)
 
+    # Regime actor attaches BEFORE the strategy (design §3; add-order is
+    # regime → strategy → compliance, matching the backtest path in
+    # ``run_backtest``). Story 15.4 proved actor.on_bar precedes strategy.on_bar
+    # regardless of add-order, so this is belt-and-braces, not load-bearing.
+    if spec.regime_actor is not None:
+        node.trader.add_actor(spec.regime_actor)
+
     strategy = _resolve_and_build_strategy(
         account=account,
         spec=spec,
         instrument_id=instrument_id,
         bar_type=bar_type,
     )
+    _inject_regime_state(strategy, spec)
     node.trader.add_strategy(strategy)
 
     if spec.compliance_actor is not None:
@@ -310,6 +354,45 @@ def _make_exec_client_factory(
             )
 
     return _AccountZmqExecClientFactory
+
+
+def _inject_regime_state(strategy: "Strategy", spec: AccountNodeSpec) -> None:
+    """Inject the shared store + declared allow-list as runtime attributes.
+
+    Mirrors ``runner_facade.run_backtest`` so backtest and live gate strategies
+    identically (R8 — runtime attributes, not config fields, to dodge the
+    msgspec frozen-config constraint). No-op when regime gating is disabled
+    (``regime_state is None``): the strategy keeps its default-OFF ``None``
+    attributes and ``_regime_admits`` always returns True — byte-identical to
+    pre-epic behaviour.
+
+    The allow-list is a property of the strategy *class*, declared via
+    ``@register_strategy(regimes=[...])`` at import time. A missing registry
+    entry means the strategy module was never imported (or a test cleared the
+    registry without repopulating); fail loud here rather than with the bare
+    ``get_regimes`` lookup mid-run.
+    """
+    if spec.regime_state is None:
+        return
+    # Local import keeps the module-load graph identical to today and mirrors
+    # run_backtest's defensive lazy import.
+    from ..strategies.registry import StrategyRegistry
+
+    if not StrategyRegistry.is_registered(spec.strategy_name):
+        raise RuntimeError(
+            f"Regime gating enabled for account {spec.account_id!r} but "
+            f"strategy {spec.strategy_name!r} has no entry in StrategyRegistry "
+            "— its @register_strategy decorator has not run. Import the "
+            "strategy module before building the node (or, in tests, "
+            "repopulate after StrategyRegistry.clear())."
+        )
+    strategy._regime_state = spec.regime_state
+    # ``get_regimes`` returns None for a strategy registered without a
+    # ``regimes`` kwarg (the always-allow contract) — passed through verbatim;
+    # ``_regime_admits`` treats None as "no allow-list ⇒ always admit", so
+    # gating stays ON (warmup still suppresses) but the strategy is never
+    # blocked by regime. Same semantics as the backtest path.
+    strategy._allowed_regimes = StrategyRegistry.get_regimes(spec.strategy_name)
 
 
 def _resolve_and_build_strategy(

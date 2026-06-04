@@ -107,6 +107,25 @@ def test_build_lifecycle_returns_engine_lifecycle_with_orchestrators():
     assert lifecycle._graceful_shutdown is None
 
 
+def test_engine_config_bar_timeframes_defaults_to_one_minute():
+    """The default matches the historical pre-config ``LiveOrchestrator`` behaviour."""
+    assert EngineConfig.empty().bar_timeframes == ("1m",)
+
+
+def test_build_lifecycle_threads_bar_timeframes_into_live_orchestrator():
+    """Operator-configured timeframe reaches the live orchestrator so the
+    calibration guard can engage."""
+    config = EngineConfig(bar_timeframes=("5m",))
+    lifecycle = build_lifecycle(config)
+    assert lifecycle._live._bar_timeframes == ("5m",)
+
+
+def test_build_lifecycle_default_bar_timeframes_reach_live_orchestrator():
+    """An unset ``bar_timeframes`` should not silently drop on the floor."""
+    lifecycle = build_lifecycle(EngineConfig.empty())
+    assert lifecycle._live._bar_timeframes == ("1m",)
+
+
 @pytest.mark.asyncio
 async def test_trading_engine_run_and_shutdown_delegate_to_lifecycle():
     engine = TradingEngine()

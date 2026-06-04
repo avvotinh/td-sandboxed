@@ -10,6 +10,10 @@ check sees the engine's authoritative per-account equity instead of the
 Nautilus ``Portfolio`` (which is populated by the bridge later in the
 pipeline). Backtest callers leave the provider ``None`` and the actor
 falls back to ``Portfolio.balance_total`` — preserving AC10 parity.
+
+Story 15.6 adds :func:`build_regime_actor`, the regime counterpart, for the
+same backtest/live parity reason — one shared constructor so the regime
+pipeline cannot drift between simulation and production.
 """
 from __future__ import annotations
 
@@ -23,6 +27,12 @@ from ..backtesting.prop_firm_actor import (
     PropFirmComplianceActor,
     PropFirmComplianceActorConfig,
 )
+from ..config.firm_profile import RegimeConfig
+from ..regime.actor import RegimeActor, RegimeActorConfig, RegimeAuditHook
+from ..regime.builders import build_extractor
+from ..regime.classifier import RuleBasedRegimeClassifier
+from ..regime.hysteresis import HysteresisFilter
+from ..regime.state_store import RegimeStateStore
 
 if TYPE_CHECKING:
     from nautilus_trader.model.data import BarType
@@ -83,4 +93,87 @@ def build_compliance_actor(
         config=config,
         rule_engine=rule_engine,
         equity_provider=equity_provider,
+    )
+
+
+def build_regime_actor(
+    *,
+    regime_config: RegimeConfig,
+    bar_type: BarType,
+    regime_state: RegimeStateStore,
+    audit_hook: RegimeAuditHook | None = None,
+) -> RegimeActor | None:
+    """Construct a :class:`RegimeActor` for one ``bar_type``, or ``None`` if off.
+
+    The regime counterpart of :func:`build_compliance_actor`: both the backtest
+    runner (:meth:`~src.backtesting.engine.BacktestRunner.attach_regime`, story
+    15.8) and the live path (``node_factory`` / ``LiveOrchestrator``, stories
+    15.10/15.11) call this so the classify → hysteresis → audit pipeline cannot
+    drift between simulation and production.
+
+    Single source of truth: the factory builds exactly one
+    :class:`FeatureExtractor` (via :func:`~src.regime.builders.build_extractor`),
+    one :class:`RuleBasedRegimeClassifier`, and one :class:`HysteresisFilter` for
+    this ``bar_type``, so the regime indicators are computed exactly once. The
+    instrument is looked up by the symbol leg of ``bar_type`` (one actor per
+    ``bar_type``; multi-symbol live is N actors — design §4), and the
+    ``HysteresisFilter`` / extractor are keyed by ``str(bar_type)`` to match the
+    key strategies read from the store.
+
+    Args:
+        regime_config: Firm-level regime block. ``enabled=False`` (the shipped
+            default) short-circuits to ``None`` — zero extractor, zero overhead.
+        bar_type: The ``BarType`` the actor subscribes to and classifies. Its
+            symbol leg selects the :class:`InstrumentRegimeConfig`.
+        regime_state: The shared :class:`RegimeStateStore` the caller also
+            injects into the strategy (story 15.7/15.8) so both sides reference
+            the *same* object — passed in rather than created here to preserve
+            that identity.
+        audit_hook: Optional sync, non-blocking audit sink. ``None`` (backtest,
+            the default) keeps ``audit_to_db`` off so zero rows reach the live
+            ``audit_logs`` hypertable (review R-E). A hook (live, story 15.11,
+            a closure over the existing ``AuditWriter`` queue) flips
+            ``audit_to_db`` on, so the factory can never produce the
+            ``(audit_to_db=True, hook=None)`` silent-drop misconfiguration.
+
+    Returns:
+        A wired :class:`RegimeActor`, or ``None`` when the classifier is
+        disabled.
+
+    Raises:
+        KeyError: if ``bar_type``'s symbol has no
+            :class:`InstrumentRegimeConfig` in ``regime_config`` — fail loudly
+            rather than classify against another instrument's calibration.
+            Only reachable when ``regime_config.enabled`` is ``True``.
+    """
+    if not regime_config.enabled:
+        return None
+
+    # Resolve the symbol via the Nautilus type system, NOT a str(bar_type)
+    # split on "." (the legacy regime/factory.py:_symbol_from_bar_type does the
+    # latter and would mis-parse a dotted symbol like "NQ.CME"). Do not
+    # "harmonize" this toward that helper. The extractor/hysteresis below are
+    # still keyed by str(bar_type) — the same key strategies read from the store.
+    symbol = bar_type.instrument_id.symbol.value
+    instrument_cfg = regime_config.get_instrument(symbol)
+    bar_type_str = str(bar_type)
+
+    config = RegimeActorConfig(
+        primary_symbol=symbol,
+        bar_type=bar_type,
+        audit_to_db=audit_hook is not None,
+    )
+    return RegimeActor(
+        config=config,
+        classifier=RuleBasedRegimeClassifier(instrument_cfg.thresholds),
+        feature_extractor=build_extractor(
+            bar_type_str, instrument_cfg, regime_config.warmup_bars
+        ),
+        hysteresis=HysteresisFilter(
+            bar_type=bar_type_str,
+            confirmation_bars=regime_config.confirmation_bars,
+            thresholds=instrument_cfg.thresholds,
+        ),
+        regime_state=regime_state,
+        audit_hook=audit_hook,
     )

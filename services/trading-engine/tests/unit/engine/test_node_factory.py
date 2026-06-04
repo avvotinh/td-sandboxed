@@ -18,6 +18,7 @@ exercise is deferred to story 10.5f.
 """
 from __future__ import annotations
 
+import importlib
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
@@ -106,6 +107,13 @@ def _reset_recording_node() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _store():
+    """A real ``RegimeStateStore`` (it is a plain holder — no need to mock)."""
+    from src.regime.state_store import RegimeStateStore
+
+    return RegimeStateStore()
+
+
 def _account(
     account_id: str = "acct-1",
     strategy: str = "ma_crossover",
@@ -125,6 +133,8 @@ def _spec(
     strategy: str = "ma_crossover",
     strategy_params: dict[str, Any] | None = None,
     compliance_actor: Any = None,
+    regime_actor: Any = None,
+    regime_state: Any = None,
 ) -> AccountNodeSpec:
     return AccountNodeSpec(
         account_id=account_id,
@@ -135,6 +145,8 @@ def _spec(
         strategy_name=strategy,
         strategy_params=strategy_params or {},
         compliance_actor=compliance_actor,
+        regime_actor=regime_actor,
+        regime_state=regime_state,
     )
 
 
@@ -342,3 +354,134 @@ class TestBuildOrder:
         actor_idx = events.index("add_actor")
         assert build_idx < strategy_idx
         assert build_idx < actor_idx
+
+
+# ---------------------------------------------------------------------------
+# Regime wiring — story 15.10
+# ---------------------------------------------------------------------------
+
+
+class TestRegimeWiring:
+    """``AccountNodeSpec`` regime pair + attach order + runtime-attr injection.
+
+    Mirrors ``runner_facade.run_backtest`` (story 15.8) on the live path: a
+    pre-built ``RegimeActor`` (15.11 supplies it) attaches BEFORE the strategy,
+    and the SAME ``RegimeStateStore`` + the strategy's declared allow-list are
+    injected as runtime attributes so the entry gate reads what the actor wrote.
+    Default-OFF (no regime pair) stays byte-identical.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _ensure_ma_crossover_registered(self):
+        """Re-fire ``@register_strategy`` in case another suite cleared it.
+
+        The regime allow-list is read from ``StrategyRegistry`` (the clearable
+        decorator registry), distinct from the backtest ``resolve_strategy``
+        dict. Reloading the module re-registers it idempotently regardless of
+        suite ordering.
+        """
+        import src.strategies.ma_crossover as _ma_module
+        from src.strategies.registry import StrategyRegistry
+
+        StrategyRegistry.unregister("ma_crossover")
+        importlib.reload(_ma_module)
+        yield
+
+    def test_regime_actor_attached_when_supplied(self) -> None:
+        actor = MagicMock(name="RegimeActor")
+        node = build_account_trading_node(
+            account=_account(),
+            spec=_spec(regime_actor=actor, regime_state=_store()),
+            trading_node_cls=_RecordingTradingNode,
+        )
+        assert actor in node.actors
+
+    def test_regime_state_and_allowlist_injected_into_strategy(self) -> None:
+        from src.strategies.registry import StrategyRegistry
+
+        store = _store()
+        node = build_account_trading_node(
+            account=_account(strategy="ma_crossover"),
+            spec=_spec(
+                strategy="ma_crossover",
+                regime_actor=MagicMock(name="RegimeActor"),
+                regime_state=store,
+            ),
+            trading_node_cls=_RecordingTradingNode,
+        )
+        strategy = node.strategies[0]
+        # Same store object the actor publishes to (read-after-write seam).
+        assert strategy._regime_state is store
+        # Allow-list pulled from the production registry, not hand-copied.
+        assert strategy._allowed_regimes == StrategyRegistry.get_regimes(
+            "ma_crossover"
+        )
+        assert strategy._allowed_regimes  # ma_crossover declares TRENDING_*
+
+    def test_default_off_leaves_strategy_ungated(self) -> None:
+        """No regime pair → no actor, strategy keeps default-OFF None attrs."""
+        node = build_account_trading_node(
+            account=_account(),
+            spec=_spec(),  # regime_actor / regime_state default None
+            trading_node_cls=_RecordingTradingNode,
+        )
+        assert node.actors == []
+        strategy = node.strategies[0]
+        assert strategy._regime_state is None
+        assert strategy._allowed_regimes is None
+
+    def test_regime_actor_attached_before_strategy(self) -> None:
+        """Add-order is regime → strategy → compliance (design §3)."""
+        events: list[str] = []
+
+        class _OrderedNode(_RecordingTradingNode):
+            def __init__(self, *a, **kw) -> None:
+                super().__init__(*a, **kw)
+                self.trader = MagicMock()
+                self.trader.add_strategy = lambda s: events.append("strategy")
+                self.trader.add_actor = lambda a: events.append(
+                    getattr(a, "_role", "actor")
+                )
+
+        regime = MagicMock(name="RegimeActor")
+        regime._role = "regime"
+        compliance = MagicMock(name="ComplianceActor")
+        compliance._role = "compliance"
+
+        build_account_trading_node(
+            account=_account(),
+            spec=_spec(
+                regime_actor=regime,
+                regime_state=_store(),
+                compliance_actor=compliance,
+            ),
+            trading_node_cls=_OrderedNode,
+        )
+
+        assert events == ["regime", "strategy", "compliance"]
+
+    def test_regime_actor_without_store_raises(self) -> None:
+        with pytest.raises(ValueError, match="set together or both"):
+            _spec(regime_actor=MagicMock(), regime_state=None)
+
+    def test_regime_state_without_actor_raises(self) -> None:
+        with pytest.raises(ValueError, match="set together or both"):
+            _spec(regime_actor=None, regime_state=_store())
+
+    def test_regime_on_with_unregistered_strategy_raises(self) -> None:
+        from src.strategies.registry import StrategyRegistry
+
+        # ma_crossover resolves in the backtest registry (so the node builds)
+        # but is absent from StrategyRegistry → the allow-list lookup must fail
+        # loud rather than silently leaving the gate mis-wired.
+        with pytest.raises(RuntimeError, match="has no entry in StrategyRegistry"):
+            StrategyRegistry.unregister("ma_crossover")
+            build_account_trading_node(
+                account=_account(strategy="ma_crossover"),
+                spec=_spec(
+                    strategy="ma_crossover",
+                    regime_actor=MagicMock(),
+                    regime_state=_store(),
+                ),
+                trading_node_cls=_RecordingTradingNode,
+            )

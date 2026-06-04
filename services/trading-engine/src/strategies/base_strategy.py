@@ -19,6 +19,7 @@ from nautilus_trader.model.events import PositionClosed, PositionOpened
 from nautilus_trader.trading.strategy import Strategy
 
 from src.orders.signal import SignalType
+from src.regime.states import RegimeState
 from src.strategies.config import BaseStrategyConfig
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.session_filter_mixin import SessionFilterMixin
@@ -26,6 +27,8 @@ from src.strategies.mixins.session_filter_mixin import SessionFilterMixin
 if TYPE_CHECKING:
     from nautilus_trader.model.orders.list import OrderList
     from nautilus_trader.model.position import Position
+
+    from src.regime.state_store import RegimeStateStore
 
 
 class BaseStrategy(Strategy):
@@ -57,6 +60,17 @@ class BaseStrategy(Strategy):
         super().__init__(config)  # CRITICAL: Initialize parent
         self._position: Position | None = None
         self._instrument = None
+
+        # Regime gating (Epic 15 story 15.7). Injected as runtime attributes
+        # AFTER construction (R8 — NOT config fields, to dodge the msgspec
+        # frozen-config constraint that bit BracketStrategyConfig): the backtest
+        # runner (15.8) and node factory / live orchestrator (15.10/15.11) set
+        # both when regime gating is enabled. The defaults give byte-identical
+        # default-OFF behaviour — ``_regime_state is None`` ⇒ ``_regime_admits``
+        # always returns True, so a strategy with no store injected behaves
+        # exactly as it did before this epic.
+        self._regime_state: RegimeStateStore | None = None
+        self._allowed_regimes: frozenset[RegimeState] | None = None
 
     # Position state properties (AC1, Task 4)
     @property
@@ -226,12 +240,72 @@ class BaseStrategy(Strategy):
         elif signal == SignalType.CLOSE:
             self._close_position()
 
+    def _regime_admits(self, signal: SignalType) -> bool:
+        """Return True if the current confirmed regime admits a new ENTRY.
+
+        Entry-only gate (Epic 15 story 15.7). Called by ``_go_long`` /
+        ``_go_short`` (review R-B: safe-by-default, so any strategy — including
+        future ones not built on ``BracketStrategyMixin`` — is gated) and by the
+        bracket entry seam. It is **never** consulted on exits
+        (``_close_position``, scale-out): in FTMO you must always be able to
+        close risk (review R-A / R-C).
+
+        Decision (the semantic inverts the Epic-11 router from "withhold the
+        bar" to "suppress the entry"):
+
+        * store ``None``        → ``True``  — regime disabled; byte-identical to
+          pre-epic behaviour (default-OFF parity, R8 default).
+        * snapshot ``None``     → ``False`` — no decision published yet (warmup);
+          suppress rather than allow (review R-H).
+        * ``HIGH_VOLATILITY`` /
+          ``UNKNOWN``           → ``False`` — non-tradeable regimes, suppressed
+          BEFORE the allow-list. HIGH_VOLATILITY is the global kill-switch;
+          UNKNOWN is the classifier's warmup/unsettled sentinel (confidence is
+          0.0 by construction, ``hysteresis.py:150``) that the hysteresis filter
+          publishes for its first ``confirmation_bars - 1`` post-warmup bars.
+        * allow-list ``None``   → ``True``  — always-allow strategy.
+        * otherwise             → ``state in allowed``.
+
+        The retired Epic-11 router only excluded HIGH_VOLATILITY before the
+        allow-list, so an always-allow strategy there would have traded on
+        UNKNOWN bars. Suppressing UNKNOWN here too is a
+        deliberate, FTMO-safer strengthening that stays parity-neutral in
+        practice: ``registry._normalise_regimes`` already rejects UNKNOWN from
+        every declared allow-list, and all production strategies declare explicit
+        lists (so ``state in allowed`` already excludes UNKNOWN for them — the
+        ablation/backtest parity in 15.9 is unchanged). The only behaviour that
+        changes is a hypothetical always-allow strategy, which is now made
+        consistent with the codebase's existing "UNKNOWN is never routable"
+        stance instead of trading with no confirmed regime.
+
+        ``signal`` is accepted for API symmetry with the future meta-label gate
+        (``_admit_entry(signal, features)``, design §7.1) and so call sites read
+        naturally; regime admission itself is direction-agnostic — the gate is
+        per-strategy allow-list, not per-signal-direction (a strategy that
+        declares both trending regimes may go either way within them).
+        """
+        store = self._regime_state
+        if store is None:
+            return True
+        snapshot = store.current(str(self.config.bar_type))
+        if snapshot is None:
+            return False
+        state = snapshot.current_state
+        if state in (RegimeState.HIGH_VOLATILITY, RegimeState.UNKNOWN):
+            return False
+        allowed = self._allowed_regimes
+        return allowed is None or state in allowed
+
     def _go_long(self) -> None:
         """Enter long position.
 
-        Creates and submits a market buy order if currently flat.
+        Creates and submits a market buy order if currently flat and the
+        current regime admits a long entry (story 15.7).
         """
         if not self.is_flat:
+            return
+        if not self._regime_admits(SignalType.BUY):
+            self._log.debug("Regime gate suppressed LONG entry")
             return
 
         order = self.order_factory.market(
@@ -245,9 +319,13 @@ class BaseStrategy(Strategy):
     def _go_short(self) -> None:
         """Enter short position.
 
-        Creates and submits a market sell order if currently flat.
+        Creates and submits a market sell order if currently flat and the
+        current regime admits a short entry (story 15.7).
         """
         if not self.is_flat:
+            return
+        if not self._regime_admits(SignalType.SELL):
+            self._log.debug("Regime gate suppressed SHORT entry")
             return
 
         order = self.order_factory.market(

@@ -55,6 +55,47 @@ def _audit_level_for(state: RegimeState) -> str:
             assert_never(state)
 
 
+def to_audit_entry(decision: RegimeDecision) -> AuditEntry:
+    """Translate a :class:`RegimeDecision` into the project ``AuditEntry`` shape.
+
+    Pure and side-effect-free — the single source of truth for the regime →
+    audit mapping. Reused verbatim by both the async :class:`RegimeAuditAdapter`
+    (Epic 11 router path) and the sync :class:`~src.regime.actor.RegimeActor`
+    (Epic 15), so a backtest and a live decision audit identically (only *where*
+    the persistence happens differs: per-bar await vs queued enqueue).
+    """
+    pending = (
+        decision.pending_state.value
+        if decision.pending_state is not None
+        else None
+    )
+    return AuditEntry(
+        timestamp=decision.timestamp,
+        account_id=None,
+        event_type="regime_decision",
+        rule_name="regime_classifier",
+        rule_result=decision.current_state.value,
+        current_value=decision.confidence,
+        threshold_value=None,
+        order_id=None,
+        context={
+            "bar_type": str(decision.bar_type),
+            "raw_state": decision.raw_state.value,
+            "pending_state": pending,
+            "bars_in_pending": decision.bars_in_pending,
+            "features": asdict(decision.features),
+        },
+        event_subtype=None,
+        source="regime-classifier",
+        level=_audit_level_for(decision.current_state),
+        message=(
+            f"Regime: {decision.current_state.value} "
+            f"(confidence={decision.confidence:.2f})"
+        ),
+        trade_id=None,
+    )
+
+
 class RegimeAuditAdapter:
     """Converts ``RegimeDecision`` → ``AuditEntry`` and persists via
     :class:`AuditWriter`."""
@@ -63,41 +104,12 @@ class RegimeAuditAdapter:
         self._writer = audit_writer
 
     async def log(self, decision: RegimeDecision) -> None:
-        entry = self._to_entry(decision)
-        await self._writer.log_async(entry)
+        await self._writer.log_async(to_audit_entry(decision))
 
     @staticmethod
     def _to_entry(decision: RegimeDecision) -> AuditEntry:
-        pending = (
-            decision.pending_state.value
-            if decision.pending_state is not None
-            else None
-        )
-        return AuditEntry(
-            timestamp=decision.timestamp,
-            account_id=None,
-            event_type="regime_decision",
-            rule_name="regime_classifier",
-            rule_result=decision.current_state.value,
-            current_value=decision.confidence,
-            threshold_value=None,
-            order_id=None,
-            context={
-                "bar_type": str(decision.bar_type),
-                "raw_state": decision.raw_state.value,
-                "pending_state": pending,
-                "bars_in_pending": decision.bars_in_pending,
-                "features": asdict(decision.features),
-            },
-            event_subtype=None,
-            source="regime-classifier",
-            level=_audit_level_for(decision.current_state),
-            message=(
-                f"Regime: {decision.current_state.value} "
-                f"(confidence={decision.confidence:.2f})"
-            ),
-            trade_id=None,
-        )
+        """Backwards-compatible alias for :func:`to_audit_entry`."""
+        return to_audit_entry(decision)
 
 
-__all__ = ["RegimeAuditAdapter"]
+__all__ = ["RegimeAuditAdapter", "to_audit_entry"]

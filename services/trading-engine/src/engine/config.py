@@ -88,6 +88,15 @@ class EngineConfig:
     # per-account ``TradingNode``'s execution client. The orchestrator
     # only mounts a node when this is wired (full live-trading deps).
     validated_adapter: ValidatedZmqAdapter | None = None
+    # Story 15.11 follow-up — per-account live bar timeframes the
+    # :class:`LiveOrchestrator` subscribes to. Each entry is a
+    # ``make_bar_type`` subscription string (e.g. ``"1m"``, ``"5m"``,
+    # ``"15m"``). Default ``("1m",)`` preserves the pre-config behaviour.
+    # Setting this to the firm's regime-calibration timeframe (M5/M15)
+    # lifts the calibration-timeframe guard in
+    # :meth:`LiveOrchestrator._build_regime_components` so the live
+    # regime gate can actually engage.
+    bar_timeframes: tuple[str, ...] = ("1m",)
 
     def __post_init__(self) -> None:
         if self.database_url is not None and self.db_session_factory is None:

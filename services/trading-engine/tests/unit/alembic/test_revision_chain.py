@@ -27,6 +27,7 @@ EXPECTED_CHAIN = [
     "009_multi_firm_account_binding",
     "010_rename_ftmo_audit_events",
     "011_drop_prop_firm_legacy",
+    "012_audit_logs_retention_180",
 ]
 
 
@@ -43,9 +44,9 @@ def script_directory() -> ScriptDirectory:
 
 
 class TestChain:
-    def test_head_is_011(self, script_directory: ScriptDirectory) -> None:
+    def test_head_is_012(self, script_directory: ScriptDirectory) -> None:
         heads = list(script_directory.get_heads())
-        assert heads == ["011_drop_prop_firm_legacy"], heads
+        assert heads == ["012_audit_logs_retention_180"], heads
 
     def test_chain_in_expected_order(
         self, script_directory: ScriptDirectory
@@ -151,6 +152,15 @@ class TestRevisionContent:
                     "LOCK TABLE accounts",
                 ],
             ),
+            (
+                "012_audit_logs_retention_180",
+                [
+                    "audit_logs",
+                    "180 days",
+                    "remove_retention_policy",
+                    "add_retention_policy",
+                ],
+            ),
         ],
     )
     def test_revision_text_contains(
@@ -198,6 +208,18 @@ class TestRevisionContent:
         assert "raise NotImplementedError" in text
         # Message must point operators at the runbook.
         assert "pg_dump" in text
+
+    def test_012_is_retention_only_no_drop_table(
+        self, script_directory: ScriptDirectory
+    ) -> None:
+        text = Path(
+            script_directory.get_revision("012_audit_logs_retention_180").path
+        ).read_text(encoding="utf-8")
+        # R-F: a retention-policy swap only — must NEVER drop the audit table.
+        assert "DROP TABLE" not in text
+        assert "INTERVAL '180 days'" in text
+        # downgrade restores the migration-007 value.
+        assert "INTERVAL '90 days'" in text
 
 
 class TestInitSqlConsistency:

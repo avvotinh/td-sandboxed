@@ -294,20 +294,6 @@ class TestStrategyRegimeRegistration:
 
         assert StrategyRegistry.get_regimes("decorated_legacy") is None
 
-    def test_get_all_regime_maps_returns_immutable_view(self):
-        StrategyRegistry.register(
-            "t",
-            MockStrategy,
-            regimes=[RegimeState.TRENDING_UP],
-        )
-        StrategyRegistry.register("legacy2", AnotherMockStrategy)
-        m = StrategyRegistry.get_all_regime_maps()
-        assert m["t"] == frozenset({RegimeState.TRENDING_UP})
-        assert m["legacy2"] is None
-        # Caller mutating the returned mapping must not corrupt registry.
-        with pytest.raises(TypeError):
-            m["hacked"] = frozenset()  # type: ignore[index]
-
     def test_unregister_clears_regime_entry(self):
         StrategyRegistry.register(
             "to_remove",
@@ -325,7 +311,8 @@ class TestStrategyRegimeRegistration:
             regimes=[RegimeState.RANGING],
         )
         StrategyRegistry.clear()
-        assert StrategyRegistry.get_all_regime_maps() == {}
+        with pytest.raises(ValueError, match="not registered"):
+            StrategyRegistry.get_regimes("x")
 
     def test_iterable_regimes_dedupes(self):
         # The decorator accepts list/tuple/set; duplicates collapse via

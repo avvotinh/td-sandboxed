@@ -4,17 +4,18 @@ This module provides a registry for trading strategies, enabling
 configuration-driven strategy instantiation. Strategies are registered
 by name and can be retrieved for use with specific accounts.
 
-Story 11.6 extends registration with a per-strategy regime declaration
-(``regimes=[...]``) consumed by the regime-aware router in story 11.7.
+Story 11.6 added a per-strategy regime declaration (``regimes=[...]``);
+Epic 15 routes that declaration through :meth:`StrategyRegistry.get_regimes`
+into :class:`BaseStrategy._allowed_regimes` so the strategy's entry seam
+gates on the live :class:`~regime.actor.RegimeActor`'s published state.
 A missing ``regimes`` kwarg means "always-allow" (the regime kill-switch
-still blocks routing in HIGH_VOLATILITY); ``regimes=[]`` means "never
-route" — the explicit Phase 1 opt-out for ORB.
+still blocks the entry seam in HIGH_VOLATILITY); ``regimes=[]`` means
+"never route" — the explicit Phase 1 opt-out for ORB.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
-from types import MappingProxyType
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 from src.regime.states import RegimeState
@@ -175,19 +176,6 @@ class StrategyRegistry:
         # KeyError loudly rather than masking a missing entry as the
         # always-allow sentinel.
         return cls._strategy_regimes[name]
-
-    @classmethod
-    def get_all_regime_maps(
-        cls,
-    ) -> Mapping[str, frozenset[RegimeState] | None]:
-        """Read-only snapshot of every registered strategy's regime mapping.
-
-        Consumed by the bootstrap factory in story 11.7 to build the
-        ``strategy_regime_map`` passed to ``RegimeAwareRouter``. The
-        returned proxy wraps a defensive copy taken at call time; later
-        registrations are not reflected in the returned mapping.
-        """
-        return MappingProxyType(dict(cls._strategy_regimes))
 
 
 def register_strategy(

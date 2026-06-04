@@ -191,10 +191,12 @@ def build_lifecycle(config: EngineConfig) -> EngineLifecycle:
         account_manager=config.account_manager,
         audit_service=config.audit_service,
         rule_assignment_service=config.rule_assignment_service,
+        firm_registry=config.firm_registry,
         risk_registry=config.risk_registry,
         pnl_registry=config.pnl_registry,
         redis_manager=config.redis_manager,
         validated_adapter=config.validated_adapter,
+        bar_timeframes=config.bar_timeframes,
     )
 
     emergency_stop_handler: EmergencyStopHandler | None = None
