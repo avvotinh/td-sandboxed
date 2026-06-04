@@ -339,7 +339,7 @@ development_status:
   16-8-timescaledb-candles-load: backlog                   # S — (optional/deferred) load candles hypertable for non-backtest consumers; backtest uses Parquet (TimescaleDataSpec not wired)
   epic-16-retrospective: optional
 
-  # Epic 17: Meta-Labeling / Signal-Quality Gate (16 stories — 5 phases P0–P4)
+  # Epic 17: Meta-Labeling / Signal-Quality Gate (18 stories — 5 phases P0–P4)
   # Context: docs/epic-17-context.md (2026-06-04)
   # Source research: docs/research/meta-labeling-corrective-ai.md + docs/research/ml-data-prep-and-training.md
   # Goal: train a per-(firm, strategy, symbol) calibrated LightGBM gate that consumes RegimeSnapshot.features
@@ -363,7 +363,9 @@ development_status:
   17-11-live-orchestrator-wiring: backlog                  # M — AccountNodeSpec.meta_label_gate field + LiveOrchestrator load at startup; XOR guard requires regime ON
   17-12-audit-prediction-logging: backlog                  # S — AuditWriter.enqueue_nowait row kind=meta_label_decision; backtest hook=None ⇒ zero rows
   # Phase P3 — Validation + drift
-  17-13-ab-evaluation-harness: backlog                     # M — scripts/evaluate_meta_label.py: PSR, Sharpe, max-DD, EV/trade per-fold; go/no-go criteria pinned
+  17-13a-training-campaign: backlog                        # L — production training campaign: 24 (firm, strategy, symbol) artifacts; per-artifact quality gate (n_trades ≥ N_min + OOS Sharpe uplift); inventory report. ONLY story that ships artifacts.
+  17-13b-artifact-storage-runbook: backlog                 # S — models/meta_label/ layout + versioning runbook (v1→vN bump, rollback, sidecar fingerprint verify); DVC deferred
+  17-13c-ab-evaluation-harness: backlog                    # M — scripts/evaluate_meta_label.py consumes 17.13a artifacts: PSR, Sharpe, max-DD, EV/trade per-fold; go/no-go criteria pinned
   17-14-drift-monitor: backlog                             # S — MetricsService weekly per-feature mean/std vs training distro; alert-only
   # Phase P4 — Cleanup
   17-15-runbook-and-arch-update: backlog                   # S — docs/runbooks/meta-label-training-and-rollout.md + architecture.md MetaLabelGate diagram

@@ -2,9 +2,9 @@
 
 **Created:** 2026-06-04
 **Last updated:** 2026-06-04
-**Status:** **Contexted** — 16 stories drafted, not started
+**Status:** **Contexted** — 18 stories drafted, not started
 **Epic:** 17 of 17+
-**Stories:** 16 (17.1 – 17.16) across 5 phases (P0–P4)
+**Stories:** 18 (17.1 – 17.16, with 17.13 split into a/b/c) across 5 phases (P0–P4)
 **Predecessor (regime infra):** Epic 15 (RegimeActor Backtest-Live Parity) — closed 2026-05-28
 **Predecessor (data):** Epic 16 (Historical Data Acquisition) — closed 2026-05-24
 **Source research:** `docs/research/meta-labeling-corrective-ai.md` (methodology) + `docs/research/ml-data-prep-and-training.md` (time-series CV / no-shuffle / no-scale rules)
@@ -249,16 +249,20 @@ ML-derived signal-quality decision — FTMO domain rule.
 | 17.10 | Backtest wiring: `BacktestRunner.attach_meta_label_gate(meta_label_config)` builds gate per `(strategy, symbol)`, injects as runtime attr on each strategy AFTER `add_strategy`. Default-OFF when `meta_label_config` is `None` — byte-identical to Epic 15 closing state | M | P2 MetaLabelGate Online | parity test: 15.9 ablation CSV re-runs with meta-label OFF ⇒ trade counts equal Epic 15 baseline byte-for-byte | backlog |
 | 17.11 | Live wiring in `LiveOrchestrator` + `node_factory`: `AccountNodeSpec` gains `meta_label_gate: MetaLabelGate \| None` (mirrors `regime_actor`/`regime_state` from 15.10); `_build_meta_label_components` loads artifact at orchestrator startup using firm-profile config. XOR guard: meta-label ON requires regime ON (gate consumes `RegimeSnapshot.features`) | M | P2 MetaLabelGate Online | **R-Z6** live `on_bar` may not block — artifact loaded once on `on_start`, inference sync ≤1ms | backlog |
 | 17.12 | Audit + prediction logging: every `should_take` writes one row via `AuditWriter.enqueue_nowait` (re-uses 15.11 primitive). No new queue, no drainer. Backtest hook=`None` ⇒ zero rows (R-E parity inherited from Epic 15) | S | P2 MetaLabelGate Online | telemetry-not-double-entry: degrade-on-QueueFull, swallow+warn (same contract as `RegimeAuditHook`) | backlog |
-| 17.13 | A/B evaluation harness `scripts/evaluate_meta_label.py`: same dataset spec under (a) Epic 15 baseline, (b) meta-label ON; reports trade count delta, Sharpe, max-DD, **PSR**, EV/trade, per-fold breakdown using the 17.5 splitter. Output: `docs/sprint-artifacts/epic-17-validation-report.md` | M | P3 Validation & Sweep | go/no-go: OOS Sharpe (gated) > baseline in ≥3/5 folds, **PSR > 0.90**, max-DD not worsened, trade-count reduction < 50% | backlog |
+| 17.13a | Production training campaign: invoke `scripts/train_meta_label.py` for each of the 24 `(firm, strategy, symbol)` combos pinned by Architectural Decision #7, on Epic 16 in_sample data; reject artifacts failing `n_trades ≥ N_min` (Open Decision #3) or OOS-Sharpe-uplift threshold; deliverable = `docs/sprint-artifacts/epic-17-training-campaign.md` (inventory + per-artifact CV metrics + rejection list). Resolves Open Decisions #2 (mlfinpy vs skfolio) and #3 (`N_min`) in practice | L | P3 Validation & Sweep | per-artifact gate is the **only** way artifacts ship to live (R-Z8). No partial-cardinality deploy: missing artifact ⇒ that `(firm, strategy, symbol)` cell stays default-OFF | backlog |
+| 17.13b | Artifact storage layout + versioning runbook: `services/trading-engine/models/meta_label/{firm}_{strategy}_{symbol}_v{n}.joblib` (gitignored); `docs/runbooks/meta-label-artifact-storage.md` covers v1→vN bump procedure, rollback, sidecar fingerprint verification, atomic-deploy convention. DVC integration explicitly deferred to a follow-up | S | P3 Validation & Sweep | filesystem-only in v1 (Architectural Decision #2); Redis blob storage deferred until multi-node live deploy lands | backlog |
+| 17.13c | A/B evaluation harness `scripts/evaluate_meta_label.py`: same dataset spec under (a) Epic 15 baseline, (b) meta-label ON (consumes 17.13a artifacts); reports trade count delta, Sharpe, max-DD, **PSR**, EV/trade, per-fold breakdown using the 17.5 splitter. Output: `docs/sprint-artifacts/epic-17-validation-report.md` | M | P3 Validation & Sweep | go/no-go: OOS Sharpe (gated) > baseline in ≥3/5 folds, **PSR > 0.90**, max-DD not worsened, trade-count reduction < 50% | backlog |
 | 17.14 | Drift monitor `src/ml/drift_monitor.py` + scheduled `MetricsService` check: weekly compute per-feature mean/std from live inference log; alert via existing notification path if any feature drifts >3σ from training distribution recorded in 17.6 sidecar | S | P3 Validation & Sweep | drift signal is observability only — never auto-disables the gate (operator decides) | backlog |
 | 17.15 | Documentation: `docs/runbooks/meta-label-training-and-rollout.md` (training cadence, threshold tuning, artifact storage, rollback) + `docs/architecture.md` update wiring `MetaLabelGate` into the diagram next to `RegimeActor` | S | P4 Cleanup | mirrors Epic 16's quality-report doc discipline | backlog |
 | 17.16 | Default-OFF parity regression test `tests/integration/ml/test_meta_label_default_off_parity.py`: runs Epic 15 ablation CSV with `meta_label_config=None`, asserts byte-identical `BacktestResult.trades` vs Epic 15 baseline checked in at 15.9. CI tripwire if anything in 17.1–17.12 leaks runtime behaviour | S | P4 Cleanup | **R-Z1** hard invariant — failure blocks merge | backlog |
 
-**Total effort:** ~6.5–7 working days (P0 ~1d, P1 ~2.5d, P2 ~2.5–3d, P3 ~0.75d, P4 ~0.5d).
+**Total effort:** ~7.75–8.25 working days (P0 ~1d, P1 ~2.5d, P2 ~2.5–3d, P3 ~2d, P4 ~0.5d).
 Phases are independently mergeable: P0 ships a recorder behind a feature flag with zero runtime
-risk; P1 is offline-only (no engine touch); P2 wires the gate default-OFF; P3 validates; P4
-documents and pins parity. P0–P1 deliver a labeled training corpus even if the gate is never
-enabled — a standalone deliverable for the research track.
+risk; P1 is offline-only (no engine touch); P2 wires the gate default-OFF; P3 trains + validates;
+P4 documents and pins parity. P0–P1 deliver a labeled training corpus even if the gate is never
+enabled — a standalone deliverable for the research track. **The P3 training campaign (17.13a)
+is the only story that produces shippable model artifacts**; without it, the gate is a tool
+without a trained model and stays default-OFF in production.
 
 **Test fate:**
 - *Reused unchanged:* `tests/unit/regime/{features,classifier,hysteresis,decision,audit,actor}.py`,
