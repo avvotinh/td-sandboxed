@@ -7,12 +7,12 @@
 - Pair programming and code generation
 - Worker agents in multi-agent systems
 
-**Sonnet 4.6** (Best coding model):
+**Sonnet 5** (Best coding model):
 - Main development work
 - Orchestrating multi-agent workflows
 - Complex coding tasks
 
-**Opus 4.5** (Deepest reasoning):
+**Opus 4.8** (Deepest reasoning):
 - Complex architectural decisions
 - Maximum reasoning requirements
 - Research and analysis tasks
@@ -49,7 +49,8 @@ For complex tasks requiring deep reasoning:
 ## Build Troubleshooting
 
 If build fails:
-1. Use **build-error-resolver** agent
-2. Analyze error messages
-3. Fix incrementally
-4. Verify after each fix
+1. Go build errors — use **go-build-resolver** agent
+2. Python/Rust build errors — fix inline (no dedicated agent; see CLAUDE.md Workflow Matrix)
+3. Analyze error messages
+4. Fix incrementally
+5. Verify after each fix
