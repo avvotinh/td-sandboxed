@@ -109,14 +109,11 @@ class _OneShotShortProbe(
 
 
 class _SymbolCase:
-    """Per-symbol scenario: synthetic-bar scale + static pip convention.
+    """Per-symbol scenario: synthetic-bar scale for the trade setup.
 
-    ``pip_size`` / ``pip_value_per_lot`` carry the values production
-    configs use today (MT5 lot convention; FX per the documented
-    ``--pip-value-per-lot 10`` guidance). For USDJPY that guidance value
-    is itself part of the bug surface — the true per-lot pip value is
-    1000 JPY (≈ $6.7 at 150), and the sizer docstring requires the
-    CALLER to convert to account currency, which no caller does.
+    Contract economics (contract size, quote currency, JPY conversion)
+    are NOT parameterised here — they come from the production
+    ``ContractSpec`` registry via the sizing chain under test.
     """
 
     def __init__(
@@ -126,15 +123,11 @@ class _SymbolCase:
         start_price: float,
         drift_scale: float,
         noise_scale: float,
-        pip_size: str,
-        pip_value_per_lot: str,
     ) -> None:
         self.symbol = symbol
         self.start_price = start_price
         self.drift_scale = drift_scale
         self.noise_scale = noise_scale
-        self.pip_size = Decimal(pip_size)
-        self.pip_value_per_lot = Decimal(pip_value_per_lot)
 
 
 _CASES = [
@@ -144,8 +137,6 @@ _CASES = [
             start_price=2400.0,
             drift_scale=1.0,
             noise_scale=1.0,
-            pip_size="0.01",
-            pip_value_per_lot="1.0",
         ),
         id="XAUUSD",
     ),
@@ -155,8 +146,6 @@ _CASES = [
             start_price=1.10,
             drift_scale=0.0008,
             noise_scale=0.001,
-            pip_size="0.0001",
-            pip_value_per_lot="10.0",
         ),
         id="EURUSD",
     ),
@@ -166,8 +155,6 @@ _CASES = [
             start_price=150.0,
             drift_scale=0.2,
             noise_scale=0.2,
-            pip_size="0.01",
-            pip_value_per_lot="10.0",
         ),
         id="USDJPY",
     ),
@@ -224,8 +211,6 @@ def _run_single_sl_trade(case: _SymbolCase) -> BacktestRunner:
         sl_atr_mult=Decimal("4.0"),
         tp_atr_mult=Decimal("8.0"),
         risk_percent=_RISK_PERCENT,
-        pip_size=case.pip_size,
-        pip_value_per_lot=case.pip_value_per_lot,
     )
     runner.add_strategy(_OneShotShortProbe(config=config))
     runner.run()

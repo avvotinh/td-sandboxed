@@ -144,23 +144,23 @@ class PositionSizer:
         account_balance: Decimal,
         entry_price: Decimal,
         stop_price: Decimal,
-        pip_value_per_lot: Decimal,
-        pip_size: Decimal,
+        contract_size: Decimal,
+        quote_to_account_rate: Decimal = Decimal("1"),
     ) -> Decimal:
         """Adapter for ``PositionSizerProtocol``.
 
-        Converts price-distance inputs to pip distance, then delegates to the
-        legacy ``calculate_size`` so existing fixed-lot / risk-percent logic is
-        preserved unchanged.
+        Derives the per-lot loss from price distance × contract economics
+        (see :mod:`src.instruments.contract_specs`), then applies the
+        legacy fixed-lot / risk-percent logic and constraints.
         """
-        if pip_size <= 0:
+        if self.config.fixed_lot_size is not None:
+            return self._apply_constraints(self.config.fixed_lot_size)
+        stop_distance = abs(entry_price - stop_price)
+        if stop_distance <= 0 or contract_size <= 0 or quote_to_account_rate <= 0:
             return self.config.min_lot_size
-        stop_loss_pips = abs(entry_price - stop_price) / pip_size
-        return self.calculate_size(
-            account_balance=account_balance,
-            stop_loss_pips=stop_loss_pips,
-            pip_value=pip_value_per_lot,
-        )
+        risk_amount = account_balance * (self.config.risk_percent / Decimal("100"))
+        loss_per_lot = stop_distance * contract_size * quote_to_account_rate
+        return self._apply_constraints(risk_amount / loss_per_lot)
 
     def _apply_constraints(self, lot_size: Decimal) -> Decimal:
         """Apply min/max constraints to lot size.
