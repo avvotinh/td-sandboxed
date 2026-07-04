@@ -1,0 +1,28 @@
+# Consolidated mean-reversion (Bollinger x RSI confluence) - XAUUSD M15.
+#
+# Track 2.1 (docs/strategy-redesign-plan-2026-07-02.md): replaces the
+# archived rsi_mr_xauusd.yaml + bollinger_mr_xauusd.yaml presets. Entry
+# requires BOTH a Bollinger band pierce AND an RSI extreme on the same
+# bar; exit at the middle band (SMA) or SL/TP.
+#
+# Target regime: RANGING only (declared via @register_strategy).
+# ATR multipliers match the archived pair so Phase 12.A cross-strategy
+# comparisons carry over cleanly.
+
+strategy: mean_reversion
+instrument_id: XAUUSD.BROKER
+bar_type: XAUUSD.BROKER-15-MINUTE-LAST-EXTERNAL
+trade_size: "0.10"   # ignored — sized by RiskBasedPositionSizer
+account_id: ftmo-main
+
+bb_period: 20
+num_std: 2.0
+rsi_period: 14
+oversold: 0.3        # Nautilus RSI is 0-1 scale, not 0-100
+overbought: 0.7
+
+atr_period: 14
+sl_atr_mult: "1.0"
+tp_atr_mult: "2.0"
+
+risk_percent: "1.0"
