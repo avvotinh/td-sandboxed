@@ -1,5 +1,14 @@
 # Epic 13 Phase 1 — Backtest A/B Validation Report
 
+> ⚠️ **SIZING-BUG NOTICE (2026-07-04):** All $-denominated figures in this report
+> (EV/trade, max drawdown $, FTMO compliance/breach counts) were produced under the
+> lot-vs-unit sizing bug — realised risk was ~1/100 (XAUUSD) to ~1/100,000 (FX) of the
+> configured `risk_percent`, and FX fees were zeroed as a workaround. Sharpe ratios and
+> strategy RANKINGS remain valid (scale-invariant); every FTMO compliance conclusion
+> ("0 breaches", "DD < X%") is void. Fixed 2026-07-04 on `fix/sizing-lot-vs-unit`
+> (see docs/strategy-redesign-plan-2026-07-02.md §1). Do not cite absolute numbers
+> from this report; re-run under Track 4 first.
+
 **Story:** 13.9 — Backtest A/B validation report  
 **Date:** 2026-05-12  
 **Branch:** `epic-13-strategy-tactics`  

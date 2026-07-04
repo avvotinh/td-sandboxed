@@ -36,8 +36,6 @@ def _common_bracket_params() -> dict:
     return {
         "atr_period": 14,
         "risk_percent": Decimal("1.0"),
-        "pip_size": Decimal("0.0001"),
-        "pip_value_per_lot": Decimal("10.0"),
         "trade_size": Decimal("10000"),
     }
 
@@ -47,7 +45,7 @@ def _base_job(strategy: str, params: dict) -> BacktestJobConfig:
         strategy=strategy,
         strategy_params=params,
         venue=_VENUE,
-        instrument_symbol="EUR/USD",
+        instrument_symbol="EURUSD",
         bar_type_suffix="1-MINUTE-BID-EXTERNAL",
         data=SyntheticDataSpec(
             pattern="trending",
@@ -192,18 +190,17 @@ def test_supertrend_scale_out_e2e_synthetic_bars() -> None:
     from nautilus_trader.model.data import BarType
     from nautilus_trader.model.enums import AccountType, OmsType, OrderType
     from nautilus_trader.model.objects import Money
-    from nautilus_trader.test_kit.providers import TestInstrumentProvider
 
     from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
+    from src.backtesting.runner_facade import _build_instrument
     from src.backtesting.synthetic_bars import generate_bars
     from src.strategies.supertrend import SupertrendConfig, SupertrendStrategy
 
-    # BTCUSDT has size_precision=6 (fractional units OK) and
-    # price_precision=2 — closer to a XAUUSD-like setup where the
-    # sizer can produce sub-unit lots without _make_qty rounding
-    # them to zero. Fractional EUR/USD with size_precision=0 forces
-    # the sizer to fail (0.45 lots → 0) under any realistic ATR.
-    instrument = TestInstrumentProvider.btcusdt_binance()
+    # The production XAUUSD instrument (size_increment 0.01 oz) accepts
+    # the fractional engine-unit sizes the risk sizer produces, and —
+    # unlike the BTCUSDT test instrument used pre-2026-07 — it has a
+    # ContractSpec so the lot→unit conversion path is exercised.
+    instrument, _ = _build_instrument("XAUUSD")
     bar_type = BarType.from_str(f"{instrument.id}-1-MINUTE-LAST-EXTERNAL")
 
     # Mean-reverting pattern with strong noise so the price oscillates
@@ -247,10 +244,6 @@ def test_supertrend_scale_out_e2e_synthetic_bars() -> None:
         runner.add_instrument(instrument)
         runner.add_data(bars)
 
-        # BTCUSDT pip economics: pip_size=1.0 (one dollar), value per
-        # lot = 1.0 (one BTC = one dollar per pip). With $100K balance
-        # and 1% risk, sizer returns ~6.67 BTC at typical ATR of ~$150
-        # — well within BTCUSDT's 0.000001 size_increment.
         config = SupertrendConfig(
             instrument_id=instrument.id,
             bar_type=bar_type,
@@ -261,8 +254,6 @@ def test_supertrend_scale_out_e2e_synthetic_bars() -> None:
             sl_atr_mult=Decimal("1.5"),
             tp_atr_mult=Decimal("3.0"),
             risk_percent=Decimal("1.0"),
-            pip_size=Decimal("1.0"),
-            pip_value_per_lot=Decimal("1.0"),
             # Phase 1 fields — feature flags ON.
             scale_out_enabled=True,
             scale_out_r_trigger=Decimal("1.0"),
@@ -348,16 +339,16 @@ def test_donchian_scale_out_e2e_synthetic_bars() -> None:
     from nautilus_trader.model.data import BarType
     from nautilus_trader.model.enums import AccountType, OmsType, OrderType
     from nautilus_trader.model.objects import Money
-    from nautilus_trader.test_kit.providers import TestInstrumentProvider
 
     from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
+    from src.backtesting.runner_facade import _build_instrument
     from src.backtesting.synthetic_bars import generate_bars
     from src.strategies.donchian_breakout import (
         DonchianBreakoutConfig,
         DonchianBreakoutStrategy,
     )
 
-    instrument = TestInstrumentProvider.btcusdt_binance()
+    instrument, _ = _build_instrument("XAUUSD")
     bar_type = BarType.from_str(f"{instrument.id}-1-MINUTE-LAST-EXTERNAL")
 
     # Mean-reverting + heavy noise mirrors the Supertrend e2e setup:
@@ -407,8 +398,6 @@ def test_donchian_scale_out_e2e_synthetic_bars() -> None:
             sl_atr_mult=Decimal("2.0"),
             tp_atr_mult=Decimal("4.0"),
             risk_percent=Decimal("1.0"),
-            pip_size=Decimal("1.0"),
-            pip_value_per_lot=Decimal("1.0"),
             # Phase 1 fields — feature flags ON.
             scale_out_enabled=True,
             scale_out_r_trigger=Decimal("1.0"),
@@ -469,16 +458,16 @@ def test_ma_crossover_scale_out_e2e_synthetic_bars() -> None:
     from nautilus_trader.model.data import BarType
     from nautilus_trader.model.enums import AccountType, OmsType, OrderType
     from nautilus_trader.model.objects import Money
-    from nautilus_trader.test_kit.providers import TestInstrumentProvider
 
     from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
+    from src.backtesting.runner_facade import _build_instrument
     from src.backtesting.synthetic_bars import generate_bars
     from src.strategies.ma_crossover import (
         MACrossoverConfig,
         MACrossoverStrategy,
     )
 
-    instrument = TestInstrumentProvider.btcusdt_binance()
+    instrument, _ = _build_instrument("XAUUSD")
     bar_type = BarType.from_str(f"{instrument.id}-1-MINUTE-LAST-EXTERNAL")
 
     start_ts = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1_000_000_000)
@@ -524,8 +513,6 @@ def test_ma_crossover_scale_out_e2e_synthetic_bars() -> None:
             sl_atr_mult=Decimal("1.5"),
             tp_atr_mult=Decimal("3.0"),
             risk_percent=Decimal("1.0"),
-            pip_size=Decimal("1.0"),
-            pip_value_per_lot=Decimal("1.0"),
             # Phase 1 fields — feature flags ON.
             scale_out_enabled=True,
             scale_out_r_trigger=Decimal("1.0"),

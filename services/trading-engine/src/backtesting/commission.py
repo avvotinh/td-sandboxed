@@ -16,6 +16,14 @@ Two converters cover the two call patterns:
   that only have a bare per-lot value (e.g. a non-firm-bound test or a
   ``VenueSpec`` populated outside the registry path).
 
+Both return a :class:`SpreadAwareFeeModel` (redesign plan Track 1.4):
+it converts the fill quantity from engine units to MT5 lots via the
+symbol's :class:`~src.instruments.contract_specs.ContractSpec` before
+charging, so per-lot commission means per LOT — not per unit. The
+Nautilus :class:`PerContractFeeModel` used pre-2026-07 charged per
+engine unit, which (once sizing was fixed) would multiply fees by the
+contract size; it is no longer used.
+
 Currency assumption: ``CommissionProfile.per_lot_usd`` is denominated
 in USD as the field name implies. Both converters reject non-USD
 ``currency`` arguments — adding a non-USD prop firm is a deliberate
@@ -28,14 +36,12 @@ Resolution rules:
   premium accounts with tighter spreads).
 * When neither side declares a profile, returns ``None`` and the
   backtest falls back to Nautilus defaults (= zero commission).
-* Story 10.9 (D8): when ``spread_pips`` is non-empty the converter
-  returns a :class:`SpreadAwareFeeModel` that adds
-  ``spread_pips × pip_value × fill_qty`` to ``per_lot_usd`` on every
-  fill. Profiles with empty ``spread_pips`` keep the legacy
-  :class:`PerContractFeeModel`. ``swap_long_pips`` / ``swap_short_pips``
-  are still future work — proper modelling needs a Nautilus
-  ``SimulationModule`` that hooks the rollover boundary; see
-  :mod:`spread_fee_model` for the deferral note.
+* Story 10.9 (D8): non-empty ``spread_pips`` additionally charges
+  ``spread_pips × pip_value_per_lot × lots`` per fill, with the pip
+  value derived from the :class:`ContractSpec`.
+  ``swap_long_pips`` / ``swap_short_pips`` are still future work —
+  proper modelling needs a Nautilus ``SimulationModule`` that hooks the
+  rollover boundary; see :mod:`spread_fee_model` for the deferral note.
 """
 
 from __future__ import annotations
@@ -43,11 +49,10 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from nautilus_trader.backtest.models import PerContractFeeModel
 from nautilus_trader.model.currencies import USD
-from nautilus_trader.model.objects import Money
 
 from ..config.firm_profile import CommissionProfile, FirmProfile
+from .spread_fee_model import SpreadAwareFeeModel
 
 if TYPE_CHECKING:
     from nautilus_trader.backtest.models import FeeModel
@@ -91,17 +96,8 @@ def resolve_commission_profile(
 def commission_profile_to_fee_model(
     profile: CommissionProfile | None,
     currency: Currency,
-    *,
-    pip_value_per_lot_usd: float | None = None,
 ) -> FeeModel | None:
     """Convert a :class:`CommissionProfile` into a Nautilus :class:`FeeModel`.
-
-    Story 10.9 splits the dispatch:
-
-    * Empty ``spread_pips`` → :class:`PerContractFeeModel` with the
-      bare ``per_lot_usd`` (legacy P0.13 behaviour).
-    * Non-empty ``spread_pips`` → :class:`SpreadAwareFeeModel` that
-      additionally charges spread × pip_value × fill_qty per fill.
 
     Returns ``None`` only when the profile is missing AND has no
     spread to apply. A profile with zero ``per_lot_usd`` but non-empty
@@ -120,26 +116,10 @@ def commission_profile_to_fee_model(
 
     _require_usd(currency)
 
-    if has_spread:
-        # Local import — keeps the legacy single-fee path free of the
-        # Nautilus FeeModel subclass at module-import time, which makes
-        # mocking easier in tests that don't care about spread.
-        from .spread_fee_model import (
-            DEFAULT_PIP_VALUE_PER_LOT_USD,
-            SpreadAwareFeeModel,
-        )
-
-        return SpreadAwareFeeModel(
-            per_lot_usd=profile.per_lot_usd,
-            spread_pips=profile.spread_pips,
-            pip_value_per_lot_usd=(
-                pip_value_per_lot_usd
-                if pip_value_per_lot_usd is not None
-                else DEFAULT_PIP_VALUE_PER_LOT_USD
-            ),
-        )
-
-    return PerContractFeeModel(commission=Money(profile.per_lot_usd, currency))
+    return SpreadAwareFeeModel(
+        per_lot_usd=profile.per_lot_usd,
+        spread_pips=profile.spread_pips,
+    )
 
 
 def commission_per_lot_to_fee_model(
@@ -164,7 +144,7 @@ def commission_per_lot_to_fee_model(
     if amount == 0:
         return None
     _require_usd(currency)
-    return PerContractFeeModel(commission=Money(float(amount), currency))
+    return SpreadAwareFeeModel(per_lot_usd=float(amount))
 
 
 __all__ = [

@@ -59,17 +59,16 @@ class TestCalculateLotSizeBasic:
     """Standard XAUUSD-style risk calculations."""
 
     def test_long_basic(self) -> None:
-        # $100k account, 1% risk, entry 2400, stop 2390, pip_size 0.01
-        # stop_distance = 10.00, pips = 10 / 0.01 = 1000 pips
-        # risk = $1000, loss_per_lot = 1000 * $1 = $1000
+        # $100k account, 1% risk, entry 2400, stop 2390, XAUUSD contract 100 oz
+        # stop_distance = 10.00
+        # risk = $1000, loss_per_lot = 10.00 * 100 = $1000
         # lot_size = $1000 / $1000 = 1.0 lot
         sizer = RiskBasedPositionSizer(RiskBasedSizerConfig(risk_percent=Decimal("1.0")))
         result = sizer.calculate_lot_size(
             account_balance=Decimal("100000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("1.00")
 
@@ -80,8 +79,7 @@ class TestCalculateLotSizeBasic:
             account_balance=Decimal("100000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2410.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("1.00")
 
@@ -91,8 +89,7 @@ class TestCalculateLotSizeBasic:
             account_balance=Decimal("100000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("2.00")
 
@@ -102,8 +99,7 @@ class TestCalculateLotSizeBasic:
             account_balance=Decimal("100000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2380.00"),  # 20 dollar stop
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("0.50")
 
@@ -113,10 +109,39 @@ class TestCalculateLotSizeBasic:
             account_balance=Decimal("10000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("0.10")
+
+
+class TestQuoteCurrencyConversion:
+    """Non-USD-quoted symbols must size via the quote→account rate."""
+
+    def test_jpy_quote_conversion(self) -> None:
+        # USDJPY @ 150, stop 60 pips (0.60 JPY). Per-lot loss:
+        # 0.60 × 100 000 = 60 000 JPY = $400 at rate 1/150.
+        # 1% of $100k = $1000 → 2.5 lots.
+        sizer = RiskBasedPositionSizer(RiskBasedSizerConfig(risk_percent=Decimal("1.0")))
+        result = sizer.calculate_lot_size(
+            account_balance=Decimal("100000"),
+            entry_price=Decimal("150.00"),
+            stop_price=Decimal("150.60"),
+            contract_size=Decimal("100000"),
+            quote_to_account_rate=Decimal("1") / Decimal("150"),
+        )
+        assert result == Decimal("2.50")
+
+    def test_rate_defaults_to_one_for_usd_quotes(self) -> None:
+        # EURUSD: 28-pip stop → loss/lot = 0.0028 × 100 000 = $280.
+        # 1% of $100k = $1000 → 3.57 lots → floors to 3.57.
+        sizer = RiskBasedPositionSizer(RiskBasedSizerConfig(risk_percent=Decimal("1.0")))
+        result = sizer.calculate_lot_size(
+            account_balance=Decimal("100000"),
+            entry_price=Decimal("1.1000"),
+            stop_price=Decimal("1.0972"),
+            contract_size=Decimal("100000"),
+        )
+        assert result == Decimal("3.57")
 
 
 class TestCalculateLotSizeConstraints:
@@ -131,8 +156,7 @@ class TestCalculateLotSizeConstraints:
             account_balance=Decimal("100000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2399.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("5.0")
 
@@ -152,8 +176,7 @@ class TestCalculateLotSizeConstraints:
             account_balance=Decimal("1000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2300.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("0")
 
@@ -169,8 +192,7 @@ class TestCalculateLotSizeConstraints:
             account_balance=Decimal("33700"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("0.33")
 
@@ -187,8 +209,7 @@ class TestCalculateLotSizeConstraints:
             account_balance=Decimal("100000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("1.00")
 
@@ -202,30 +223,28 @@ class TestCalculateLotSizeEdgeCases:
             account_balance=Decimal("100000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2400.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("0")
 
-    def test_zero_pip_value_returns_zero(self) -> None:
+    def test_zero_contract_size_returns_zero(self) -> None:
         sizer = RiskBasedPositionSizer()
         result = sizer.calculate_lot_size(
             account_balance=Decimal("100000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("0"),
         )
         assert result == Decimal("0")
 
-    def test_zero_pip_size_returns_zero(self) -> None:
+    def test_zero_quote_rate_returns_zero(self) -> None:
         sizer = RiskBasedPositionSizer()
         result = sizer.calculate_lot_size(
             account_balance=Decimal("100000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0"),
+            contract_size=Decimal("100"),
+            quote_to_account_rate=Decimal("0"),
         )
         assert result == Decimal("0")
 
@@ -235,8 +254,7 @@ class TestCalculateLotSizeEdgeCases:
             account_balance=Decimal("0"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("0")
 
@@ -246,8 +264,7 @@ class TestCalculateLotSizeEdgeCases:
             account_balance=Decimal("-1000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("0")
 
@@ -262,8 +279,7 @@ class TestDecimalPrecision:
             account_balance=Decimal("30000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         # 30000 * 0.01 / (1000 * 1) = 0.3
         assert result == Decimal("0.30")
@@ -275,8 +291,7 @@ class TestDecimalPrecision:
             account_balance=Decimal("100000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert isinstance(result, Decimal)
 
@@ -291,7 +306,6 @@ class TestLegacyPositionSizerAdapter:
             account_balance=Decimal("100000"),
             entry_price=Decimal("2400.00"),
             stop_price=Decimal("2390.00"),
-            pip_value_per_lot=Decimal("1.0"),
-            pip_size=Decimal("0.01"),
+            contract_size=Decimal("100"),
         )
         assert result == Decimal("1.00")

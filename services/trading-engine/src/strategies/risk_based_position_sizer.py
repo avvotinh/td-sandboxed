@@ -1,13 +1,21 @@
 """Risk-percent based position sizer.
 
 Targets a fixed % of account equity per trade. Lot size is derived from
-the price distance between entry and stop, scaled by pip value per lot.
+the price distance between entry and stop, scaled by the symbol's
+contract size and (for non-account-currency quotes) the quote→account
+conversion rate.
 
 Formula:
     risk_amount   = account_balance * (risk_percent / 100)
-    stop_pips     = abs(entry_price - stop_price) / pip_size
-    loss_per_lot  = stop_pips * pip_value_per_lot
+    stop_distance = abs(entry_price - stop_price)          # quote ccy
+    loss_per_lot  = stop_distance * contract_size * quote_to_account_rate
     raw_lot_size  = risk_amount / loss_per_lot
+
+``contract_size`` and the rate come from
+:class:`src.instruments.contract_specs.ContractSpec` — strategies no
+longer carry per-symbol pip metadata (the static ``pip_size`` /
+``pip_value_per_lot`` YAML convention caused the 2026-07 lot-vs-unit
+sizing bug; see ``docs/strategy-redesign-plan-2026-07-02.md`` §1).
 
 The raw size is then floored to ``lot_step``. If the floored size is
 **below** ``min_lot_size`` the method returns ``Decimal("0")`` to signal
@@ -15,15 +23,9 @@ The raw size is then floored to ``lot_step``. If the floored size is
 than silently upsize to ``min_lot_size`` and breach the FTMO risk target.
 Above the minimum, the result is clamped to ``max_lot_size``.
 
-Invalid inputs (non-positive balance, pip size, pip value, or stop
+Invalid inputs (non-positive balance, contract size, rate, or stop
 distance) likewise return ``Decimal("0")`` so strategies do not open
 positions from malformed context.
-
-Pip value contract:
-    ``pip_value_per_lot`` MUST be denominated in the account currency.
-    For non-account-currency-quoted instruments (e.g. EURJPY on a USD
-    account), the caller is responsible for converting at the live rate
-    before invoking this sizer.
 """
 
 from __future__ import annotations
@@ -61,8 +63,8 @@ class RiskBasedPositionSizer:
         account_balance: Decimal,
         entry_price: Decimal,
         stop_price: Decimal,
-        pip_value_per_lot: Decimal,
-        pip_size: Decimal,
+        contract_size: Decimal,
+        quote_to_account_rate: Decimal = Decimal("1"),
     ) -> Decimal:
         """Return lot size respecting risk_percent and lot constraints.
 
@@ -72,8 +74,8 @@ class RiskBasedPositionSizer:
         """
         if (
             account_balance <= 0
-            or pip_size <= 0
-            or pip_value_per_lot <= 0
+            or contract_size <= 0
+            or quote_to_account_rate <= 0
         ):
             return Decimal("0")
 
@@ -82,8 +84,7 @@ class RiskBasedPositionSizer:
             return Decimal("0")
 
         risk_amount = account_balance * (self.config.risk_percent / Decimal("100"))
-        stop_pips = stop_distance / pip_size
-        loss_per_lot = stop_pips * pip_value_per_lot
+        loss_per_lot = stop_distance * contract_size * quote_to_account_rate
         raw_lot_size = risk_amount / loss_per_lot
 
         return self._clamp(raw_lot_size)

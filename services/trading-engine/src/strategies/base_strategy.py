@@ -18,6 +18,7 @@ from nautilus_trader.model.enums import OrderSide, OrderType, PositionSide
 from nautilus_trader.model.events import PositionClosed, PositionOpened
 from nautilus_trader.trading.strategy import Strategy
 
+from src.instruments.contract_specs import get_contract_spec
 from src.orders.signal import SignalType
 from src.regime.states import RegimeState
 from src.strategies.config import BaseStrategyConfig
@@ -211,18 +212,26 @@ class BaseStrategy(Strategy):
         raise NotImplementedError
 
     def get_position_size(self, signal: SignalType) -> float:
-        """Get position size for a signal.
+        """Get position size for a signal, in ENGINE UNITS.
 
         Override in subclass for dynamic position sizing.
-        Default returns the configured trade size.
+        Default converts the configured ``trade_size`` (MT5 lots, per
+        ``BaseStrategyConfig``) to engine units via the symbol's
+        :class:`~src.instruments.contract_specs.ContractSpec` — the
+        same lot→unit discipline as ``RiskSizedMixin.size_from_risk``.
+        Without this conversion the dormant fixed-lot path
+        (``_go_long`` / ``_go_short``) would resubmit lots as units,
+        reintroducing the 2026-07 sizing bug for any future
+        non-bracket strategy. Unknown symbols fail loudly.
 
         Args:
             signal: The signal type (BUY, SELL, CLOSE)
 
         Returns:
-            Position size as a float
+            Position size in engine units as a float
         """
-        return float(self.config.trade_size)
+        spec = get_contract_spec(str(self.config.instrument_id.symbol))
+        return float(spec.lots_to_units(self.config.trade_size))
 
     # Signal execution (AC3, Task 5)
     def _execute_signal(self, signal: SignalType) -> None:

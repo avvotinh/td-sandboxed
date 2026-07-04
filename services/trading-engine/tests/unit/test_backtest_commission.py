@@ -4,7 +4,7 @@ Three layers under test:
 
 1. ``resolve_commission_profile`` — picks product override over firm default.
 2. ``commission_profile_to_fee_model`` — converts the dataclass into a
-   Nautilus :class:`PerContractFeeModel`, returns ``None`` for the
+   lot-aware :class:`SpreadAwareFeeModel`, returns ``None`` for the
    zero-fee path.
 3. ``run_backtest`` — passes ``fee_model`` to ``add_venue`` only when
    ``VenueSpec.commission_per_lot_usd`` > 0, preserving prior behaviour
@@ -20,9 +20,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nautilus_trader.backtest.models import PerContractFeeModel
 from nautilus_trader.model.currencies import EUR, USD
 
+from src.backtesting.spread_fee_model import SpreadAwareFeeModel
 from src.backtesting.commission import (
     commission_per_lot_to_fee_model,
     commission_profile_to_fee_model,
@@ -126,10 +126,10 @@ class TestCommissionProfileToFeeModel:
         profile = CommissionProfile(per_lot_usd=0.0)
         assert commission_profile_to_fee_model(profile, USD) is None
 
-    def test_positive_per_lot_returns_per_contract_fee_model(self) -> None:
+    def test_positive_per_lot_returns_lot_aware_fee_model(self) -> None:
         profile = CommissionProfile(per_lot_usd=5.0)
         fee = commission_profile_to_fee_model(profile, USD)
-        assert isinstance(fee, PerContractFeeModel)
+        assert isinstance(fee, SpreadAwareFeeModel)
 
     def test_non_usd_currency_rejected(self) -> None:
         profile = CommissionProfile(per_lot_usd=5.0)
@@ -147,9 +147,9 @@ class TestCommissionPerLotToFeeModel:
         assert commission_per_lot_to_fee_model(0, USD) is None
         assert commission_per_lot_to_fee_model(Decimal("0"), USD) is None
 
-    def test_positive_returns_per_contract_fee_model(self) -> None:
+    def test_positive_returns_lot_aware_fee_model(self) -> None:
         fee = commission_per_lot_to_fee_model(Decimal("4.5"), USD)
-        assert isinstance(fee, PerContractFeeModel)
+        assert isinstance(fee, SpreadAwareFeeModel)
 
     def test_negative_raises_value_error(self) -> None:
         with pytest.raises(ValueError, match="must be >= 0"):
@@ -244,11 +244,11 @@ class TestRunnerFacadeWiresFeeModel:
         # Nautilus accepts fee_model=None (default no-fee path).
         assert add_venue_calls[0][2]["fee_model"] is None
 
-    def test_positive_commission_passes_per_contract_fee_model(self) -> None:
+    def test_positive_commission_passes_lot_aware_fee_model(self) -> None:
         runner = self._patch_runner_and_run(_job_with_commission(Decimal("7")))
         add_venue_calls = [c for c in runner.method_calls if c[0] == "add_venue"]
         assert len(add_venue_calls) == 1
-        assert isinstance(add_venue_calls[0][2]["fee_model"], PerContractFeeModel)
+        assert isinstance(add_venue_calls[0][2]["fee_model"], SpreadAwareFeeModel)
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +266,7 @@ def firms_dir(pytestconfig: pytest.Config) -> Path:
 class TestRealFtmoYamlCommission:
     """Loads ``configs/firms/ftmo.yaml`` end-to-end — value parity guard."""
 
-    def test_ftmo_resolves_to_per_contract_fee_of_7_usd(
+    def test_ftmo_resolves_to_per_lot_fee_of_7_usd(
         self, firms_dir: Path
     ) -> None:
         registry = FirmRegistry(firms_dir)
@@ -278,4 +278,4 @@ class TestRealFtmoYamlCommission:
         assert profile.per_lot_usd == 7.0
 
         fee = commission_profile_to_fee_model(profile, USD)
-        assert isinstance(fee, PerContractFeeModel)
+        assert isinstance(fee, SpreadAwareFeeModel)

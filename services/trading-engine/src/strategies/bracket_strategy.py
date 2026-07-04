@@ -66,8 +66,6 @@ class BracketStrategyConfig(BaseStrategyConfig, frozen=True, kw_only=True):
     sl_atr_mult: Decimal = Decimal("1.5")
     tp_atr_mult: Decimal = Decimal("3.0")
     risk_percent: Decimal = Decimal("1.0")
-    pip_size: Decimal = Decimal("0.01")
-    pip_value_per_lot: Decimal = Decimal("1.0")
 
     # Phase 1 — scale-out + trail tactics (Epic 13).
     # Both flags default False so legacy strategies keep single-fill +
@@ -97,8 +95,6 @@ class BracketStrategyConfig(BaseStrategyConfig, frozen=True, kw_only=True):
             "sl_atr_mult",
             "tp_atr_mult",
             "risk_percent",
-            "pip_size",
-            "pip_value_per_lot",
         ):
             value = getattr(self, field_name)
             if value <= 0:
@@ -191,11 +187,11 @@ class BracketStrategyMixin:
     Requires the host to provide:
     - ``self.cache`` (Nautilus cache, for last-bar reads)
     - ``self.portfolio`` (Nautilus portfolio, for balance reads)
-    - ``self.config`` with ``bar_type``, ``sl_atr_mult``, ``tp_atr_mult``,
-      ``pip_size``, ``pip_value_per_lot``
+    - ``self.config`` with ``bar_type``, ``sl_atr_mult``, ``tp_atr_mult``
     - ``self.calculate_atr_stop`` / ``calculate_atr_take_profit`` (from
       ``ATRStopMixin``)
-    - ``self.size_from_risk`` (from ``RiskSizedMixin``)
+    - ``self.size_from_risk`` (from ``RiskSizedMixin``; returns engine
+      units — lot→unit conversion happens there, nowhere else)
     - ``self._submit_bracket_order`` (from ``BaseStrategy``)
     """
 
@@ -250,7 +246,11 @@ class BracketStrategyMixin:
         atr_value: Decimal,
         account_balance: Decimal,
     ) -> tuple[Decimal, Decimal, Decimal]:
-        """Return ``(qty, sl_price, tp_price)`` from ATR + risk sizing."""
+        """Return ``(qty, sl_price, tp_price)`` from ATR + risk sizing.
+
+        ``qty`` is in engine units (``size_from_risk`` owns the
+        lot→unit conversion).
+        """
         cfg = self.config  # type: ignore[attr-defined]
         sl_price = self.calculate_atr_stop(  # type: ignore[attr-defined]
             side=side,
@@ -268,8 +268,6 @@ class BracketStrategyMixin:
             account_balance=account_balance,
             entry_price=entry_price,
             stop_price=sl_price,
-            pip_value_per_lot=cfg.pip_value_per_lot,
-            pip_size=cfg.pip_size,
         )
         return qty, sl_price, tp_price
 

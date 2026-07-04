@@ -1,5 +1,14 @@
 # In-sample comparison report
 
+> ⚠️ **SIZING-BUG NOTICE (2026-07-04):** All $-denominated figures in this report
+> (EV/trade, max drawdown $, FTMO compliance/breach counts) were produced under the
+> lot-vs-unit sizing bug — realised risk was ~1/100 (XAUUSD) to ~1/100,000 (FX) of the
+> configured `risk_percent`, and FX fees were zeroed as a workaround. Sharpe ratios and
+> strategy RANKINGS remain valid (scale-invariant); every FTMO compliance conclusion
+> ("0 breaches", "DD < X%") is void. Fixed 2026-07-04 on `fix/sizing-lot-vs-unit`
+> (see docs/strategy-redesign-plan-2026-07-02.md §1). Do not cite absolute numbers
+> from this report; re-run under Track 4 first.
+
 - Run label: `epic-12a-baseline-xauusd-m15-scaleout`
 - Dataset: `xauusd-validation` v`1.0.0` (window `in_sample`)
 - Dataset fingerprint: `b0ad700694500da8`

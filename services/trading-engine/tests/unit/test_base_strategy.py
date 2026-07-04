@@ -2,12 +2,11 @@
 
 import pytest
 from decimal import Decimal
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 
-from nautilus_trader.model.enums import PositionSide, OrderSide
+from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.data import BarType
-from nautilus_trader.model.events import PositionOpened, PositionClosed
 
 from src.strategies.base_strategy import BaseStrategy
 from src.strategies.config import BaseStrategyConfig
@@ -267,10 +266,16 @@ class TestSignalExecution:
 
 
 class TestGetPositionSize:
-    """Tests for get_position_size method."""
+    """Tests for get_position_size method.
 
-    def test_returns_config_trade_size(self):
-        """get_position_size should return config trade_size."""
+    Regression gate for the dormant fixed-lot path (2026-07 sizing
+    fix): ``trade_size`` is MT5 lots and MUST convert to engine units
+    via the symbol's ContractSpec before reaching ``make_qty`` —
+    otherwise ``_go_long`` / ``_go_short`` would resubmit lots as units
+    (the lot-vs-unit bug) for any future non-bracket strategy.
+    """
+
+    def test_converts_trade_size_lots_to_engine_units_xauusd(self):
         config = BaseStrategyConfig(
             instrument_id=InstrumentId.from_str("XAUUSD.BROKER"),
             bar_type=BarType.from_str("XAUUSD.BROKER-1-MINUTE-LAST-EXTERNAL"),
@@ -280,7 +285,29 @@ class TestGetPositionSize:
 
         size = strategy.get_position_size(SignalType.BUY)
 
-        assert size == 0.5
+        # 0.5 lots × 100 oz/lot = 50 engine units, NOT 0.5.
+        assert size == 50.0
+
+    def test_converts_trade_size_lots_to_engine_units_fx(self):
+        config = BaseStrategyConfig(
+            instrument_id=InstrumentId.from_str("EURUSD.BROKER"),
+            bar_type=BarType.from_str("EURUSD.BROKER-1-MINUTE-LAST-EXTERNAL"),
+            trade_size=Decimal("0.1"),
+        )
+        strategy = ConcreteStrategy(config)
+
+        assert strategy.get_position_size(SignalType.SELL) == 10_000.0
+
+    def test_unknown_symbol_fails_loudly(self):
+        config = BaseStrategyConfig(
+            instrument_id=InstrumentId.from_str("BTCUSDT.BINANCE"),
+            bar_type=BarType.from_str("BTCUSDT.BINANCE-1-MINUTE-LAST-EXTERNAL"),
+            trade_size=Decimal("0.1"),
+        )
+        strategy = ConcreteStrategy(config)
+
+        with pytest.raises(ValueError, match="No contract spec"):
+            strategy.get_position_size(SignalType.BUY)
 
 
 class TestOnEventLogic:

@@ -14,8 +14,6 @@ strategy_params:
   sl_atr_mult: "2.0"
   tp_atr_mult: "4.0"
   risk_percent: "0.5"
-  pip_size: "0.01"
-  pip_value_per_lot: "1.0"
   scale_out_enabled: false
   trailing_enabled: false
 data:

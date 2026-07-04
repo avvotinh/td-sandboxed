@@ -34,8 +34,6 @@ def _make_config(**overrides) -> SupertrendConfig:
         sl_atr_mult=Decimal("1.5"),
         tp_atr_mult=Decimal("3.0"),
         risk_percent=Decimal("1.0"),
-        pip_size=Decimal("0.01"),
-        pip_value_per_lot=Decimal("1.0"),
     )
     defaults.update(overrides)
     return SupertrendConfig(**defaults)

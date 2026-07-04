@@ -133,8 +133,6 @@ class TestBracketStrategyConfigValidation:
             ("tp_atr_mult", Decimal("-1.0")),
             ("risk_percent", Decimal("0")),
             ("risk_percent", Decimal("-0.1")),
-            ("pip_size", Decimal("0")),
-            ("pip_value_per_lot", Decimal("0")),
         ],
     )
     def test_decimal_fields_must_be_positive(

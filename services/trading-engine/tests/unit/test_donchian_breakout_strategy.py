@@ -36,8 +36,6 @@ def _make_config(**overrides) -> DonchianBreakoutConfig:
         sl_atr_mult=Decimal("2.0"),
         tp_atr_mult=Decimal("4.0"),
         risk_percent=Decimal("1.0"),
-        pip_size=Decimal("0.01"),
-        pip_value_per_lot=Decimal("1.0"),
     )
     defaults.update(overrides)
     return DonchianBreakoutConfig(**defaults)
