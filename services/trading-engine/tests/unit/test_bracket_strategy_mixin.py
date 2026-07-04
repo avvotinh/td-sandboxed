@@ -81,13 +81,12 @@ class TestReadAccountBalance:
         portfolio = MagicMock()
         account = MagicMock()
         money = MagicMock()
-        money.as_double.return_value = 120_500.50
+        money.as_decimal.return_value = Decimal("120500.50")
         account.balance_total.return_value = money
         portfolio.account.return_value = account
         host = _Host(portfolio=portfolio, bar_type=self._bar_type())
-        # Decimal(str(float)) is a controlled conversion; this proves the
-        # mixin plumbs the money all the way through.
-        assert host._read_account_balance() == Decimal("120500.5")
+        # Track 2.3: Money.as_decimal() end-to-end — no float round-trip.
+        assert host._read_account_balance() == Decimal("120500.50")
 
     def test_zero_when_balance_is_none(self) -> None:
         portfolio = MagicMock()
@@ -96,6 +95,60 @@ class TestReadAccountBalance:
         portfolio.account.return_value = account
         host = _Host(portfolio=portfolio, bar_type=self._bar_type())
         assert host._read_account_balance() == Decimal("0")
+
+
+# ---------------------------------------------------------------------------
+# BracketHost composition guard (Track 2.3 — review 2026-05-02 refactor #1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestBracketHostCompositionGuard:
+    """Mis-composed concrete strategies must fail at class DEFINITION,
+    not at their first signal mid-backtest."""
+
+    def test_missing_risk_sized_mixin_fails_at_definition(self) -> None:
+        from src.strategies.base_strategy import BaseStrategy
+        from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
+
+        with pytest.raises(TypeError, match="size_from_risk"):
+
+            class _Incomplete(  # noqa: F811 — never bound on raise
+                BaseStrategy, ATRStopMixin, BracketStrategyMixin
+            ):
+                def generate_signal(self, bar):  # pragma: no cover
+                    ...
+
+    def test_missing_atr_stop_mixin_fails_at_definition(self) -> None:
+        from src.strategies.base_strategy import BaseStrategy
+        from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
+
+        with pytest.raises(TypeError, match="calculate_atr_stop"):
+
+            class _Incomplete(
+                BaseStrategy, RiskSizedMixin, BracketStrategyMixin
+            ):
+                def generate_signal(self, bar):  # pragma: no cover
+                    ...
+
+    def test_complete_composition_passes(self) -> None:
+        from src.strategies.base_strategy import BaseStrategy
+        from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
+        from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
+
+        class _Complete(
+            BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin
+        ):
+            def generate_signal(self, bar):  # pragma: no cover
+                ...
+
+        assert _Complete is not None
+
+    def test_bare_test_hosts_are_exempt(self) -> None:
+        # _Host at the top of this file subclasses only the mixin —
+        # non-BaseStrategy hosts stub the contract per-instance and must
+        # keep working (the guard scopes to concrete strategies).
+        assert _Host is not None
 
 
 # ---------------------------------------------------------------------------

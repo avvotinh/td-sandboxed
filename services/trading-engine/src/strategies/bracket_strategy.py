@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import math
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from nautilus_trader.model.currencies import USD
 from nautilus_trader.model.enums import OrderSide
@@ -32,6 +32,78 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class BracketHost(Protocol):
+    """The contract a ``BracketStrategyMixin`` host must satisfy.
+
+    Track 2.3 (strategy-review-2026-05-02.md refactor #1): promotes the
+    previously implicit duck-typed contract to an explicit Protocol.
+    Methods listed here come from the standard composition —
+    ``BaseStrategy`` (submit/close/regime seams), ``ATRStopMixin``
+    (stop/take-profit math) and ``RiskSizedMixin`` (risk sizing).
+    Data attributes (``cache``, ``portfolio``, ``config``) are provided
+    by Nautilus ``Strategy`` and are not part of the runtime-checkable
+    surface (Cython properties resolve per instance, not per class).
+
+    Enforcement is two-fold: static (annotate against this Protocol
+    once mypy lands — TODO(mypy)) and runtime — see
+    ``BracketStrategyMixin.__init_subclass__``, which fails a concrete
+    strategy class at DEFINITION time when the composition is missing a
+    required mixin, instead of at the first signal.
+    """
+
+    @property
+    def is_flat(self) -> bool: ...
+
+    def calculate_atr_stop(
+        self,
+        *,
+        side: OrderSide,
+        entry_price: Decimal,
+        atr_value: Decimal,
+        multiplier: Decimal,
+    ) -> Decimal: ...
+
+    def calculate_atr_take_profit(
+        self,
+        *,
+        side: OrderSide,
+        entry_price: Decimal,
+        atr_value: Decimal,
+        multiplier: Decimal,
+    ) -> Decimal: ...
+
+    def size_from_risk(
+        self,
+        *,
+        account_balance: Decimal,
+        entry_price: Decimal,
+        stop_price: Decimal,
+    ) -> Decimal: ...
+
+    def _submit_bracket_order(
+        self,
+        side: OrderSide,
+        quantity: Decimal,
+        sl_price: Decimal,
+        tp_price: Decimal,
+    ) -> Any: ...
+
+    def _regime_admits(self, signal: SignalType) -> bool: ...
+
+    def _close_position(self) -> None: ...
+
+
+_BRACKET_HOST_REQUIRED: tuple[str, ...] = (
+    "calculate_atr_stop",
+    "calculate_atr_take_profit",
+    "size_from_risk",
+    "_submit_bracket_order",
+    "_regime_admits",
+    "_close_position",
+)
 
 
 def is_atr_unsafe(atr_raw: float | None) -> bool:
@@ -193,7 +265,36 @@ class BracketStrategyMixin:
     - ``self.size_from_risk`` (from ``RiskSizedMixin``; returns engine
       units — lot→unit conversion happens there, nowhere else)
     - ``self._submit_bracket_order`` (from ``BaseStrategy``)
+
+    The contract is spelled out in :class:`BracketHost` and enforced at
+    class-definition time by :meth:`__init_subclass__` for concrete
+    strategy compositions.
     """
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Fail a mis-composed concrete strategy at definition time.
+
+        A bracket strategy that forgets ``RiskSizedMixin`` (or
+        ``ATRStopMixin``) used to fail only at its FIRST SIGNAL, deep
+        inside a backtest. Checking the :class:`BracketHost` surface
+        when the class is created moves that failure to import time.
+        Only classes that are also ``BaseStrategy`` subclasses are
+        checked — bare test hosts stub the contract per-instance.
+        """
+        super().__init_subclass__(**kwargs)
+        from src.strategies.base_strategy import BaseStrategy
+
+        if not issubclass(cls, BaseStrategy):
+            return
+        missing = [
+            name for name in _BRACKET_HOST_REQUIRED if not hasattr(cls, name)
+        ]
+        if missing:
+            raise TypeError(
+                f"{cls.__name__} composes BracketStrategyMixin but is missing "
+                f"BracketHost member(s): {', '.join(missing)}. Add the "
+                "ATRStopMixin / RiskSizedMixin bases (see BracketHost)."
+            )
 
     def _last_bar(self) -> Bar | None:
         """Retrieve the most recent bar from the Nautilus cache.
@@ -232,11 +333,9 @@ class BracketStrategyMixin:
         if balance is None:
             logger.warning("balance_total is None for %s; treating as $0", venue)
             return Decimal("0")
-        # str(float) round-trip is deliberate: ``Decimal(float)`` picks
-        # up the binary-representation noise (e.g. 0.1 → 0.1000000000...);
-        # str() gives a clean repr capped at ~15 significant digits,
-        # which is sufficient for balance math.
-        return Decimal(str(balance.as_double()))
+        # ``Money.as_decimal()`` is exact — no float round-trip (Track 2.3;
+        # the old ``Decimal(str(as_double()))`` capped at float precision).
+        return balance.as_decimal()
 
     def _compute_bracket_params(
         self,
