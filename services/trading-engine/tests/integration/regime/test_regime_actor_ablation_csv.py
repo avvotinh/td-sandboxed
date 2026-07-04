@@ -127,6 +127,11 @@ def _ensure_strategies_registered():
     StrategyRegistry.unregister(BOLLINGER)
     importlib.reload(_donchian_module)
     importlib.reload(_bollinger_module)
+    # Drift guard: the ACTIVE strategy's pinned allow-list must still
+    # match its live declaration — if the decorator ever changes, this
+    # fails loudly instead of the matrix silently testing stale regimes.
+    # (BOLLINGER is exempt: archived with regimes=[], pin is deliberate.)
+    assert StrategyRegistry.get_regimes(DONCHIAN) == _TEST_ALLOW_LISTS[DONCHIAN]
     yield
 
 

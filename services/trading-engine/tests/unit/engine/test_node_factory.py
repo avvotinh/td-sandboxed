@@ -116,7 +116,7 @@ def _store():
 
 def _account(
     account_id: str = "acct-1",
-    strategy: str = "ma_crossover",
+    strategy: str = "donchian_breakout",
     strategy_params: dict[str, Any] | None = None,
 ) -> MagicMock:
     cfg = MagicMock()
@@ -130,7 +130,7 @@ def _spec(
     account_id: str = "acct-1",
     *,
     bar_subscriptions: tuple[tuple[str, str], ...] = (("EURUSD", "1m"),),
-    strategy: str = "ma_crossover",
+    strategy: str = "donchian_breakout",
     strategy_params: dict[str, Any] | None = None,
     compliance_actor: Any = None,
     regime_actor: Any = None,
@@ -181,13 +181,13 @@ class TestNodeBuild:
     def test_strategy_added_with_account_id_threaded_through(self) -> None:
         account = _account(
             "acct-1",
-            strategy="ma_crossover",
-            strategy_params={"fast_period": 5, "slow_period": 20},
+            strategy="donchian_breakout",
+            strategy_params={"channel_period": 10, "atr_period": 7},
         )
         spec = _spec(
             "acct-1",
-            strategy="ma_crossover",
-            strategy_params={"fast_period": 5, "slow_period": 20},
+            strategy="donchian_breakout",
+            strategy_params={"channel_period": 10, "atr_period": 7},
         )
 
         node = build_account_trading_node(
@@ -202,8 +202,21 @@ class TestNodeBuild:
         # it back through the strategy's config proves the param flow.
         assert getattr(strategy.config, "account_id", "") == "acct-1"
         # Strategy params survived the pass-through.
-        assert getattr(strategy.config, "fast_period", None) == 5
-        assert getattr(strategy.config, "slow_period", None) == 20
+        assert getattr(strategy.config, "channel_period", None) == 10
+        assert getattr(strategy.config, "atr_period", None) == 7
+
+    def test_archived_strategy_rejected_on_live_path(self) -> None:
+        # Track 2 hard stop: regimes=[] archival only bites when regime
+        # gating is enabled for the account, so the node factory refuses
+        # archived strategies outright regardless of regime config.
+        from src.backtesting.strategy_registry import ArchivedStrategyError
+
+        with pytest.raises(ArchivedStrategyError, match="ARCHIVED"):
+            build_account_trading_node(
+                account=_account(strategy="ma_crossover"),
+                spec=_spec(strategy="ma_crossover"),
+                trading_node_cls=_RecordingTradingNode,
+            )
 
     def test_compliance_actor_attached_when_supplied(self) -> None:
         actor = MagicMock(name="PropFirmComplianceActor")
@@ -282,7 +295,7 @@ class TestPerAccountIsolation:
             bar_subscriptions=(("XAUUSD", "1m"),),
             redis_client=MagicMock(),
             validated_adapter=adapter_a,
-            strategy_name="ma_crossover",
+            strategy_name="donchian_breakout",
             strategy_params={},
         )
         spec_b = AccountNodeSpec(
@@ -291,7 +304,7 @@ class TestPerAccountIsolation:
             bar_subscriptions=(("XAUUSD", "1m"),),
             redis_client=MagicMock(),
             validated_adapter=adapter_b,
-            strategy_name="ma_crossover",
+            strategy_name="donchian_breakout",
             strategy_params={},
         )
 
@@ -372,7 +385,7 @@ class TestRegimeWiring:
     """
 
     @pytest.fixture(autouse=True)
-    def _ensure_ma_crossover_registered(self):
+    def _ensure_strategy_registered(self):
         """Re-fire ``@register_strategy`` in case another suite cleared it.
 
         The regime allow-list is read from ``StrategyRegistry`` (the clearable
@@ -380,11 +393,11 @@ class TestRegimeWiring:
         dict. Reloading the module re-registers it idempotently regardless of
         suite ordering.
         """
-        import src.strategies.ma_crossover as _ma_module
+        import src.strategies.donchian_breakout as _strategy_module
         from src.strategies.registry import StrategyRegistry
 
-        StrategyRegistry.unregister("ma_crossover")
-        importlib.reload(_ma_module)
+        StrategyRegistry.unregister("donchian_breakout")
+        importlib.reload(_strategy_module)
         yield
 
     def test_regime_actor_attached_when_supplied(self) -> None:
@@ -401,9 +414,9 @@ class TestRegimeWiring:
 
         store = _store()
         node = build_account_trading_node(
-            account=_account(strategy="ma_crossover"),
+            account=_account(strategy="donchian_breakout"),
             spec=_spec(
-                strategy="ma_crossover",
+                strategy="donchian_breakout",
                 regime_actor=MagicMock(name="RegimeActor"),
                 regime_state=store,
             ),
@@ -414,12 +427,9 @@ class TestRegimeWiring:
         assert strategy._regime_state is store
         # Allow-list pulled from the production registry, not hand-copied.
         assert strategy._allowed_regimes == StrategyRegistry.get_regimes(
-            "ma_crossover"
+            "donchian_breakout"
         )
-        # Archived (Track 2.2): ma_crossover declares regimes=[] — the
-        # injected empty frozenset is distinct from None (ungated).
-        assert strategy._allowed_regimes is not None
-        assert strategy._allowed_regimes == frozenset()
+        assert strategy._allowed_regimes  # donchian declares TRENDING_*
 
     def test_default_off_leaves_strategy_ungated(self) -> None:
         """No regime pair → no actor, strategy keeps default-OFF None attrs."""
@@ -474,15 +484,15 @@ class TestRegimeWiring:
     def test_regime_on_with_unregistered_strategy_raises(self) -> None:
         from src.strategies.registry import StrategyRegistry
 
-        # ma_crossover resolves in the backtest registry (so the node builds)
-        # but is absent from StrategyRegistry → the allow-list lookup must fail
-        # loud rather than silently leaving the gate mis-wired.
+        # donchian_breakout resolves in the backtest registry (so the node
+        # builds) but is absent from StrategyRegistry → the allow-list lookup
+        # must fail loud rather than silently leaving the gate mis-wired.
         with pytest.raises(RuntimeError, match="has no entry in StrategyRegistry"):
-            StrategyRegistry.unregister("ma_crossover")
+            StrategyRegistry.unregister("donchian_breakout")
             build_account_trading_node(
-                account=_account(strategy="ma_crossover"),
+                account=_account(strategy="donchian_breakout"),
                 spec=_spec(
-                    strategy="ma_crossover",
+                    strategy="donchian_breakout",
                     regime_actor=MagicMock(),
                     regime_state=_store(),
                 ),

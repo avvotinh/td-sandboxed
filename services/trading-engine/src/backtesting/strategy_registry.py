@@ -44,12 +44,29 @@ class UnknownStrategyError(KeyError):
     """Raised when a backtest job references an unregistered strategy name."""
 
 
+class ArchivedStrategyError(ValueError):
+    """Raised when a LIVE caller resolves an archived strategy.
+
+    ``regimes=[]`` archival only bites when regime gating is wired for
+    the account; this error is the independent hard stop for the live
+    path (Track 2 review follow-up) — an archived strategy must never
+    trade real capital regardless of regime configuration.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class StrategyEntry:
-    """Registry entry: (config class, strategy class) pair."""
+    """Registry entry: (config class, strategy class) pair.
+
+    ``archived=True`` marks strategies retired from the active roster
+    (Track 2, redesign plan 2026-07-02). They stay resolvable for
+    backtest A/B re-runs but are refused on the live path
+    (``resolve_strategy(..., allow_archived=False)``).
+    """
 
     config_cls: type[StrategyConfig]
     strategy_cls: type[BaseStrategy]
+    archived: bool = False
 
 
 BACKTEST_STRATEGIES: Final[dict[str, StrategyEntry]] = {
@@ -59,30 +76,54 @@ BACKTEST_STRATEGIES: Final[dict[str, StrategyEntry]] = {
         DonchianBreakoutConfig, DonchianBreakoutStrategy
     ),
     "mean_reversion": StrategyEntry(MeanReversionConfig, MeanReversionStrategy),
-    # Archived (regimes=[]; kept resolvable for A/B re-runs of the old
-    # Phase 12.A reports — see the sizing-bug banners in sprint-artifacts).
-    "ma_crossover": StrategyEntry(MACrossoverConfig, MACrossoverStrategy),
+    # Archived (regimes=[] + archived=True; kept resolvable for A/B
+    # re-runs of the old Phase 12.A reports — see the sizing-bug banners
+    # in sprint-artifacts).
+    "ma_crossover": StrategyEntry(
+        MACrossoverConfig, MACrossoverStrategy, archived=True
+    ),
     "rsi_mean_reversion": StrategyEntry(
-        RSIMeanReversionConfig, RSIMeanReversionStrategy
+        RSIMeanReversionConfig, RSIMeanReversionStrategy, archived=True
     ),
     "bollinger_mean_reversion": StrategyEntry(
-        BollingerMeanReversionConfig, BollingerMeanReversionStrategy
+        BollingerMeanReversionConfig, BollingerMeanReversionStrategy,
+        archived=True,
     ),
-    "orb": StrategyEntry(ORBConfig, ORBStrategy),
+    "orb": StrategyEntry(ORBConfig, ORBStrategy, archived=True),
 }
 
 
-def resolve_strategy(name: str) -> StrategyEntry:
+def resolve_strategy(name: str, *, allow_archived: bool = True) -> StrategyEntry:
     """Return the ``StrategyEntry`` for ``name`` or raise.
+
+    Args:
+        name: Registered strategy name.
+        allow_archived: ``True`` (default) serves backtest callers —
+            archived strategies stay runnable for A/B re-runs against
+            the banner-flagged Phase 12.A reports. The LIVE path
+            (``node_factory``) passes ``False`` so an archived strategy
+            can never be provisioned onto a real account, independent
+            of whether regime gating is enabled there.
 
     Raises:
         UnknownStrategyError: ``name`` is not registered. The message
             lists known strategies so callers (and users) can fix typos.
+        ArchivedStrategyError: ``name`` is archived and
+            ``allow_archived=False``.
     """
     try:
-        return BACKTEST_STRATEGIES[name]
+        entry = BACKTEST_STRATEGIES[name]
     except KeyError as exc:
         known = ", ".join(sorted(BACKTEST_STRATEGIES.keys()))
         raise UnknownStrategyError(
             f"Unknown strategy {name!r}. Known: {known}"
         ) from exc
+    if entry.archived and not allow_archived:
+        active = ", ".join(
+            sorted(n for n, e in BACKTEST_STRATEGIES.items() if not e.archived)
+        )
+        raise ArchivedStrategyError(
+            f"Strategy {name!r} is ARCHIVED (Track 2, redesign plan "
+            f"2026-07-02) and cannot run on the live path. Active: {active}"
+        )
+    return entry

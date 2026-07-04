@@ -147,8 +147,10 @@ class MeanReversionStrategy(
         if not self.is_flat:
             return SignalType.NONE
 
-        # Confluence entry: band pierce AND RSI extreme (inclusive
-        # thresholds, matching the archived RSI MR zone semantics).
+        # Confluence entry: band pierce AND RSI extreme. The RSI side is
+        # a static zone check (inclusive thresholds) — deliberately NOT
+        # the archived RSI MR's momentum-cross requirement, which would
+        # rarely coincide with the band pierce on the same bar.
         if close < lower and rsi <= self.config.oversold:
             return SignalType.BUY
         if close > upper and rsi >= self.config.overbought:

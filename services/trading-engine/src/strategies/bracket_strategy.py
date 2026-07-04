@@ -57,9 +57,11 @@ class BracketHost(Protocol):
     @property
     def is_flat(self) -> bool: ...
 
+    # NOTE: positional-or-keyword (no ``*``) to match the actual
+    # ``ATRStopMixin`` staticmethod signatures — a keyword-only Protocol
+    # would produce spurious conformance errors once mypy lands.
     def calculate_atr_stop(
         self,
-        *,
         side: OrderSide,
         entry_price: Decimal,
         atr_value: Decimal,
@@ -68,7 +70,6 @@ class BracketHost(Protocol):
 
     def calculate_atr_take_profit(
         self,
-        *,
         side: OrderSide,
         entry_price: Decimal,
         atr_value: Decimal,
@@ -96,6 +97,11 @@ class BracketHost(Protocol):
     def _close_position(self) -> None: ...
 
 
+# The guard only fires for BaseStrategy subclasses, which already provide
+# _submit_bracket_order / _regime_admits / _close_position — those three
+# entries are defensive against a future BaseStrategy refactor moving
+# them out; today only the ATRStopMixin / RiskSizedMixin methods can
+# actually be missing.
 _BRACKET_HOST_REQUIRED: tuple[str, ...] = (
     "calculate_atr_stop",
     "calculate_atr_take_profit",

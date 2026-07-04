@@ -413,7 +413,10 @@ def _resolve_and_build_strategy(
     ``spec.account_id`` so per-account routing inside the strategy
     (used by ``ValidatedZmqAdapter``) sees the correct scope.
     """
-    entry = resolve_strategy(spec.strategy_name)
+    # allow_archived=False: the live path must refuse archived strategies
+    # outright — the regimes=[] archival only bites when regime gating is
+    # enabled for the account (Track 2 review follow-up).
+    entry = resolve_strategy(spec.strategy_name, allow_archived=False)
     config_kwargs: dict[str, Any] = {
         "instrument_id": instrument_id,
         "bar_type": bar_type,
