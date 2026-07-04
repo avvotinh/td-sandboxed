@@ -117,21 +117,22 @@ class SpreadAwareFeeModel(FeeModel):
 
     # ----- Nautilus FeeModel surface -----------------------------------
 
-    def get_commission(self, order, fill_qty, fill_px, instrument):  # noqa: ANN001 — Cython types
+    def get_commission(self, order, fill_qty, fill_px, instrument) -> Money:  # noqa: ANN001 — Cython params
         """Compute the per-fill USD cost = (commission + spread) × lots.
 
         Nautilus calls this on every fill; an entry and an exit each
         invoke once, so a round trip pays the spread twice — matching
-        how live brokers settle.
+        how live brokers settle. The lot conversion and total are
+        computed in ``Decimal``; floats only cross the boundary at the
+        Nautilus ``Money`` constructor (which quantises to cents).
         """
         symbol = self._extract_symbol(instrument)
         spec = get_contract_spec(symbol)
-        qty_lots = float(fill_qty) / float(spec.contract_size)
-        per_lot_total = self._per_lot_usd + self._spread_cost_per_lot(
-            symbol, float(fill_px)
+        qty_lots = Decimal(str(float(fill_qty))) / spec.contract_size
+        per_lot_total = Decimal(str(self._per_lot_usd)) + Decimal(
+            str(self._spread_cost_per_lot(symbol, float(fill_px)))
         )
-        total_usd = per_lot_total * qty_lots
-        return Money(total_usd, USD)
+        return Money(per_lot_total * qty_lots, USD)
 
     # ----- Internals ---------------------------------------------------
 
@@ -144,7 +145,13 @@ class SpreadAwareFeeModel(FeeModel):
         return str(symbol).strip().upper()
 
     def _spread_cost_per_lot(self, symbol: str, price: float | None) -> float:
-        """Spread cost in USD per lot: pips × pip-value-per-lot(USD)."""
+        """Spread cost in USD per lot: pips × pip-value-per-lot(USD).
+
+        Symbols with no configured spread short-circuit to 0 and skip
+        ContractSpec validation entirely — commission-only symbols are
+        allowed; the loud unknown-symbol guard for every fill lives in
+        :meth:`get_commission` instead.
+        """
         spread = self._spread_pips.get(symbol.strip().upper())
         if not spread:
             return 0.0

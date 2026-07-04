@@ -1,12 +1,15 @@
 """Mixin that delegates risk sizing to an injected ``PositionSizerProtocol``.
 
-This module owns the ONE lot→engine-unit conversion point in production
-code. The sizer speaks MT5 lots (that is what FTMO limits, lot_step and
-the MT5 bridge are denominated in); Nautilus ``Quantity`` for our
-backtest instruments means base-asset units (1 oz / 1 unit of base
-currency). ``size_from_risk`` sizes in lots, then converts to engine
-units via the symbol's :class:`~src.instruments.contract_specs.ContractSpec`
-before returning. Everything downstream of this mixin (bracket helpers,
+This module owns the lot→engine-unit conversion for the risk-sized
+(bracket) path — the only conversion on that path; the dormant
+fixed-``trade_size`` path converts in ``BaseStrategy.get_position_size``
+with the same :class:`ContractSpec` discipline. The sizer speaks MT5
+lots (that is what FTMO limits, lot_step and the MT5 bridge are
+denominated in); Nautilus ``Quantity`` for our backtest instruments
+means base-asset units (1 oz / 1 unit of base currency).
+``size_from_risk`` sizes in lots, then converts to engine units via the
+symbol's :class:`~src.instruments.contract_specs.ContractSpec` before
+returning. Everything downstream of this mixin (bracket helpers,
 ``make_qty``, partial closes) is engine units — do not convert again.
 """
 
@@ -40,12 +43,27 @@ class RiskSizedMixin:
     def contract_spec(self) -> ContractSpec:
         """Contract spec for the traded symbol (resolved once, then cached).
 
+        The cache assumes the Nautilus invariant of one immutable
+        (frozen-config) instrument per strategy instance for its whole
+        lifetime. The symbol is re-checked on every call so a violated
+        assumption (config swap, multi-symbol reuse) fails loudly
+        instead of silently sizing with stale contract economics.
+
         Raises ``ValueError`` for symbols without a registered spec —
         sizing must never proceed on guessed contract economics.
         """
-        if self._cached_contract_spec is None:
-            symbol = str(self.config.instrument_id.symbol)  # type: ignore[attr-defined]
-            self._cached_contract_spec = get_contract_spec(symbol)
+        symbol = str(self.config.instrument_id.symbol)  # type: ignore[attr-defined]
+        bare = symbol.split(".", 1)[0].upper()
+        cached = self._cached_contract_spec
+        if cached is not None:
+            if cached.symbol != bare:
+                raise RuntimeError(
+                    f"Cached contract spec is for {cached.symbol!r} but the "
+                    f"strategy config now trades {bare!r} — strategy instances "
+                    "must not be reused across instruments"
+                )
+            return cached
+        self._cached_contract_spec = get_contract_spec(symbol)
         return self._cached_contract_spec
 
     def size_from_risk(
