@@ -9,11 +9,14 @@ router, this test feeds **OHLCV bar fixtures through the real
 strategy's *orders* — the only observable that proves the 15.7 entry gate
 filters trades end to end.
 
-Ablation matrix (2 production strategies, regimes read live from
-``StrategyRegistry`` so a decorator change retunes the table automatically):
+Ablation matrix (allow-lists pinned test-locally in ``_TEST_ALLOW_LISTS``
+— Track 2.1 archived ``bollinger_mean_reversion`` with ``regimes=[]``, but
+it remains the ideal RANGING gate *vehicle* here because the fixtures were
+tuned to its band-touch entries; the pin restores its historical allow-list
+for gate-mechanics testing without depending on roster policy):
 
     donchian_breakout      -> {TRENDING_UP, TRENDING_DOWN}
-    bollinger_mean_reversion -> {RANGING}
+    bollinger_mean_reversion -> {RANGING}   (pinned; archived in roster)
 
     fixture            allowed strategy           blocked strategy
     -----------------  -------------------------  ------------------------
@@ -101,6 +104,14 @@ EXPECTED_BARS = 280
 
 DONCHIAN = "donchian_breakout"
 BOLLINGER = "bollinger_mean_reversion"
+
+# Test-local allow-lists (see module docstring). Donchian mirrors its live
+# declaration; bollinger pins the pre-Track-2 {RANGING} list because its
+# live declaration is now the archived "never route" empty set.
+_TEST_ALLOW_LISTS: dict[str, frozenset[RegimeState]] = {
+    DONCHIAN: frozenset({RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN}),
+    BOLLINGER: frozenset({RegimeState.RANGING}),
+}
 
 
 @pytest.fixture(autouse=True)
@@ -247,7 +258,7 @@ def _run_order_count(
         )
         if store is not None:
             strategy._regime_state = store
-            strategy._allowed_regimes = StrategyRegistry.get_regimes(strategy_name)
+            strategy._allowed_regimes = _TEST_ALLOW_LISTS[strategy_name]
         runner.add_strategy(strategy)
 
         runner.run()

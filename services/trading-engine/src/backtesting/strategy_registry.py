@@ -23,6 +23,10 @@ from src.strategies.donchian_breakout import (
     DonchianBreakoutStrategy,
 )
 from src.strategies.ma_crossover import MACrossoverConfig, MACrossoverStrategy
+from src.strategies.mean_reversion import (
+    MeanReversionConfig,
+    MeanReversionStrategy,
+)
 from src.strategies.orb import ORBConfig, ORBStrategy
 from src.strategies.rsi_mean_reversion import (
     RSIMeanReversionConfig,
@@ -49,11 +53,15 @@ class StrategyEntry:
 
 
 BACKTEST_STRATEGIES: Final[dict[str, StrategyEntry]] = {
-    "ma_crossover": StrategyEntry(MACrossoverConfig, MACrossoverStrategy),
+    # Active roster (Track 2, redesign plan 2026-07-02).
     "supertrend": StrategyEntry(SupertrendConfig, SupertrendStrategy),
     "donchian_breakout": StrategyEntry(
         DonchianBreakoutConfig, DonchianBreakoutStrategy
     ),
+    "mean_reversion": StrategyEntry(MeanReversionConfig, MeanReversionStrategy),
+    # Archived (regimes=[]; kept resolvable for A/B re-runs of the old
+    # Phase 12.A reports — see the sizing-bug banners in sprint-artifacts).
+    "ma_crossover": StrategyEntry(MACrossoverConfig, MACrossoverStrategy),
     "rsi_mean_reversion": StrategyEntry(
         RSIMeanReversionConfig, RSIMeanReversionStrategy
     ),

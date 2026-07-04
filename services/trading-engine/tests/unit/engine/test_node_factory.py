@@ -416,7 +416,10 @@ class TestRegimeWiring:
         assert strategy._allowed_regimes == StrategyRegistry.get_regimes(
             "ma_crossover"
         )
-        assert strategy._allowed_regimes  # ma_crossover declares TRENDING_*
+        # Archived (Track 2.2): ma_crossover declares regimes=[] — the
+        # injected empty frozenset is distinct from None (ungated).
+        assert strategy._allowed_regimes is not None
+        assert strategy._allowed_regimes == frozenset()
 
     def test_default_off_leaves_strategy_ungated(self) -> None:
         """No regime pair → no actor, strategy keeps default-OFF None attrs."""

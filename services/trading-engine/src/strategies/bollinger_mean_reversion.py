@@ -25,7 +25,6 @@ from src.strategies.bracket_strategy import (
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
-from src.regime.states import RegimeState
 from src.strategies.registry import register_strategy
 from src.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
@@ -60,9 +59,13 @@ class BollingerMeanReversionConfig(BracketStrategyConfig, frozen=True, kw_only=T
             )
 
 
+# ARCHIVED (Track 2.1, redesign plan 2026-07-02): superseded by the
+# consolidated ``mean_reversion`` strategy (Bollinger × RSI confluence).
+# regimes=[] means "never route" — kept registered/resolvable only for
+# A/B re-runs against the old Phase 12.A reports.
 @register_strategy(
     "bollinger_mean_reversion",
-    regimes=[RegimeState.RANGING],
+    regimes=[],
 )
 class BollingerMeanReversionStrategy(
     BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin

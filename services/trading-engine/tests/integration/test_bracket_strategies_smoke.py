@@ -134,6 +134,27 @@ def test_bollinger_mean_reversion_smoke() -> None:
     _assert_well_formed(result, "bollinger_mean_reversion")
 
 
+def test_mean_reversion_smoke() -> None:
+    # Track 2.1 consolidated strategy (Bollinger × RSI confluence).
+    job = _base_job(
+        "mean_reversion",
+        {
+            **_common_bracket_params(),
+            "bb_period": 20,
+            "num_std": 2.0,
+            "rsi_period": 14,
+            "oversold": 0.3,
+            "overbought": 0.7,
+            "sl_atr_mult": Decimal("1.0"),
+            "tp_atr_mult": Decimal("2.0"),
+        },
+    )
+    t0 = time.monotonic()
+    result = run_backtest(job)
+    assert time.monotonic() - t0 < 10.0
+    _assert_well_formed(result, "mean_reversion")
+
+
 def test_orb_smoke() -> None:
     # Synthetic bars start at 2024-01-01 00:00 UTC; match the ORB session
     # to the full 24h UTC window so every bar is in-session.

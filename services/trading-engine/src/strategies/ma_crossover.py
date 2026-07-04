@@ -32,7 +32,6 @@ from src.strategies.bracket_strategy import (
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
-from src.regime.states import RegimeState
 from src.strategies.registry import register_strategy
 from src.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
@@ -87,9 +86,14 @@ class MACrossoverConfig(BracketStrategyConfig, frozen=True, kw_only=True):
             )
 
 
+# ARCHIVED (Track 2.2, redesign plan 2026-07-02): the Phase 12.A edge
+# (+0.137 Sharpe, best-of-roster) was an artifact of the missing SL —
+# see epic-12-phase-12a-final-verdict.md. EMA slope survives as a
+# regime-classifier feature; the strategy itself never routes.
+# regimes=[] — kept registered/resolvable only for A/B re-runs.
 @register_strategy(
     "ma_crossover",
-    regimes=[RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN],
+    regimes=[],
 )
 class MACrossoverStrategy(
     BracketScaleOutMixin,
