@@ -86,9 +86,12 @@ kết luận FTMO compliance ("0 breaches, DD < 5.1%") vô giá trị** — chư
 
 ## Track 4 — Validate lại (CẦN data: chặn bởi Track 0 + Track 1)
 
-- [ ] **4.1** Re-run Phase 12.A trên XAUUSD M5/M15 với sizing đúng → viết verdict mới.
+- [x] **4.1** Re-run Phase 12.A trên XAUUSD M5/M15 với sizing đúng → viết verdict mới.
       Kỳ vọng: thứ hạng Sharpe giữ, số FTMO compliance thay đổi hoàn toàn (một số strategy
       sẽ breach daily-loss thật — đó là thông tin để loại bỏ).
+      *(2026-07-05: chạy trên 2y window — `epic-12a-rerun-2y-verdict.md`. Kỳ vọng xác nhận:
+      Sharpe giữ nguyên từng số trừ ma_crossover sụp vì fee per-lot; mọi strategy breach
+      max-DD 10%. Re-run 5y chờ Track 0.)*
 - [ ] **4.2** Baseline 5 năm × 4 symbols × M5/M15 (kiểm tra giả thuyết "XAUUSD chỉ là
       instrument nhiễu nhất" từ retro Epic 13 §8).
 - [ ] **4.3** Regime gating **ablation ON vs OFF** (RegimeActor Epic 15 đã xong, default-OFF) —
