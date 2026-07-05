@@ -1,22 +1,24 @@
-"""Phase 12.A — in-sample baseline run on all 6 production strategies.
+"""Phase 12.A — in-sample baseline run across the strategy registry.
 
-Pins the canonical XAUUSD M5 in_sample window from the Epic 12.7.0
-dataset, runs ``run_baseline()`` (Story 12.2) across every strategy
-in the production registry, applies the Decision §2 acceptance filter
-(Story 12.3), and writes a side-by-side markdown comparison report to
-``docs/sprint-artifacts/epic-12-baseline-comparison.md``.
+Pins the canonical XAUUSD in_sample window from the dataset manifest,
+runs ``run_baseline()`` (Story 12.2) across every strategy in the
+registry, applies the Decision §2 acceptance filter (Story 12.3), and
+writes a side-by-side markdown comparison report to
+``docs/sprint-artifacts/``.
 
-This is the **input** for Story 12.7b (parameter sweep on top 2-3
-filter-passing strategies). It is intentionally a one-shot operator
-script rather than a CLI subcommand because the experiment is run
-once per dataset bump — the CLI footprint already covers ``run`` /
-``sweep`` / ``walkforward`` / ``ab`` for recurring use.
+Post Track-1/2 redesign (2026-07): pip economics come from
+``ContractSpec`` (derived per instrument) instead of per-strategy
+``pip_size``/``pip_value_per_lot`` params. The roster includes the
+consolidated ``mean_reversion`` plus the archived strategies
+(``ma_crossover``, ``bollinger_mean_reversion``, ``rsi_mean_reversion``,
+``orb``) — archived entries still resolve in backtests so the re-run
+compares like-for-like against the pre-fix (sizing-bug) reports.
 
 Usage::
 
     uv run python scripts/run_epic12a_baseline.py \\
-      --manifest manifests/xauusd-validation-v1.json \\
-      --out      ../../docs/sprint-artifacts/epic-12-baseline-comparison.md
+      --manifest manifests/xauusd-2y.json \\
+      --out      ../../docs/sprint-artifacts/epic-12a-rerun-2y.md
 """
 
 from __future__ import annotations
@@ -108,8 +110,6 @@ def _build_strategies(timeframe: str, *, scale_out: bool = False) -> tuple[Strat
                     "sl_atr_mult": "1.5",
                     "tp_atr_mult": "3.0",
                     "risk_percent": "0.5",
-                    "pip_size": "0.01",
-                    "pip_value_per_lot": "1.0",
                 },
             ),
         ),
@@ -125,10 +125,24 @@ def _build_strategies(timeframe: str, *, scale_out: bool = False) -> tuple[Strat
                     "sl_atr_mult": "2.0",
                     "tp_atr_mult": "4.0",
                     "risk_percent": "0.5",
-                    "pip_size": "0.01",
-                    "pip_value_per_lot": "1.0",
                 },
             ),
+        ),
+        StrategySpec(
+            name="mean_reversion",
+            timeframe=timeframe,
+            bar_type_suffix=suffix,
+            params={
+                "bb_period": 20,
+                "num_std": 2.0,
+                "rsi_period": 14,
+                "oversold": 0.3,
+                "overbought": 0.7,
+                "atr_period": 14,
+                "sl_atr_mult": "1.0",
+                "tp_atr_mult": "2.0",
+                "risk_percent": "0.5",
+            },
         ),
         StrategySpec(
             name="ma_crossover",
@@ -143,8 +157,6 @@ def _build_strategies(timeframe: str, *, scale_out: bool = False) -> tuple[Strat
                     "sl_atr_mult": "1.5",
                     "tp_atr_mult": "3.0",
                     "risk_percent": "0.5",
-                    "pip_size": "0.01",
-                    "pip_value_per_lot": "1.0",
                 },
             ),
         ),
@@ -159,8 +171,6 @@ def _build_strategies(timeframe: str, *, scale_out: bool = False) -> tuple[Strat
                 "sl_atr_mult": "1.0",
                 "tp_atr_mult": "2.0",
                 "risk_percent": "0.5",
-                "pip_size": "0.01",
-                "pip_value_per_lot": "1.0",
             },
         ),
         StrategySpec(
@@ -176,8 +186,6 @@ def _build_strategies(timeframe: str, *, scale_out: bool = False) -> tuple[Strat
                 "sl_atr_mult": "1.0",
                 "tp_atr_mult": "2.0",
                 "risk_percent": "0.5",
-                "pip_size": "0.01",
-                "pip_value_per_lot": "1.0",
             },
         ),
         StrategySpec(
@@ -195,8 +203,6 @@ def _build_strategies(timeframe: str, *, scale_out: bool = False) -> tuple[Strat
                 "sl_atr_mult": "1.0",
                 "tp_atr_mult": "2.0",
                 "risk_percent": "0.5",
-                "pip_size": "0.01",
-                "pip_value_per_lot": "1.0",
             },
         ),
     )
@@ -207,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path("manifests/xauusd-validation-v1.json"),
+        default=Path("manifests/xauusd-2y.json"),
         help="Path to the dataset manifest (default: %(default)s)",
     )
     parser.add_argument(
@@ -223,17 +229,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--scale-out",
         action="store_true",
-        help="Apply Epic 13 Phase 1 scale-out overlay on eligible trend-followers (supertrend + donchian_breakout)",
-    )
-    parser.add_argument(
-        "--pip-size",
-        default=None,
-        help="Override pip_size for all strategies (default: XAUUSD-tuned 0.01). FX symbols need 0.0001.",
-    )
-    parser.add_argument(
-        "--pip-value-per-lot",
-        default=None,
-        help="Override pip_value_per_lot for all strategies (default: XAUUSD-tuned 1.0). FX standard-lot pip value is typically 10.",
+        help=(
+            "Apply Epic 13 Phase 1 scale-out overlay on eligible "
+            f"trend-followers ({', '.join(sorted(_SCALE_OUT_STRATEGIES))})"
+        ),
     )
     parser.add_argument(
         "--max-lot-size",
@@ -319,23 +318,6 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     strategies = _build_strategies(args.timeframe, scale_out=args.scale_out)
-    # Per-symbol pip economics: XAUUSD defaults baked into _build_strategies,
-    # FX (and other symbols) override via --pip-size / --pip-value-per-lot.
-    if args.pip_size is not None or args.pip_value_per_lot is not None:
-        overrides = {}
-        if args.pip_size is not None:
-            overrides["pip_size"] = args.pip_size
-        if args.pip_value_per_lot is not None:
-            overrides["pip_value_per_lot"] = args.pip_value_per_lot
-        strategies = tuple(
-            StrategySpec(
-                name=s.name,
-                timeframe=s.timeframe,
-                bar_type_suffix=s.bar_type_suffix,
-                params={**dict(s.params), **overrides},
-            )
-            for s in strategies
-        )
     suffix = "-scaleout" if args.scale_out else ""
     run_label = (
         f"epic-12a-baseline-{manifest.symbol.lower()}-{args.timeframe.lower()}{suffix}"
@@ -349,7 +331,11 @@ def main(argv: list[str] | None = None) -> int:
         prop_firm=prop_firm,
     )
 
-    overlay_tag = " [scale-out overlay applied to supertrend + donchian_breakout]" if args.scale_out else ""
+    overlay_tag = (
+        f" [scale-out overlay applied to {', '.join(sorted(_SCALE_OUT_STRATEGIES))}]"
+        if args.scale_out
+        else ""
+    )
     print(
         f"\nrunning {len(strategies)} strategies on {manifest.symbol} {args.window_name} "
         f"{args.timeframe}{overlay_tag}…"
@@ -378,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
     table_md = render_comparison_report(results, baseline_filter=filter_)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(table_md + "\n")
+    args.out.write_text(table_md + "\n", encoding="utf-8")
     print(f"\nreport written to {args.out}")
     return 0
 
