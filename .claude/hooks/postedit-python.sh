@@ -32,7 +32,7 @@ esac
 
 [ -f "$FILE" ] || exit 0
 
-REPO_ROOT="$(pwd)"
+REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 case "$FILE" in
   *services/*)
