@@ -344,15 +344,49 @@ class TestBracketScaleOutConfigInvariants:
                 trailing_atr_multiplier=bad,
             )
 
-    def test_trailing_requires_scale_out(self) -> None:
-        # Trail applies only to the remaining 50% after partial close
-        # (implementation plan §1) — enabling trail without scale-out is
-        # a configuration error.
-        with pytest.raises(ValueError, match="trailing_enabled"):
+    def test_trailing_without_scale_out_is_valid(self) -> None:
+        # Trail-only mode (entry-exit-trailing analysis §3.5): full
+        # position keeps its original hard SL until the trail line
+        # tightens past it — no partial close, no BE. The Phase 1
+        # "trailing requires scale_out" invariant was implementation
+        # coupling, not an evidence-backed constraint.
+        cfg = _bracket_config(
+            scale_out_enabled=False,
+            trailing_enabled=True,
+        )
+        assert cfg.trailing_enabled is True
+        assert cfg.scale_out_enabled is False
+
+    def test_trail_only_still_validates_trailing_params(self) -> None:
+        # Trailing param validation must fire in trail-only mode too,
+        # not just when scale-out is on.
+        with pytest.raises(ValueError, match="trailing_method"):
             _bracket_config(
                 scale_out_enabled=False,
                 trailing_enabled=True,
+                trailing_method="chandelier",
             )
+        with pytest.raises(ValueError, match="trailing_atr_period"):
+            _bracket_config(
+                scale_out_enabled=False,
+                trailing_enabled=True,
+                trailing_atr_period=0,
+            )
+
+    @pytest.mark.parametrize("bad", [Decimal("-1"), Decimal("-0.01")])
+    def test_breakeven_offset_pips_negative_rejected(
+        self, bad: Decimal
+    ) -> None:
+        # Offset is a cost-recovery constant (spread + commission in
+        # pips) — negative would place BE below entry, i.e. a
+        # guaranteed-loss "breakeven".
+        with pytest.raises(ValueError, match="breakeven_offset_pips"):
+            _bracket_config(breakeven_offset_pips=bad)
+
+    def test_breakeven_offset_pips_defaults_to_zero(self) -> None:
+        # Zero offset = legacy exact-entry BE; existing YAMLs unaffected.
+        cfg = _bracket_config(scale_out_enabled=True)
+        assert cfg.breakeven_offset_pips == Decimal("0")
 
     @pytest.mark.parametrize("bad", [Decimal("0"), Decimal("-6.0")])
     def test_safety_tp_atr_mult_must_be_positive(self, bad: Decimal) -> None:

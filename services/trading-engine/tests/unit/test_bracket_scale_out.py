@@ -36,6 +36,7 @@ def _make_config(**overrides) -> Mock:
     cfg.scale_out_r_trigger = Decimal("1.0")
     cfg.scale_out_close_fraction = Decimal("0.5")
     cfg.breakeven_at_r = Decimal("1.0")
+    cfg.breakeven_offset_pips = Decimal("0")
     cfg.trailing_enabled = False
     for k, v in overrides.items():
         setattr(cfg, k, v)
@@ -581,3 +582,351 @@ class TestTrailUpdate:
         assert state.current_sl == Decimal("2010.0")  # unchanged
 
         assert host._modify_sl.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Breakeven fee-offset (entry-exit-trailing analysis §3.5 tier 1)
+# ---------------------------------------------------------------------------
+
+
+class TestBreakevenOffset:
+    def _init(self, host: _Host, side: OrderSide, **kwargs) -> None:
+        sl = Decimal("1990") if side == OrderSide.BUY else Decimal("2010")
+        host._init_scale_state(
+            side=side,
+            entry_price=Decimal("2000"),
+            sl_price=sl,
+            qty=Decimal("1.0"),
+            **kwargs,
+        )
+
+    def test_be_offset_applied_long(self) -> None:
+        # 17 pips x 0.01 pip_size = +0.17 above entry: BE covers the
+        # round-trip cost instead of locking a small realized loss.
+        cfg = _make_config(breakeven_offset_pips=Decimal("17"))
+        host = _Host(cfg)
+        self._init(host, OrderSide.BUY, pip_size=Decimal("0.01"))
+
+        host.evaluate_scale_out(Decimal("2010"))
+
+        host._modify_sl.assert_called_once_with(Decimal("2000.17"))
+        assert host._scale_state.current_sl == Decimal("2000.17")
+
+    def test_be_offset_applied_short(self) -> None:
+        cfg = _make_config(breakeven_offset_pips=Decimal("17"))
+        host = _Host(cfg)
+        self._init(host, OrderSide.SELL, pip_size=Decimal("0.01"))
+
+        host.evaluate_scale_out(Decimal("1990"))
+
+        host._modify_sl.assert_called_once_with(Decimal("1999.83"))
+
+    def test_zero_offset_uses_exact_entry(self) -> None:
+        # Legacy behaviour preserved: offset 0 -> BE at entry price.
+        cfg = _make_config(breakeven_offset_pips=Decimal("0"))
+        host = _Host(cfg)
+        self._init(host, OrderSide.BUY, pip_size=Decimal("0.01"))
+
+        host.evaluate_scale_out(Decimal("2010"))
+
+        host._modify_sl.assert_called_once_with(Decimal("2000"))
+
+    def test_offset_without_pip_size_falls_back_to_entry(self) -> None:
+        # Direct init without pip economics (e.g. synthetic-instrument
+        # smoke tests): offset silently unavailable -> exact-entry BE,
+        # never a crash.
+        cfg = _make_config(breakeven_offset_pips=Decimal("17"))
+        host = _Host(cfg)
+        self._init(host, OrderSide.BUY)  # no pip_size
+
+        host.evaluate_scale_out(Decimal("2010"))
+
+        host._modify_sl.assert_called_once_with(Decimal("2000"))
+
+    def test_oversized_offset_falls_back_to_entry(self) -> None:
+        # Offset >= the BE-trigger cushion (breakeven_at_r x risk) would
+        # place SL at/above current price on the BE bar -> instant stop.
+        # Guard: fall back to exact-entry BE. risk=10, be_at_r=1.0 ->
+        # cushion 10; 1100 pips x 0.01 = 11 > 10.
+        cfg = _make_config(breakeven_offset_pips=Decimal("1100"))
+        host = _Host(cfg)
+        self._init(host, OrderSide.BUY, pip_size=Decimal("0.01"))
+
+        host.evaluate_scale_out(Decimal("2010"))
+
+        host._modify_sl.assert_called_once_with(Decimal("2000"))
+
+
+# ---------------------------------------------------------------------------
+# Trail-only mode (trailing without scale-out/BE — analysis §3.5 tier 1)
+# ---------------------------------------------------------------------------
+
+
+def _trail_only_config(**overrides) -> Mock:
+    return _make_config(
+        scale_out_enabled=False,
+        trailing_enabled=True,
+        **overrides,
+    )
+
+
+class TestTrailOnlyMode:
+    def _init_long(self, host: _Host) -> None:
+        host._init_scale_state(
+            side=OrderSide.BUY,
+            entry_price=Decimal("2000"),
+            sl_price=Decimal("1990"),
+            qty=Decimal("1.0"),
+        )
+
+    def test_init_captures_state_without_scale_out(self) -> None:
+        host = _Host(_trail_only_config())
+        self._init_long(host)
+        assert host._scale_state is not None
+        assert host._scale_state.current_sl == Decimal("1990")
+
+    def test_trail_activates_immediately_no_partial_no_be(self) -> None:
+        # Even below +1R the trail is live; partial close and BE never
+        # fire in trail-only mode.
+        host = _Host(_trail_only_config())
+        self._init_long(host)
+
+        host.evaluate_scale_out(Decimal("2002"))  # +0.2R
+
+        assert host._scale_state.trail_active is True
+        host._update_trailing_sl.assert_called_once()
+        host._close_partial.assert_not_called()
+        host._modify_sl.assert_not_called()
+
+    def test_no_partial_even_deep_in_profit(self) -> None:
+        host = _Host(_trail_only_config())
+        self._init_long(host)
+
+        host.evaluate_scale_out(Decimal("2050"))  # +5R
+
+        host._close_partial.assert_not_called()
+        assert host._scale_state.scaled_out is False
+        assert host._scale_state.breakeven_moved is False
+
+    def test_trail_tightens_from_initial_sl(self) -> None:
+        # Turtle-style: SL ratchets from the ORIGINAL hard SL (1990),
+        # not from a BE anchor.
+        trail = _stub_trail(value=1995.0, trend=1)
+        host = _Host(_trail_only_config(), supertrend_trail=trail)
+        self._init_long(host)
+
+        host.evaluate_scale_out(Decimal("2005"))
+
+        host._modify_sl.assert_called_once_with(Decimal("1995.0"))
+        assert host._scale_state.current_sl == Decimal("1995.0")
+
+    def test_scale_out_flags_untouched_when_both_disabled(self) -> None:
+        # Neither feature on: init must stay a no-op (legacy behaviour).
+        cfg = _make_config(scale_out_enabled=False, trailing_enabled=False)
+        host = _Host(cfg)
+        self._init_long(host)
+        assert host._scale_state is None
+
+
+class TestTrailOnlyDispatchGates:
+    def test_dispatch_forwards_events_in_trail_only_mode(self) -> None:
+        from nautilus_trader.model.events import PositionClosed, PositionOpened
+
+        host = _Host(_trail_only_config())
+        host._try_init_scale_state = Mock()
+
+        opened = Mock(spec=PositionOpened)
+        host._dispatch_scale_out_event(opened)
+        host._try_init_scale_state.assert_called_once()
+
+        host._scale_state = Mock()
+        closed = Mock(spec=PositionClosed)
+        host._dispatch_scale_out_event(closed)
+        assert host._scale_state is None
+
+    def test_dispatch_ignores_events_when_both_disabled(self) -> None:
+        from nautilus_trader.model.events import PositionOpened
+
+        cfg = _make_config(scale_out_enabled=False, trailing_enabled=False)
+        host = _Host(cfg)
+        host._try_init_scale_state = Mock()
+
+        host._dispatch_scale_out_event(Mock(spec=PositionOpened))
+        host._try_init_scale_state.assert_not_called()
+
+    def test_bar_evaluator_runs_in_trail_only_mode(self) -> None:
+        host = _Host(_trail_only_config())
+        host.is_flat = False
+        host.evaluate_scale_out = Mock()
+        host._scale_state = Mock()
+
+        bar = Mock()
+        bar.close.as_double.return_value = 2005.0
+        host._evaluate_scale_out_for_bar(bar)
+
+        host.evaluate_scale_out.assert_called_once_with(Decimal("2005.0"))
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups (python-reviewer 2026-07-06)
+# ---------------------------------------------------------------------------
+
+
+class TestBePriceDeadStateGuard:
+    def test_be_price_none_when_breakeven_disabled(self) -> None:
+        # scale-out on, BE off, offset configured: be_price must stay
+        # None (BE never fires — a computed offset price is dead state).
+        cfg = _make_config(
+            breakeven_at_r=None,
+            breakeven_offset_pips=Decimal("17"),
+        )
+        host = _Host(cfg)
+        host._init_scale_state(
+            side=OrderSide.BUY,
+            entry_price=Decimal("2000"),
+            sl_price=Decimal("1990"),
+            qty=Decimal("1.0"),
+            pip_size=Decimal("0.01"),
+        )
+
+        assert host._scale_state.setup.be_price is None
+
+    def test_be_price_none_in_trail_only_mode(self) -> None:
+        cfg = _trail_only_config(breakeven_offset_pips=Decimal("17"))
+        host = _Host(cfg)
+        host._init_scale_state(
+            side=OrderSide.BUY,
+            entry_price=Decimal("2000"),
+            sl_price=Decimal("1990"),
+            qty=Decimal("1.0"),
+            pip_size=Decimal("0.01"),
+        )
+
+        assert host._scale_state.setup.be_price is None
+
+
+class TestTrailActivationWithBeDisabled:
+    def test_trail_activates_after_partial_when_be_none(self) -> None:
+        # scale_out on + trailing on + breakeven_at_r=None: trail must
+        # activate after the partial close (previously stuck off
+        # forever because breakeven_moved could never become True).
+        cfg = _make_config(breakeven_at_r=None, trailing_enabled=True)
+        host = _Host(cfg)
+        host._init_scale_state(
+            side=OrderSide.BUY,
+            entry_price=Decimal("2000"),
+            sl_price=Decimal("1990"),
+            qty=Decimal("1.0"),
+        )
+
+        host.evaluate_scale_out(Decimal("2010"))  # +1R: partial fires
+
+        host._close_partial.assert_called_once()
+        host._modify_sl.assert_not_called()  # BE disabled
+        assert host._scale_state.trail_active is True
+        host._update_trailing_sl.assert_called_once()
+
+    def test_trail_waits_for_partial_when_be_none(self) -> None:
+        cfg = _make_config(breakeven_at_r=None, trailing_enabled=True)
+        host = _Host(cfg)
+        host._init_scale_state(
+            side=OrderSide.BUY,
+            entry_price=Decimal("2000"),
+            sl_price=Decimal("1990"),
+            qty=Decimal("1.0"),
+        )
+
+        host.evaluate_scale_out(Decimal("2005"))  # +0.5R: nothing yet
+
+        assert host._scale_state.trail_active is False
+
+
+class TestModifySlFailureHandling:
+    def test_be_retries_when_modify_fails(self) -> None:
+        # A failed SL modify must NOT mark breakeven_moved — the next
+        # bar retries instead of desyncing current_sl from the live
+        # order.
+        host = _Host(_make_config())
+        host._modify_sl = Mock(return_value=False)
+        host._init_scale_state(
+            side=OrderSide.BUY,
+            entry_price=Decimal("2000"),
+            sl_price=Decimal("1990"),
+            qty=Decimal("1.0"),
+        )
+
+        host.evaluate_scale_out(Decimal("2010"))
+        assert host._scale_state.breakeven_moved is False
+        assert host._scale_state.current_sl == Decimal("1990")
+
+        host._modify_sl = Mock(return_value=True)
+        host.evaluate_scale_out(Decimal("2010"))
+        assert host._scale_state.breakeven_moved is True
+        assert host._scale_state.current_sl == Decimal("2000")
+
+    def test_trail_current_sl_unchanged_when_modify_fails(self) -> None:
+        trail = _stub_trail(value=1995.0, trend=1)
+        host = _Host(_trail_only_config(), supertrend_trail=trail)
+        host._modify_sl = Mock(return_value=False)
+        host._init_scale_state(
+            side=OrderSide.BUY,
+            entry_price=Decimal("2000"),
+            sl_price=Decimal("1990"),
+            qty=Decimal("1.0"),
+        )
+
+        host.evaluate_scale_out(Decimal("2005"))
+
+        assert host._scale_state.current_sl == Decimal("1990")
+
+
+class TestContractSpecLookupGate:
+    def _wire_position(self, host: _Host) -> None:
+        from nautilus_trader.model.enums import PositionSide
+
+        position = Mock()
+        position.side = PositionSide.LONG
+        position.avg_px_open = 2000.0
+        position.quantity.as_double.return_value = 1.0
+        position.instrument_id = "SYNTH.BINANCE"
+        host._position = position
+        sl_order = Mock()
+        sl_order.trigger_price.as_double.return_value = 1990.0
+        host._find_active_sl_order = Mock(return_value=sl_order)
+
+    def test_no_spec_lookup_in_trail_only_mode(self, monkeypatch) -> None:
+        # Trail-only + stray breakeven_offset_pips on an unknown symbol
+        # must NOT crash the event path with the fail-loud lookup.
+        import src.strategies.bracket_scale_out as mod
+
+        def _boom(symbol):
+            raise ValueError(f"no spec for {symbol}")
+
+        monkeypatch.setattr(mod, "get_contract_spec", _boom)
+        cfg = _trail_only_config(breakeven_offset_pips=Decimal("17"))
+        host = _Host(cfg)
+        self._wire_position(host)
+
+        host._try_init_scale_state()  # must not raise
+
+        assert host._scale_state is not None
+        assert host._scale_state.setup.be_price is None
+
+    def test_no_spec_lookup_when_be_disabled(self, monkeypatch) -> None:
+        import src.strategies.bracket_scale_out as mod
+
+        monkeypatch.setattr(
+            mod,
+            "get_contract_spec",
+            Mock(side_effect=ValueError("boom")),
+        )
+        cfg = _make_config(
+            breakeven_at_r=None,
+            breakeven_offset_pips=Decimal("17"),
+        )
+        host = _Host(cfg)
+        self._wire_position(host)
+
+        host._try_init_scale_state()  # must not raise
+
+        assert host._scale_state is not None

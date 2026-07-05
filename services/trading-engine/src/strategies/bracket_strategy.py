@@ -158,6 +158,12 @@ class BracketStrategyConfig(BaseStrategyConfig, frozen=True, kw_only=True):
     scale_out_r_trigger: Decimal = Decimal("1.0")
     scale_out_close_fraction: Decimal = Decimal("0.5")
     breakeven_at_r: Decimal | None = Decimal("1.0")
+    # Cost-recovery offset for the BE move, in pips (converted to price
+    # via the instrument's ContractSpec.pip_size at trade init). A stop
+    # at the raw entry price realises a small loss once spread +
+    # commission settle; BE + offset is the price where the trade truly
+    # breaks even. 0 keeps the legacy exact-entry BE.
+    breakeven_offset_pips: Decimal = Decimal("0")
     trailing_enabled: bool = False
     trailing_method: str = "supertrend"
     trailing_atr_period: int = 7
@@ -234,14 +240,19 @@ class BracketStrategyConfig(BaseStrategyConfig, frozen=True, kw_only=True):
                     f"trigger={self.scale_out_r_trigger}"
                 )
 
+        # Offset must be non-negative regardless of mode — a negative
+        # value would place "breakeven" below entry (guaranteed loss).
+        if self.breakeven_offset_pips < 0:
+            raise ValueError(
+                "breakeven_offset_pips must be >= 0, "
+                f"got {self.breakeven_offset_pips}"
+            )
+
         if self.trailing_enabled:
-            # Trail tightens the remaining size after partial close —
-            # without scale-out there is no remainder to tighten against.
-            if not self.scale_out_enabled:
-                raise ValueError(
-                    "trailing_enabled requires scale_out_enabled=True "
-                    "(trail applies only to the remainder after partial close)"
-                )
+            # Trail-only mode (scale_out_enabled=False) is valid: the
+            # full position keeps its original hard SL until the trail
+            # line tightens past it — no partial close, no BE move
+            # (entry-exit-trailing analysis 2026-07-05 §3.5).
             if self.trailing_method != "supertrend":
                 raise ValueError(
                     "trailing_method must be 'supertrend' in Phase 1, "

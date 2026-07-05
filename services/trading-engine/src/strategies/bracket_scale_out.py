@@ -1,16 +1,24 @@
-"""BracketScaleOutMixin — Phase 1 scale-out + trail state machine.
+"""BracketScaleOutMixin — scale-out + trail state machine.
 
 Tracks per-trade state through the ``INITIAL → SCALED_OUT_BE → flat``
 transitions described in implementation plan §1. Composes the
 ``_close_partial`` / ``_modify_sl`` helpers added to ``BaseStrategy`` in
-story 13.3; the trail-update body is intentionally a no-op stub here
-and lands in story 13.6 (Supertrend ATR(7)×2.1 trailing indicator).
+story 13.3; the trail body (story 13.6) tightens SL via a dedicated
+Supertrend instance (``trailing_atr_period`` × ``trailing_atr_multiplier``).
 
-The mixin is a behavior add-on: hosts that include it must wire
-``_init_scale_state`` in their ``on_position_opened`` event handler,
-``_clear_scale_state`` in their ``on_position_closed`` handler, and
-call ``evaluate_scale_out`` from their ``on_bar`` after the existing
-signal logic. Host wiring lives in story 13.5.
+Two modes (entry-exit-trailing analysis 2026-07-05 §3.5):
+
+* **Scale-out** (``scale_out_enabled``): partial close at
+  +``scale_out_r_trigger``R → SL to breakeven (+ optional
+  ``breakeven_offset_pips`` cost-recovery offset) → trail the remainder
+  when ``trailing_enabled``.
+* **Trail-only** (``trailing_enabled`` without ``scale_out_enabled``):
+  no partial close, no BE — the full position keeps its original hard
+  SL until the trail line ratchets past it (Turtle-style).
+
+Host wiring (``on_event`` / ``on_bar`` overrides) lives at the bottom
+of this class — hosts prepend the mixin in their MRO and expose a
+``_supertrend_trail`` attribute.
 """
 
 from __future__ import annotations
@@ -23,6 +31,8 @@ from typing import TYPE_CHECKING, Any
 from nautilus_trader.core.message import Event
 from nautilus_trader.model.enums import OrderSide, PositionSide
 from nautilus_trader.model.events import PositionClosed, PositionOpened
+
+from src.instruments import get_contract_spec
 
 if TYPE_CHECKING:
     from nautilus_trader.model.data import Bar
@@ -49,6 +59,10 @@ class _ScaleOutSetup:
     initial_qty: Decimal
     side: OrderSide
     risk_per_unit: Decimal
+    # Price the BE move targets: entry ± breakeven_offset_pips×pip_size
+    # (cost recovery). ``None`` → exact entry (legacy behaviour, and the
+    # fallback when pip economics are unavailable at init time).
+    be_price: Decimal | None = None
 
 
 @dataclass
@@ -106,28 +120,87 @@ class BracketScaleOutMixin:
         entry_price: Decimal,
         sl_price: Decimal,
         qty: Decimal,
+        pip_size: Decimal | None = None,
     ) -> None:
-        """Capture trade entry context. No-op when ``scale_out_enabled`` is False.
+        """Capture trade entry context.
 
-        Must be called by the host immediately after the bracket entry
-        fills (story 13.5 wires this into ``on_position_opened``). Calling
-        a second time without an intervening ``_clear_scale_state`` will
-        overwrite the previous state — the host is expected to clear on
-        position-close events.
+        No-op unless ``scale_out_enabled`` or ``trailing_enabled`` is on
+        (trail-only mode also needs the setup baseline for tighten-only
+        comparisons). Must be called by the host immediately after the
+        bracket entry fills. Calling a second time without an intervening
+        ``_clear_scale_state`` will overwrite the previous state — the
+        host is expected to clear on position-close events.
+
+        ``pip_size`` feeds the ``breakeven_offset_pips`` → price
+        conversion; when omitted (synthetic instruments, direct test
+        calls) the BE move falls back to the exact entry price.
         """
         cfg = self._cfg()
-        if not cfg.scale_out_enabled:
+        if not (cfg.scale_out_enabled or cfg.trailing_enabled):
             return
+        risk_per_unit = abs(entry_price - sl_price)
         self._scale_state = _ScaleOutTradeState(
             setup=_ScaleOutSetup(
                 entry_price=entry_price,
                 initial_sl=sl_price,
                 initial_qty=qty,
                 side=side,
-                risk_per_unit=abs(entry_price - sl_price),
+                risk_per_unit=risk_per_unit,
+                be_price=self._compute_be_price(
+                    side=side,
+                    entry_price=entry_price,
+                    risk_per_unit=risk_per_unit,
+                    pip_size=pip_size,
+                ),
             ),
             current_sl=sl_price,
         )
+
+    def _compute_be_price(
+        self,
+        *,
+        side: OrderSide,
+        entry_price: Decimal,
+        risk_per_unit: Decimal,
+        pip_size: Decimal | None,
+    ) -> Decimal | None:
+        """Breakeven target = entry ± cost-recovery offset, or None (=entry).
+
+        Falls back to ``None`` (exact-entry BE) when the offset is zero,
+        pip economics are unavailable, or the offset would eat the whole
+        BE-trigger cushion (SL at/above the market on the BE bar → the
+        remainder would be stopped instantly).
+        """
+        cfg = self._cfg()
+        offset_pips = cfg.breakeven_offset_pips
+        if offset_pips is None or offset_pips <= 0:
+            return None
+        # BE only ever fires in scale-out mode with a BE trigger set —
+        # computing an offset price outside that is dead state.
+        if not cfg.scale_out_enabled or cfg.breakeven_at_r is None:
+            return None
+        if pip_size is None:
+            logger.warning(
+                "breakeven_offset_pips=%s configured but pip_size "
+                "unavailable at trade init — falling back to exact-entry BE",
+                offset_pips,
+            )
+            return None
+        offset = offset_pips * pip_size
+        # breakeven_at_r is not None here (early return above).
+        cushion = cfg.breakeven_at_r * risk_per_unit
+        if offset >= cushion:
+            logger.warning(
+                "breakeven offset %s >= BE-trigger cushion %s "
+                "(offset would stop the remainder instantly) — "
+                "falling back to exact-entry BE",
+                offset,
+                cushion,
+            )
+            return None
+        if side == OrderSide.BUY:
+            return entry_price + offset
+        return entry_price - offset
 
     def _clear_scale_state(self) -> None:
         """Reset state on position close. Idempotent — safe to call when flat."""
@@ -143,12 +216,13 @@ class BracketScaleOutMixin:
 
         Transitions (in order, single bar):
 
-            1. partial close at +``scale_out_r_trigger``R
-               (sets ``scaled_out`` to True)
-            2. SL → breakeven at +``breakeven_at_r``R, only if config
-               is not None (sets ``breakeven_moved`` to True)
-            3. activate trail after BE move, only if
-               ``trailing_enabled`` (sets ``trail_active`` to True)
+            1. partial close at +``scale_out_r_trigger``R, scale-out
+               mode only (sets ``scaled_out`` to True)
+            2. SL → breakeven target (entry + cost-recovery offset) at
+               +``breakeven_at_r``R, only if config is not None
+               (sets ``breakeven_moved`` to True)
+            3. activate trail — after the BE move in scale-out mode,
+               or immediately in trail-only mode (sets ``trail_active``)
             4. update trail SL each bar while ``trail_active``
         """
         st = self._scale_state
@@ -166,9 +240,11 @@ class BracketScaleOutMixin:
         else:
             unrealized_r = (setup.entry_price - current_price) / setup.risk_per_unit
 
-        # Step 1: partial close at +scale_out_r_trigger × R.
+        # Step 1: partial close at +scale_out_r_trigger × R (scale-out
+        # mode only — trail-only mode never reduces the position).
         if (
-            not st.scaled_out
+            cfg.scale_out_enabled
+            and not st.scaled_out
             and unrealized_r >= cfg.scale_out_r_trigger
         ):
             self._close_partial(cfg.scale_out_close_fraction)
@@ -192,23 +268,37 @@ class BracketScaleOutMixin:
             and cfg.breakeven_at_r is not None
             and unrealized_r >= cfg.breakeven_at_r
         ):
-            self._modify_sl(setup.entry_price)
-            st.breakeven_moved = True
-            st.current_sl = setup.entry_price
-            self._log.info(f"SL moved to breakeven at {setup.entry_price}")
+            be_price = (
+                setup.be_price if setup.be_price is not None
+                else setup.entry_price
+            )
+            # Only advance state when the broker-side modify succeeds —
+            # a failed modify (SL leg not found) leaves breakeven_moved
+            # False so the next bar retries instead of desyncing
+            # current_sl from the live order.
+            if self._modify_sl(be_price):
+                st.breakeven_moved = True
+                st.current_sl = be_price
+                self._log.info(f"SL moved to breakeven at {be_price}")
 
-        # Step 3: activate trail (only after BE move; trailing_enabled
-        # requires scale_out_enabled per 13.2 invariant).
+        # Step 3: activate trail. Scale-out mode: after the BE move —
+        # or after the partial close when BE is deliberately disabled
+        # (breakeven_at_r=None). Trail-only mode: immediately — the
+        # trail ratchets from the original hard SL, no BE anchor exists.
         if (
-            st.breakeven_moved
-            and not st.trail_active
+            not st.trail_active
             and cfg.trailing_enabled
+            and (
+                st.breakeven_moved
+                or not cfg.scale_out_enabled
+                or (st.scaled_out and cfg.breakeven_at_r is None)
+            )
         ):
             st.trail_active = True
             self._log.info("Trailing activated")
 
-        # Step 4: update trail SL each bar while active. Body lands in
-        # story 13.6 — until then the call is a no-op stub.
+        # Step 4: update trail SL each bar while active (tighten-only
+        # Supertrend line — see _update_trailing_sl).
         if st.trail_active:
             self._update_trailing_sl(st)
 
@@ -257,8 +347,11 @@ class BracketScaleOutMixin:
             if trail.trend != -1 or new_sl >= state.current_sl:
                 return
 
-        self._modify_sl(new_sl)
-        state.current_sl = new_sl
+        # Advance the tracked SL only on a successful modify — keeps
+        # current_sl in sync with the live order so a transient failure
+        # is retried on the next bar instead of silently skipped.
+        if self._modify_sl(new_sl):
+            state.current_sl = new_sl
 
     def _cfg(self) -> "BracketStrategyConfig":
         """Typed alias for ``self.config``.
@@ -298,7 +391,8 @@ class BracketScaleOutMixin:
         bar evaluator retries) and ``PositionClosed`` (clear state).
         Unrelated events are ignored.
         """
-        if not self._cfg().scale_out_enabled:
+        cfg = self._cfg()
+        if not (cfg.scale_out_enabled or cfg.trailing_enabled):
             return
         if isinstance(event, PositionOpened):
             self._try_init_scale_state()
@@ -328,11 +422,27 @@ class BracketScaleOutMixin:
             if position.side == PositionSide.LONG
             else OrderSide.SELL
         )
+        # Pip economics only matter when the BE offset can actually
+        # fire (scale-out mode + BE trigger set + offset > 0); skip the
+        # fail-loud contract-spec lookup in every other mode so
+        # synthetic instruments (smoke tests) and trail-only configs
+        # with a stray offset never crash the event path.
+        cfg = self._cfg()
+        pip_size: Decimal | None = None
+        if (
+            cfg.scale_out_enabled
+            and cfg.breakeven_at_r is not None
+            and cfg.breakeven_offset_pips > 0
+        ):
+            pip_size = get_contract_spec(
+                str(position.instrument_id)
+            ).pip_size
         self._init_scale_state(
             side=side,
             entry_price=Decimal(str(position.avg_px_open)),
             sl_price=Decimal(str(sl_order.trigger_price.as_double())),
             qty=Decimal(str(position.quantity.as_double())),
+            pip_size=pip_size,
         )
 
     def on_bar(self, bar: "Bar") -> None:
@@ -349,11 +459,15 @@ class BracketScaleOutMixin:
     def _evaluate_scale_out_for_bar(self, bar: "Bar") -> None:
         """Drive the scale-out state machine off the latest bar close.
 
-        No-op when scale-out is disabled or the host is flat. When in
-        position but ``_scale_state`` is None, retry init — covers the
-        PositionOpened-vs-SL-leg race documented in Story 13.7.
+        No-op when both scale-out and trailing are disabled, or the
+        host is flat. When in position but ``_scale_state`` is None,
+        retry init — covers the PositionOpened-vs-SL-leg race
+        documented in Story 13.7.
         """
-        if not self._cfg().scale_out_enabled or self.is_flat:  # type: ignore[attr-defined]
+        cfg = self._cfg()
+        if not (cfg.scale_out_enabled or cfg.trailing_enabled):
+            return
+        if self.is_flat:  # type: ignore[attr-defined]
             return
         if self._scale_state is None:
             self._try_init_scale_state()

@@ -286,6 +286,7 @@ class TestDispatchScaleOutEvent:
             entry_price=Decimal("2000.0"),
             sl_price=Decimal("1990.0"),
             qty=Decimal("1.0"),
+            pip_size=None,
         )
 
     def test_position_opened_short_maps_position_side_to_sell(self) -> None:
