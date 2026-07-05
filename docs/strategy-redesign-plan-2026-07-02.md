@@ -52,36 +52,36 @@ kết luận FTMO compliance ("0 breaches, DD < 5.1%") vô giá trị** — chư
 
 ## Track 1 — Sửa sizing bug (KHÔNG cần data — làm đầu tiên)
 
-- [ ] **1.1 (TDD RED)** Viết **sizing parity test**: dùng `synthetic_bars.py`, cho mỗi symbol
+- [x] **1.1 (TDD RED)** Viết **sizing parity test**: dùng `synthetic_bars.py`, cho mỗi symbol
       (XAUUSD, EURUSD, USDJPY) chạy 1 lệnh dính SL qua backtest engine → assert lỗ thực nhận
       ≈ `risk_percent × balance` (±5%). Test này lẽ ra đã bắt được bug từ đầu; là cổng hồi quy vĩnh viễn.
-- [ ] **1.2** Tạo **contract spec per symbol** (contract_size, pip_size, quote_currency) làm
+- [x] **1.2** Tạo **contract spec per symbol** (contract_size, pip_size, quote_currency) làm
       nguồn sự thật duy nhất — có thể derive từ instrument definition. Xóa `pip_size`/
       `pip_value_per_lot` khỏi strategy YAML (breaking change có chủ đích).
-- [ ] **1.3** Sửa submit path: quy đổi lot→engine-unit tại một điểm duy nhất
+- [x] **1.3** Sửa submit path: quy đổi lot→engine-unit tại một điểm duy nhất
       (XAUUSD ×100, FX ×100.000), quy đổi pip value quote-currency→USD cho JPY pairs.
-- [ ] **1.4** Sửa fee models: phí per-lot tính theo `qty / contract_size`; bật lại
+- [x] **1.4** Sửa fee models: phí per-lot tính theo `qty / contract_size`; bật lại
       commission/spread thực cho FX (đừng giữ zero-fee workaround).
-- [ ] **1.5** Full test suite + `python-reviewer`; cập nhật ghi chú vào các báo cáo cũ
+- [x] **1.5** Full test suite + `python-reviewer`; cập nhật ghi chú vào các báo cáo cũ
       (banner "số liệu EV/DD trước 2026-07 bị lệch 100×" để người sau không đọc nhầm).
 
 ## Track 2 — Dọn roster strategy (KHÔNG cần data)
 
-- [ ] **2.1** Gộp RSI-MR + Bollinger-MR thành **một** strategy mean-reversion với tín hiệu
+- [x] **2.1** Gộp RSI-MR + Bollinger-MR thành **một** strategy mean-reversion với tín hiệu
       kết hợp (chạm band BB **và** RSI cực trị) — đồng thời trả nợ `MeanReversionMixin`
       từ `strategy-review-2026-05-02.md`.
-- [ ] **2.2** Loại `ma_crossover` khỏi roster active (edge đã chứng minh là artifact);
+- [x] **2.2** Loại `ma_crossover` khỏi roster active (edge đã chứng minh là artifact);
       giữ EMA slope làm regime feature. ORB giữ nguyên trạng thái archived (`regimes=[]`).
-- [ ] **2.3** Trả nợ kỹ thuật liên quan: `BracketHost` Protocol thay duck-typing,
+- [x] **2.3** Trả nợ kỹ thuật liên quan: `BracketHost` Protocol thay duck-typing,
       `_read_account_balance` dùng Decimal/Redis HWM thay float round-trip.
 
 ## Track 3 — Research redesign (KHÔNG cần data, không cần code)
 
-- [ ] **3.1** `/research` multi-indicator confirmation cho trend-followers:
+- [x] **3.1** `/research` multi-indicator confirmation cho trend-followers:
       Donchian + ADX≥25 filter; Supertrend–Donchian confluence; session VWAP làm bias filter
       (indicator `session_vwap.py` đã viết sẵn, chưa strategy nào dùng).
-- [ ] **3.2** `/research` session filter cho XAUUSD/FX (hạ tầng `SessionFilterMixin` có sẵn từ ORB).
-- [ ] **3.3** Đọc lại 2 research docs meta-labeling có sẵn (`docs/research/meta-labeling-*.md`,
+- [x] **3.2** `/research` session filter cho XAUUSD/FX (hạ tầng `SessionFilterMixin` có sẵn từ ORB).
+- [x] **3.3** Đọc lại 2 research docs meta-labeling có sẵn (`docs/research/meta-labeling-*.md`,
       `ml-data-prep-and-training.md`) — chuẩn bị cho Track 5.
 
 ## Track 4 — Validate lại (CẦN data: chặn bởi Track 0 + Track 1)

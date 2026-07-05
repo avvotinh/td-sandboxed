@@ -4,6 +4,20 @@
 **Requested for:** Pre-implementation research — Corrective AI / meta-labeling layer on top of existing primary strategies
 **Status:** complete
 
+> **Addendum 2026-07-05 (re-read chuẩn bị Track 5):** một số code reference trong doc này đã
+> drift sau Epic 15 + Track 1/2 redesign:
+> - `RegimeAwareRouter._dispatch` (`regime_routing.py:139`) — **file không còn tồn tại**. Gating
+>   seam hiện tại: `RegimeActor` (Epic 15, default-OFF) + `RegimeSnapshot` /` RegimeStateStore`
+>   (`src/regime/state_store.py`). Seam meta-label theo plan mới:
+>   `RegimeSnapshot.features` → `_meta_label_admits` (chưa implement — Track 5.2).
+> - `risk_based_position_sizer.py:58 calculate_lot_size()` — giờ ở dòng 60; sau Track 1
+>   (sizing fix 2026-07), submit path quy đổi lot→engine units qua `ContractSpec`
+>   (`src/instruments/contract_specs.py`) — semantics "return 0 = skip trade" vẫn giữ.
+> - `BracketStrategyConfig` không còn `pip_size`/`pip_value_per_lot` (breaking change Track 1).
+> - Roster active hiện tại: supertrend, donchian_breakout, mean_reversion (BB+RSI hợp nhất);
+>   rsi_mr/bollinger_mr/ma_crossover đã archived — spike nên chạy trên supertrend hoặc donchian.
+> Các khuyến nghị library (mlfinpy, skfolio CPCV, LightGBM+calibration) vẫn nguyên giá trị.
+
 ---
 
 ## Tom tat Tieng Viet (Executive Summary)
