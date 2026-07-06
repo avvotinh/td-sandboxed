@@ -38,6 +38,7 @@ from src.strategies.bracket_strategy import (
     is_atr_unsafe,
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
+from src.strategies.mixins.entry_filter_mixin import EntryFilterMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
 from src.strategies.registry import register_strategy
 from src.strategies.risk_based_position_sizer import (
@@ -58,6 +59,13 @@ class MeanReversionConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     # cross-strategy comparisons carry over cleanly).
     sl_atr_mult: Decimal = Decimal("1.0")
     tp_atr_mult: Decimal = Decimal("2.0")
+    # Track 5.1 entry semantics:
+    #   "pierce"  — legacy: enter on the bar whose close sits outside
+    #               the band with RSI extreme (catches falling knives).
+    #   "recross" — enter on the snap-back bar: previous close outside
+    #               the band, current close back inside, RSI still in
+    #               the extreme zone (entry-exit-trailing analysis §7.3).
+    entry_mode: str = "pierce"
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -80,11 +88,15 @@ class MeanReversionConfig(BracketStrategyConfig, frozen=True, kw_only=True):
                 "thresholds must satisfy 0 ≤ oversold < overbought ≤ 1; "
                 f"got oversold={self.oversold} overbought={self.overbought}"
             )
+        if self.entry_mode not in ("pierce", "recross"):
+            raise ValueError(
+                f"entry_mode must be 'pierce' or 'recross', got {self.entry_mode!r}"
+            )
 
 
 @register_strategy("mean_reversion", regimes=[RegimeState.RANGING])
 class MeanReversionStrategy(
-    BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin
+    EntryFilterMixin, BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin
 ):
     """Mean-reversion — band pierce confirmed by an RSI extreme."""
 
@@ -98,18 +110,28 @@ class MeanReversionStrategy(
                 RiskBasedSizerConfig(risk_percent=config.risk_percent)
             )
         )
+        self._init_entry_filters()
+        # Recross entry state: previous bar's close and band values.
+        self._prev_close: float | None = None
+        self._prev_band_lower: float | None = None
+        self._prev_band_upper: float | None = None
 
     def on_start(self) -> None:
         super().on_start()
         self.register_indicator_for_bars(self.config.bar_type, self._bb)
         self.register_indicator_for_bars(self.config.bar_type, self._rsi)
         self.register_indicator_for_bars(self.config.bar_type, self._atr)
+        self._register_entry_filter_indicators()
 
     def on_reset(self) -> None:
         super().on_reset()
         self._bb.reset()
         self._rsi.reset()
         self._atr.reset()
+        self._reset_entry_filters()
+        self._prev_close = None
+        self._prev_band_lower = None
+        self._prev_band_upper = None
 
     def generate_signal(self, bar: Bar) -> SignalType:
         if not (
@@ -137,6 +159,26 @@ class MeanReversionStrategy(
             )
             return SignalType.NONE
 
+        # Advance recross state BEFORE any exit/entry/session return
+        # path so the previous-bar reference is never stale (bands are
+        # valid here — the squeeze guard above already returned). A
+        # pierce that lands on a session-gated bar still arms the
+        # snap-back reference for the first in-session bar.
+        prev_close = self._prev_close
+        prev_lower = self._prev_band_lower
+        prev_upper = self._prev_band_upper
+        self._prev_close = close
+        self._prev_band_lower = lower
+        self._prev_band_upper = upper
+
+        # Session filter (Track 5.1), after state upkeep. With the
+        # MR-shaped "block_entry" policy the gate passes through while a
+        # position is open, so the middle-band exit below keeps managing
+        # open trades out-of-session; fresh entries are blocked.
+        gated = self._session_gate(bar)
+        if gated is not None:
+            return gated
+
         # Exit first — middle-band mean-reversion target wins the
         # same-bar race against a fresh opposite-side entry.
         if self.is_long and close >= middle:
@@ -145,6 +187,26 @@ class MeanReversionStrategy(
             return SignalType.CLOSE
 
         if not self.is_flat:
+            return SignalType.NONE
+
+        if self.config.entry_mode == "recross":
+            # Snap-back confirmation: previous close pierced the band,
+            # this close is back inside, RSI still extreme — enter on
+            # the reversal evidence, not the falling knife.
+            if prev_close is None:
+                return SignalType.NONE
+            if (
+                prev_close < prev_lower
+                and close >= lower
+                and rsi <= self.config.oversold
+            ):
+                return SignalType.BUY
+            if (
+                prev_close > prev_upper
+                and close <= upper
+                and rsi >= self.config.overbought
+            ):
+                return SignalType.SELL
             return SignalType.NONE
 
         # Confluence entry: band pierce AND RSI extreme. The RSI side is

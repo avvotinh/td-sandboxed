@@ -19,6 +19,7 @@ import logging
 import math
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from nautilus_trader.model.currencies import USD
 from nautilus_trader.model.enums import OrderSide
@@ -170,6 +171,28 @@ class BracketStrategyConfig(BaseStrategyConfig, frozen=True, kw_only=True):
     trailing_atr_multiplier: Decimal = Decimal("2.1")
     safety_tp_atr_mult: Decimal = Decimal("6.0")
 
+    # Track 5.1 entry filters (redesign plan 2026-07-02) — both
+    # default-OFF so legacy configs are bit-identical.
+    #
+    # ADX gate: entries allowed only while ADX(adx_gate_period) is
+    # initialised and >= adx_gate_min. None disables the gate (and the
+    # indicator). Threshold on Wilder's 0-100 scale; 25 = "trending"
+    # (same convention the regime classifier uses).
+    adx_gate_period: int = 14
+    adx_gate_min: Decimal | None = None
+    # Session filter: bars outside [open, close] in session_filter_tz
+    # (IANA name; DST-safe via zoneinfo) are handled per
+    # session_filter_exit_policy — "flatten" (trend shape: close the
+    # position at session end) or "block_entry" (MR shape: no fresh
+    # entries, but exit logic keeps managing open positions). tz=None
+    # disables the filter.
+    session_filter_tz: str | None = None
+    session_filter_open_hour: int = 0
+    session_filter_open_minute: int = 0
+    session_filter_close_hour: int = 23
+    session_filter_close_minute: int = 59
+    session_filter_exit_policy: str = "flatten"
+
     def __post_init__(self) -> None:
         if self.atr_period <= 0:
             raise ValueError(
@@ -267,6 +290,43 @@ class BracketStrategyConfig(BaseStrategyConfig, frozen=True, kw_only=True):
                 raise ValueError(
                     "trailing_atr_multiplier must be > 0, "
                     f"got {self.trailing_atr_multiplier}"
+                )
+
+        # Track 5.1 filter invariants — like the scale-out block above,
+        # they only fire when the relevant filter is enabled so YAML
+        # defaults can be staged while a filter is still off.
+        if self.adx_gate_min is not None:
+            if self.adx_gate_min <= 0:
+                raise ValueError(
+                    f"adx_gate_min must be > 0 when set, got {self.adx_gate_min}"
+                )
+            if self.adx_gate_period <= 0:
+                raise ValueError(
+                    f"adx_gate_period must be > 0, got {self.adx_gate_period}"
+                )
+
+        if self.session_filter_tz is not None:
+            try:
+                ZoneInfo(self.session_filter_tz)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise ValueError(
+                    f"session_filter_tz {self.session_filter_tz!r} is not a "
+                    "known IANA timezone"
+                ) from exc
+            for field_name, value, bound in (
+                ("session_filter_open_hour", self.session_filter_open_hour, 23),
+                ("session_filter_open_minute", self.session_filter_open_minute, 59),
+                ("session_filter_close_hour", self.session_filter_close_hour, 23),
+                ("session_filter_close_minute", self.session_filter_close_minute, 59),
+            ):
+                if not 0 <= value <= bound:
+                    raise ValueError(
+                        f"{field_name} must be in [0, {bound}], got {value}"
+                    )
+            if self.session_filter_exit_policy not in ("flatten", "block_entry"):
+                raise ValueError(
+                    "session_filter_exit_policy must be 'flatten' or "
+                    f"'block_entry', got {self.session_filter_exit_policy!r}"
                 )
 
 

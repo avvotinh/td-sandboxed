@@ -29,6 +29,7 @@ from src.strategies.bracket_strategy import (
     is_atr_unsafe,
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
+from src.strategies.mixins.entry_filter_mixin import EntryFilterMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
 from src.regime.states import RegimeState
 from src.strategies.registry import register_strategy
@@ -71,6 +72,7 @@ class SupertrendConfig(BracketStrategyConfig, frozen=True, kw_only=True):
 )
 class SupertrendStrategy(
     BracketScaleOutMixin,
+    EntryFilterMixin,
     BaseStrategy,
     ATRStopMixin,
     RiskSizedMixin,
@@ -113,6 +115,7 @@ class SupertrendStrategy(
                 RiskBasedSizerConfig(risk_percent=config.risk_percent)
             )
         )
+        self._init_entry_filters()
         self._prev_trend: int | None = None
 
     def on_start(self) -> None:
@@ -123,6 +126,7 @@ class SupertrendStrategy(
             self.register_indicator_for_bars(
                 self.config.bar_type, self._supertrend_trail
             )
+        self._register_entry_filter_indicators()
         self._log.info(
             f"Supertrend started period={self.config.period} mult={self.config.multiplier}"
         )
@@ -132,9 +136,18 @@ class SupertrendStrategy(
         self._atr.reset()
         if self._supertrend_trail is not None:
             self._supertrend_trail.reset()
+        self._reset_entry_filters()
         self._prev_trend = None
 
     def generate_signal(self, bar: Bar) -> SignalType:
+        # Session filter first (Track 5.1): out-of-session bars flatten
+        # or no-op before any signal state is touched — at session open
+        # the flip comparison runs against the last in-session trend, so
+        # an overnight flip enters on the first eligible bar.
+        gated = self._session_gate(bar)
+        if gated is not None:
+            return gated
+
         if not self._supertrend.initialized or not self._atr.initialized:
             return SignalType.NONE
 
@@ -148,7 +161,12 @@ class SupertrendStrategy(
         if current_trend == prev:
             return SignalType.NONE
 
-        # Trend flipped
+        # Trend flipped — admit only when the ADX gate sees trend
+        # strength. _prev_trend has already advanced, so a blocked flip
+        # does not re-fire when ADX recovers bars later.
+        if self._adx_gate_blocks():
+            return SignalType.NONE
+
         if current_trend == 1:
             return SignalType.BUY
         if current_trend == -1:

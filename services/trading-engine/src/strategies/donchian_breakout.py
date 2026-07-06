@@ -30,6 +30,7 @@ from src.strategies.bracket_strategy import (
     is_atr_unsafe,
 )
 from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
+from src.strategies.mixins.entry_filter_mixin import EntryFilterMixin
 from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
 from src.regime.states import RegimeState
 from src.strategies.registry import register_strategy
@@ -46,6 +47,13 @@ class DonchianBreakoutConfig(BracketStrategyConfig, frozen=True, kw_only=True):
     # Donchian defaults override the generic bracket config defaults
     sl_atr_mult: Decimal = Decimal("2.0")
     tp_atr_mult: Decimal = Decimal("4.0")
+    # Track 5.1 crossing semantics: enter only on the FIRST bar of a
+    # breakout episode (edge-triggered) instead of every bar whose close
+    # sits outside the prior channel (level-triggered). Kills the
+    # re-entry churn diagnosed in entry-exit-trailing analysis §1.2 —
+    # after an SL/TP exit mid-episode there is no re-entry until the
+    # close returns inside the channel and breaks out again.
+    entry_on_cross_only: bool = False
 
     def __post_init__(self) -> None:
         """Validate config — delegate ATR + Phase 1 invariants to parent.
@@ -67,6 +75,7 @@ class DonchianBreakoutConfig(BracketStrategyConfig, frozen=True, kw_only=True):
 )
 class DonchianBreakoutStrategy(
     BracketScaleOutMixin,
+    EntryFilterMixin,
     BaseStrategy,
     ATRStopMixin,
     RiskSizedMixin,
@@ -105,8 +114,13 @@ class DonchianBreakoutStrategy(
                 RiskBasedSizerConfig(risk_percent=config.risk_percent)
             )
         )
+        self._init_entry_filters()
         self._prev_upper: float | None = None
         self._prev_lower: float | None = None
+        # Crossing-semantics episode state: was the previous close
+        # already outside the (then-prior) channel on each side?
+        self._prev_breakout_up: bool = False
+        self._prev_breakout_down: bool = False
 
     def on_start(self) -> None:
         super().on_start()
@@ -116,14 +130,18 @@ class DonchianBreakoutStrategy(
             self.register_indicator_for_bars(
                 self.config.bar_type, self._supertrend_trail
             )
+        self._register_entry_filter_indicators()
 
     def on_reset(self) -> None:
         self._donchian.reset()
         self._atr.reset()
         if self._supertrend_trail is not None:
             self._supertrend_trail.reset()
+        self._reset_entry_filters()
         self._prev_upper = None
         self._prev_lower = None
+        self._prev_breakout_up = False
+        self._prev_breakout_down = False
 
     def generate_signal(self, bar: Bar) -> SignalType:
         if not self._donchian.initialized or not self._atr.initialized:
@@ -135,17 +153,43 @@ class DonchianBreakoutStrategy(
 
         # Capture current band as the "prior" reference for the next bar
         # BEFORE any return path — otherwise the seed bar never stores it.
+        # Rolling references advance on EVERY bar, including session-gated
+        # ones, so the first in-session bar after a gap compares against
+        # the true prior bar rather than a frozen pre-gap snapshot.
         self._prev_upper = self._donchian.upper
         self._prev_lower = self._donchian.lower
 
         if prev_upper is None or prev_lower is None:
             return SignalType.NONE
 
-        if close > prev_upper:
-            return SignalType.BUY
-        if close < prev_lower:
-            return SignalType.SELL
-        return SignalType.NONE
+        breakout_up = close > prev_upper
+        breakout_down = close < prev_lower
+
+        # Advance episode state before any gating so a suppressed,
+        # session-gated, or ADX-blocked breakout bar still arms/disarms
+        # the edge trigger — an episode that begins overnight must not
+        # read as "first breakout bar" at session open.
+        was_up = self._prev_breakout_up
+        was_down = self._prev_breakout_down
+        self._prev_breakout_up = breakout_up
+        self._prev_breakout_down = breakout_down
+
+        # Session filter (Track 5.1): after state upkeep, before entries.
+        gated = self._session_gate(bar)
+        if gated is not None:
+            return gated
+
+        if self.config.entry_on_cross_only:
+            breakout_up = breakout_up and not was_up
+            breakout_down = breakout_down and not was_down
+
+        if not (breakout_up or breakout_down):
+            return SignalType.NONE
+
+        if self._adx_gate_blocks():
+            return SignalType.NONE
+
+        return SignalType.BUY if breakout_up else SignalType.SELL
 
     def _execute_signal(self, signal: SignalType) -> None:
         if signal == SignalType.CLOSE:
