@@ -102,9 +102,13 @@ kết luận FTMO compliance ("0 breaches, DD < 5.1%") vô giá trị** — chư
 
 ## Track 5 — Redesign entries + meta-labeling (CẦN data)
 
-- [ ] **5.1** Implement các biến thể confirmation từ Track 3, validate bằng **walk-forward**
+- [x] **5.1** Implement các biến thể confirmation từ Track 3, validate bằng **walk-forward**
       trên 5y. KHÔNG parameter sweep (12.7b gated có chủ đích — sửa thiết kế tín hiệu,
-      không tinh chỉnh số).
+      không tinh chỉnh số). → Implement + A/B: `entry-filter-ab-2y-verdict.md` (2026-07-06);
+      walk-forward (2y thay vì 5y — data 5y vẫn chặn):
+      `walk-forward-donchian-verdict.md` (2026-07-09) — **FAIL Decision §4**
+      (cross: OOS/IS 0.02, CV 141; 9/18 fold âm) → `entry_on_cross_only` KHÔNG
+      promote default; edge full-window là structure, không phải edge ổn định.
 - [ ] **5.2** Epic 17 meta-labeling (18 stories đã contexted): triple-barrier labeling,
       purged/embargoed CV, LightGBM + calibration, `MetaLabelGate` qua seam
       `RegimeSnapshot.features` → `_meta_label_admits`.
