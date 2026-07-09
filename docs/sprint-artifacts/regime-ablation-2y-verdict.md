@@ -52,6 +52,14 @@ ungated. Hai ô gated M5 lần đầu pass FTMO DD nhưng Sharpe (~+0.03) còn r
 xa gate 0.8 và mẫu mỏng (59–166 trades) — cần OOS + walk-forward trước khi
 tin.
 
+**Cập nhật OOS cùng ngày (§5): edge EV in-sample KHÔNG sống sót OOS**
+(2026-01→05: supertrend+gate EV +77→−105; MR[recross]+gate −0.009 ≈ hòa-âm;
+cả donchian[cross] ungated cũng sụp +0.087→−0.109 — cửa sổ OOS thù địch với
+toàn roster). Cái replicate được là **nén DD** (supertrend 31.8→8.3%, MR
+12.3→2.2%) — gate là công cụ kiểm soát rủi ro robust, không phải nguồn
+alpha. Không promote ô nào; còn lại: walk-forward donchian + meta-labeling
+(Track 5.2).
+
 ---
 
 ## 1. Results
@@ -205,7 +213,49 @@ unmet by every cell. The redesign's two levers so far: signal design
 
 ---
 
-## 5. References
+## 5. OOS addendum (2026-07-09, same day)
+
+Ran the identical M5 matrix on `oos_reserve` (2026-01→2026-05, 23,146 bars,
+fp `17e28d422baea568`) — `regime-ablation-oos-m5.md`:
+
+| Cell (M5) | Arm | Sharpe | Max DD | PF | Trades | EV $/trade |
+|---|---|---:|---:|---:|---:|---:|
+| supertrend[none] | off | −0.115 | 31.8% | 0.873 | 608 | −33.99 |
+| | on | −0.103 | 8.3% | 0.643 | 40 | −104.92 |
+| donchian[cross] | off | −0.109 | 18.5% | 0.887 | 358 | −37.21 |
+| | on | −0.097 | 11.2% | 0.847 | 161 | −49.61 |
+| mean_reversion[none] | off | +0.006 | 31.9% | 0.996 | 1819 | −1.35 |
+| | on | −0.118 | 22.2% | 0.893 | 517 | −32.65 |
+| mean_reversion[recross] | off | −0.089 | 12.3% | 0.909 | 413 | −26.92 |
+| | on | **−0.009** | **2.2%** | 0.963 | 31 | −11.06 |
+
+Three honest readings:
+
+1. **The in-sample EV edge does not survive OOS.** supertrend+gate flips
+   hard negative (EV +77 → −105); MR[recross]+gate lands at −0.009 —
+   effectively breakeven-negative. Neither gated cell earned promotion.
+2. **The whole OOS window is hostile to everything** — including the
+   ungated donchian[cross] flagship (+0.087 IS → −0.109 OOS). Early-2026
+   XAUUSD is a different animal from the 2024–25 in-sample; whether the IS
+   edges were regime-local or never real, a single 4-month window cannot
+   say. This is exactly what the walk-forward (next step) is for.
+3. **What replicates is the DD compression, not the EV**: supertrend
+   31.8→8.3%, MR[recross] 12.3→2.2%. The gate's risk-control property is
+   robust OOS; its alpha property is not. That is a meaningful but much
+   weaker claim than §2.1–2.2 — treat the gate as an *exposure governor*,
+   not an edge source.
+
+Sample caveats cut both ways: 31–40 gated trades in 4 months is too few to
+*reject* the IS edge with confidence — but the burden of proof is on the
+edge, and it did not show up. Verdict unchanged on wiring (no global ON,
+per-strategy opt-out required); verdict on *promotion* hardens to: **no
+cell — gated or not — has demonstrated out-of-sample edge**. The plan's
+post-Track-4 decision point (~0.3 Sharpe) is unmet everywhere; the
+meta-labeling track (5.2) and the donchian walk-forward are what remain.
+
+---
+
+## 6. References
 
 - `docs/sprint-artifacts/regime-ablation-2y-m5.md` / `-m15.md` — full tables
 - `docs/sprint-artifacts/entry-filter-ab-2y-verdict.md` — anchors (Track 5.1)
