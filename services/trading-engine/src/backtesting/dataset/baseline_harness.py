@@ -9,9 +9,11 @@ the campaign reads the same bytes.
 
 The returned :class:`BacktestResult` instances carry a populated
 ``config_snapshot`` (Decision §7 in ``docs/epic-12-context.md``):
-dataset fingerprint, strategy params, venue settings, and the baseline
-flag ``regime_classifier_enabled: False`` (Decision §5). 12.3 consumes
-the snapshot when rendering the comparison report.
+dataset fingerprint, strategy params, venue settings, and
+``regime_classifier_enabled`` — ``False`` unless the run carries an
+enabled ``BaselineConfig.regime_config`` (Decision §5 default; Track
+4.3 ablation flips it ON). 12.3 consumes the snapshot when rendering
+the comparison report.
 
 Sequential runner — parallelism is the job of 12.6/12.7.
 """
@@ -35,6 +37,7 @@ from src.backtesting.job_config import (
 from src.backtesting.result import BacktestResult
 from src.backtesting.runner_facade import run_backtest
 from src.backtesting.strategy_registry import resolve_strategy
+from src.config.firm_profile import RegimeConfig
 
 
 logger = logging.getLogger(__name__)
@@ -153,7 +156,17 @@ class StrategySpec:
 
 @dataclass(frozen=True, slots=True)
 class BaselineConfig:
-    """Single in-sample baseline run."""
+    """Single in-sample baseline run.
+
+    ``regime_config`` (Track 4.3): optional regime-classifier block
+    forwarded to :func:`run_backtest` for every strategy in the run.
+    ``None`` (the default) keeps the historical dispatch signature —
+    the kwarg is not passed at all, so pre-existing ``runner``
+    callables without a ``regime_config`` parameter keep working.
+    Regime gating is single-process only (``RegimeConfig`` is not
+    picklable); this sequential harness qualifies, the parallel
+    sweep harnesses (12.6/12.7) do not.
+    """
 
     run_label: str
     manifest: DatasetManifest
@@ -161,6 +174,7 @@ class BaselineConfig:
     venue: VenueSpec
     strategies: tuple[StrategySpec, ...]
     prop_firm: PropFirmSpec | None = None
+    regime_config: RegimeConfig | None = None
 
     def __post_init__(self) -> None:
         labels = [s.display_label for s in self.strategies]
@@ -213,7 +227,10 @@ def run_baseline(
             config.window_name,
             entry.parquet_path,
         )
-        result = dispatch(job)
+        if config.regime_config is not None:
+            result = dispatch(job, regime_config=config.regime_config)
+        else:
+            result = dispatch(job)
         snapshot = _build_config_snapshot(
             spec=spec, entry=entry, config=config
         )
@@ -322,5 +339,7 @@ def _build_config_snapshot(
                 "max_drawdown_method": config.prop_firm.max_drawdown_method,
             }
         ),
-        "regime_classifier_enabled": False,
+        "regime_classifier_enabled": (
+            config.regime_config is not None and config.regime_config.enabled
+        ),
     }

@@ -94,8 +94,10 @@ kết luận FTMO compliance ("0 breaches, DD < 5.1%") vô giá trị** — chư
       max-DD 10%. Re-run 5y chờ Track 0.)*
 - [ ] **4.2** Baseline 5 năm × 4 symbols × M5/M15 (kiểm tra giả thuyết "XAUUSD chỉ là
       instrument nhiễu nhất" từ retro Epic 13 §8).
-- [ ] **4.3** Regime gating **ablation ON vs OFF** (RegimeActor Epic 15 đã xong, default-OFF) —
-      quyết định bật default bằng số liệu.
+- [x] **4.3** Regime gating **ablation ON vs OFF** (RegimeActor Epic 15 đã xong, default-OFF) —
+      quyết định bật default bằng số liệu. → `sprint-artifacts/regime-ablation-2y-verdict.md`
+      (2026-07-09): KHÔNG bật global — gate cứu MR[recross] (+0.035, DD 4.8%) và supertrend
+      (+0.032, DD 3.4%) trên M5 nhưng phá donchian (+0.087→−0.013); cần per-strategy opt-out.
 - [ ] **4.4** Story 12.12 **roster memo**: go/no-go từng strategy trên số liệu đúng.
 
 ## Track 5 — Redesign entries + meta-labeling (CẦN data)

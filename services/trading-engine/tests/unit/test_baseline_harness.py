@@ -34,6 +34,11 @@ from src.backtesting.job_config import (
     VenueSpec,
 )
 from src.backtesting.result import BacktestResult
+from src.config.firm_profile import (
+    InstrumentRegimeConfig,
+    RegimeConfig,
+    RegimeThresholds,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -95,7 +100,13 @@ def _strategy(name: str, timeframe: str = "M5", **params) -> StrategySpec:
 
 @dataclass
 class _FakeRunner:
-    """Captures every job sent to ``run_backtest`` and returns a stub result."""
+    """Captures every job sent to ``run_backtest`` and returns a stub result.
+
+    Deliberately does NOT accept a ``regime_config`` kwarg — it doubles as
+    the regression proof that ``run_baseline`` never forwards the kwarg
+    when ``BaselineConfig.regime_config`` is ``None`` (pre-Track-4.3
+    runner callables keep working unchanged).
+    """
 
     jobs: list[BacktestJobConfig] = field(default_factory=list)
     overrides: list[dict[str, Any] | None] = field(default_factory=list)
@@ -115,6 +126,52 @@ class _FakeRunner:
             initial_balance=Decimal(job.venue.starting_balance),
             final_balance=Decimal(job.venue.starting_balance),
         )
+
+
+@dataclass
+class _RegimeAwareFakeRunner(_FakeRunner):
+    """Fake runner that also records the ``regime_config`` kwarg."""
+
+    regime_configs: list[RegimeConfig | None] = field(default_factory=list)
+
+    def __call__(
+        self,
+        job: BacktestJobConfig,
+        *,
+        strategy_overrides: dict[str, Any] | None = None,
+        regime_config: RegimeConfig | None = None,
+    ) -> BacktestResult:
+        self.regime_configs.append(regime_config)
+        return super().__call__(job, strategy_overrides=strategy_overrides)
+
+
+def _regime_config(*, enabled: bool = True) -> RegimeConfig:
+    thresholds = RegimeThresholds(
+        adx_trend_min=25.0,
+        adx_strong_trend=40.0,
+        bb_width_low_pct=0.30,
+        bb_width_high_pct=0.80,
+        realized_vol_high=0.025,
+        ema_slope_trend_threshold=0.0005,
+    )
+    instrument = InstrumentRegimeConfig(
+        timeframe="M5",
+        thresholds=thresholds,
+        adx_period=14,
+        bb_period=20,
+        bb_stddev=2.0,
+        bb_baseline_window=100,
+        realized_vol_window=20,
+        ema_slope_period=20,
+        ema_slope_lookback=5,
+    )
+    return RegimeConfig(
+        enabled=enabled,
+        confirmation_bars=2,
+        warmup_bars=50,
+        feature_window=200,
+        instruments={"XAUUSD": instrument},
+    )
 
 
 # --- Tests ------------------------------------------------------------
@@ -369,6 +426,65 @@ class TestConfigSnapshot:
         snapshot = result.config_snapshot
         assert snapshot is not None
         assert snapshot["run_label"] == "phase-12a"
+
+
+class TestRegimeConfigPassthrough:
+    """Track 4.3 — ``BaselineConfig.regime_config`` reaches ``run_backtest``."""
+
+    def _cfg(self, regime: RegimeConfig | None) -> BaselineConfig:
+        return BaselineConfig(
+            run_label="track43-ablation",
+            manifest=_manifest((_entry("M5"),)),
+            window_name="in_sample",
+            venue=_venue(),
+            strategies=(_strategy("mean_reversion"),),
+            regime_config=regime,
+        )
+
+    def test_regime_config_forwarded_to_runner(self) -> None:
+        regime = _regime_config()
+        fake = _RegimeAwareFakeRunner()
+        run_baseline(self._cfg(regime), runner=fake)
+
+        assert fake.regime_configs == [regime]
+
+    def test_none_regime_config_not_forwarded(self) -> None:
+        # _FakeRunner has no ``regime_config`` parameter — forwarding the
+        # kwarg on the None path would TypeError, breaking existing callers.
+        fake = _FakeRunner()
+        results = run_baseline(self._cfg(None), runner=fake)
+
+        assert len(results) == 1
+
+    def test_snapshot_records_regime_enabled(self) -> None:
+        fake = _RegimeAwareFakeRunner()
+        result = run_baseline(self._cfg(_regime_config()), runner=fake)[0]
+
+        snapshot = result.config_snapshot
+        assert snapshot is not None
+        assert snapshot["regime_classifier_enabled"] is True
+
+    def test_snapshot_records_disabled_regime_block_as_false(self) -> None:
+        # A regime_config carried but with enabled=False builds no actor
+        # downstream — the snapshot must say False, not True.
+        fake = _RegimeAwareFakeRunner()
+        result = run_baseline(
+            self._cfg(_regime_config(enabled=False)), runner=fake
+        )[0]
+
+        snapshot = result.config_snapshot
+        assert snapshot is not None
+        assert snapshot["regime_classifier_enabled"] is False
+
+    def test_default_is_none(self) -> None:
+        cfg = BaselineConfig(
+            run_label="phase-12a",
+            manifest=_manifest((_entry("M5"),)),
+            window_name="in_sample",
+            venue=_venue(),
+            strategies=(_strategy("ma_crossover"),),
+        )
+        assert cfg.regime_config is None
 
 
 class TestErrors:
