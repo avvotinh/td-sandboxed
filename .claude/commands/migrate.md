@@ -1,5 +1,7 @@
 Run all pending database migrations on TimescaleDB.
 
+> Live-path only — research loop (backtest + chart viewer) không cần Docker/DB (xem docs/v2/01-architecture.md D6).
+
 Check TimescaleDB is running first:
 ```bash
 docker exec trading-timescaledb pg_isready -U trading -d trading

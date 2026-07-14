@@ -1,5 +1,7 @@
 Check health status of all project services and infrastructure.
 
+> Redis/TimescaleDB checks bên dưới chỉ cần cho **live path** — research loop (backtest + chart viewer) không cần Docker/DB (xem docs/v2/01-architecture.md D6).
+
 ## 1. Container status
 ```bash
 docker ps --filter "name=trading-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"

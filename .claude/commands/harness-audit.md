@@ -5,7 +5,7 @@ Audit the `.claude/` harness configuration for drift, bugs, and missed leverage.
 1. **Structure completeness**
    - `agents/`, `commands/`, `rules/`, `skills/`, `settings.local.json` exist.
    - Every active service language has a matching `rules/<lang>/` directory.
-     - Project services: trading-engine (python), tv-api & notification (golang), mt5-bridge (rust), + database for TimescaleDB/Alembic.
+     - Project services (v2): trading-engine (Python — kernel/lab/live), mt5-bridge (Rust), chart-viewer (Python FastAPI, upcoming), tv-api frozen (tv-cli fetch only), + database for TimescaleDB/Alembic (live path).
 
 2. **Agent ↔ CLAUDE.md alignment**
    - Every agent in `.claude/agents/` is referenced in CLAUDE.md's Workflow Matrix (or an alternative surface).

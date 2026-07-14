@@ -1,5 +1,7 @@
 Guide the user through first-time project setup. Check each prerequisite and report status before proceeding.
 
+> Live-path only — research loop (backtest + chart viewer) không cần Docker/DB (xem docs/v2/01-architecture.md D6).
+
 ## Step 1 — Check prerequisites
 Run these checks and report pass/fail for each:
 ```bash

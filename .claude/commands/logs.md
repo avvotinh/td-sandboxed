@@ -1,6 +1,6 @@
 Show recent logs from project services.
 
-$ARGUMENTS can be a service name: `redis`, `timescaledb`, `tv-api`, `mt5-bridge`, `trading-engine`, `notification`
+$ARGUMENTS can be a service name: `redis`, `timescaledb`, `mt5-bridge`, `trading-engine`
 
 If argument is provided:
 ```bash

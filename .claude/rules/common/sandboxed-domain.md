@@ -1,20 +1,32 @@
-# Sandboxed Domain Rules
+# Sandboxed Domain Rules (v2)
 
-## Monorepo boundaries
-- `services/trading-engine/` KHÔNG được import từ `services/tv-api/` (và ngược lại)
-- Communication giữa các service CHỈ qua ZeroMQ (order flow) hoặc Redis pub/sub (events)
-- KHÔNG tạo shared library chung giữa các service khác ngôn ngữ — nếu cần shared Python code, đặt trong `services/_shared/` (thư mục này sẽ được tạo khi có nhu cầu thực tế, hiện chưa tồn tại); Go services giữ copy riêng của contract DTOs
+## Research loop — không phụ thuộc hạ tầng
+- Research loop (backtest, sweep, walk-forward, chart viewer) chạy KHÔNG cần Docker/TimescaleDB/Redis (Quyết định D6, `docs/v2/01-architecture.md`) — dữ liệu là Parquet + JSON file
+- KHÔNG thêm dependency vào DB/Redis cho code trong kernel/lab/viewer — DB/Redis chỉ dành cho live path
+- KHÔNG yêu cầu user chạy `/up`, `/migrate` cho công việc research
 
-## Database discipline
+## Results & run_id discipline
+- `results/` là **gitignored** (file lớn) — KHÔNG commit result JSON
+- Verdict markdown trong `docs/v2/studies/` PHẢI reference `run_id` của run tạo ra kết quả
+- Mọi số liệu performance được trích dẫn (Sharpe, PF, DD, win-rate...) PHẢI kèm `run_id` — số liệu không truy vết được về một run cụ thể coi như không tồn tại
+
+## Chống lookahead bias
+- Mọi entry model MỚI phải kèm test chứng minh chỉ dùng dữ liệu ≤ t (bar hiện tại và trước đó) — không đọc bar tương lai, không dùng giá close của bar chưa đóng
+- Indicator/feature tính trên toàn bộ series (scaling, normalization, rolling mà center) là red flag — phải tính cumulative/rolling trái
+- Nghi ngờ kết quả backtest "quá đẹp" → kiểm tra lookahead trước khi tin
+
+## Database discipline (chỉ live path)
+- Áp dụng khi làm live path (P5+) — research loop không đụng DB
 - Mọi schema change PHẢI đi qua Alembic migration (không `ALTER TABLE` thủ công)
 - TimescaleDB hypertable: trade_audit_log, rule_check_log, account_snapshot — retention 180 ngày
 - NEVER `DROP TABLE` trong migration prod — chỉ `DROP` qua backup/restore manual
 
-## Sprint workflow
-- Trước khi commit: kiểm tra `docs/sprint-artifacts/sprint-status.yaml` có phản ánh đúng trạng thái story không
-- Mỗi commit tương ứng 1 story — message format: `Implement spec <epic> story <story>`
-- KHÔNG commit code ngoài scope story đang làm (dùng stash/branch khác)
+## Study & decision workflow
+- Study verdict (kết quả nghiên cứu chiến lược) → `docs/v2/studies/<slug>-<yyyy-mm-dd>.md`
+- Quyết định kiến trúc → ghi vào `docs/v2/decisions.md`
+- KHÔNG commit code ngoài scope study/task đang làm (dùng stash/branch khác)
 
 ## FTMO compliance boundaries
 - Ngưỡng daily loss / max drawdown KHÔNG được hardcode — load từ `configs/ftmo-presets.yaml`
 - Mọi thay đổi preset PHẢI kèm validation report ở `docs/sprint-artifacts/validation-report-*.md`
+- FTMO layer chỉ bật SAU KHI chiến lược pass promotion gate D7 (OOS Sharpe ≥ 0.8 + WF pass + DD chấp nhận được)
