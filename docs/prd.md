@@ -11,6 +11,9 @@ date: '2025-12-07'
 
 # Product Requirements Document - Multi-Account Trading System
 
+> ⚠️ **DEPRECATED (2026-07-14):** PRD của hệ multi-account CŨ. Định hướng sản phẩm
+> hiện hành (single MT5 account, strategy-first): [`docs/v2/README.md`](v2/README.md).
+
 **Author:** BMad
 **Date:** 2025-12-07
 

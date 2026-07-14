@@ -1,5 +1,8 @@
 # Multi-Account Trading System - Epic Breakdown
 
+> ⚠️ **DEPRECATED (2026-07-14):** Epic breakdown của hệ multi-account CŨ.
+> Roadmap hiện hành: [`docs/v2/02-roadmap.md`](v2/02-roadmap.md).
+
 **Author:** BMad
 **Date:** 2025-12-17
 **Project Level:** High Complexity

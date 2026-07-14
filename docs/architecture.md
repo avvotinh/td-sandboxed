@@ -1,5 +1,8 @@
 # Architecture
 
+> ⚠️ **DEPRECATED (2026-07-14):** Tài liệu này mô tả kiến trúc multi-account/4-service CŨ.
+> Kiến trúc hiện hành xem tại [`docs/v2/`](v2/README.md). Chỉ dùng file này để tra cứu hệ cũ.
+
 ## Executive Summary
 
 Event-driven automated trading system for **multi-account, multi-prop-firm trading**, architected as a **monorepo with independent microservices**. The system leverages a polyglot tech stack optimized for each service's requirements: Go for I/O-bound services, Rust for latency-critical messaging, and Python for trading logic with Nautilus Trader.
