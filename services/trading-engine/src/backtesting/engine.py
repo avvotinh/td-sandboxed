@@ -18,15 +18,14 @@ from typing import TYPE_CHECKING, Any
 
 from nautilus_trader.backtest.engine import BacktestEngine, BacktestEngineConfig
 from nautilus_trader.model.currencies import USD
-from nautilus_trader.model.enums import OrderSide, OrderType
-from nautilus_trader.model.events import OrderInitialized, OrderUpdated
+from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.objects import Currency, Money
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.backtesting.prop_firm_actor import PropFirmComplianceActor
 from src.backtesting.prop_firm_preset import PropFirmPreset
 from src.backtesting.metrics.calculator import calculate_metrics
-from src.backtesting.result import BacktestResult, SlUpdate, TradeRecord
+from src.backtesting.result import BacktestResult, TradeRecord
 
 if TYPE_CHECKING:
     from nautilus_trader.model.data import BarType
@@ -55,85 +54,6 @@ def _pos_pnl_decimal(pnl: Any) -> Decimal:
     if isinstance(pnl, Money):
         return pnl.as_decimal()
     return Decimal(str(pnl))
-
-
-def _ns_to_utc(ns: int) -> datetime:
-    """Nautilus ns timestamp → tz-aware UTC datetime (second resolution)."""
-    return datetime.fromtimestamp(ns // 1_000_000_000, tz=UTC)
-
-
-def _to_decimal(value: Any) -> Decimal | None:
-    """Best-effort ``Decimal`` coercion for Nautilus price-like objects."""
-    if value is None:
-        return None
-    try:
-        return Decimal(str(value))
-    except ArithmeticError:
-        return None
-
-
-def _initial_sl_price(order: Any) -> Decimal | None:
-    """The SL leg's *initial* trigger price.
-
-    ``order.trigger_price`` reflects the latest modification, so a
-    trailed SL would read as its final value. The original trigger is
-    recorded on the ``OrderInitialized`` event's ``options`` mapping;
-    we fall back to the live attribute when the event (or the key) is
-    missing — correct for never-modified legs, best-effort otherwise.
-    """
-    for event in getattr(order, "events", ()) or ():
-        if isinstance(event, OrderInitialized):
-            options = getattr(event, "options", None) or {}
-            initial = _to_decimal(options.get("trigger_price"))
-            if initial is not None:
-                return initial
-            break
-    return _to_decimal(getattr(order, "trigger_price", None))
-
-
-def _sl_update_history(order: Any) -> tuple[SlUpdate, ...]:
-    """Chronological SL modifications (BE move + trailing ratchets)."""
-    updates: list[SlUpdate] = []
-    for event in getattr(order, "events", ()) or ():
-        if not isinstance(event, OrderUpdated):
-            continue
-        price = _to_decimal(event.trigger_price)
-        if price is None:
-            continue
-        updates.append(SlUpdate(ts=_ns_to_utc(event.ts_event), price=price))
-    updates.sort(key=lambda u: u.ts)
-    return tuple(updates)
-
-
-def _extract_bracket_levels(
-    cache: Any, position_id: Any
-) -> tuple[Decimal | None, Decimal | None, tuple[SlUpdate, ...]]:
-    """Recover (initial SL, TP, SL-update history) for one position.
-
-    Our strategies enter with market brackets whose children are a
-    STOP_MARKET SL leg and a LIMIT TP leg (``BaseStrategy._build_bracket_args``),
-    so order type identifies the leg. Multiple same-type legs (should
-    not happen with one bracket per position) resolve to the earliest
-    by ``ts_init``. Any cache/lookup failure degrades to ``(None, None, ())``
-    — the chart viewer treats levels as optional enrichment.
-    """
-    try:
-        orders = list(cache.orders_for_position(position_id))
-    except Exception:
-        return None, None, ()
-
-    orders.sort(key=lambda o: getattr(o, "ts_init", 0))
-    sl_price: Decimal | None = None
-    tp_price: Decimal | None = None
-    sl_updates: tuple[SlUpdate, ...] = ()
-    for order in orders:
-        order_type = getattr(order, "order_type", None)
-        if order_type == OrderType.STOP_MARKET and sl_price is None:
-            sl_price = _initial_sl_price(order)
-            sl_updates = _sl_update_history(order)
-        elif order_type == OrderType.LIMIT and tp_price is None:
-            tp_price = _to_decimal(getattr(order, "price", None))
-    return sl_price, tp_price, sl_updates
 
 
 class BacktestRunnerConfig(BaseModel):
@@ -374,15 +294,12 @@ class BacktestRunner:
 
         records: list[TradeRecord] = []
         for pos in positions:
-            # A CLOSED position reports ``side == PositionSide.FLAT`` —
-            # comparing against LONG here mislabelled every closed trade
-            # as SELL. ``pos.entry`` is the entry order's side and is
-            # stable for the position's whole lifecycle.
-            side = "BUY" if pos.entry == OrderSide.BUY else "SELL"
-            entry_ts = _ns_to_utc(pos.ts_opened)
-            exit_ts = _ns_to_utc(pos.ts_closed or pos.ts_last)
-            sl_price, tp_price, sl_updates = _extract_bracket_levels(
-                self._engine.cache, pos.id
+            side = "BUY" if pos.side == PositionSide.LONG else "SELL"
+            entry_ts = datetime.fromtimestamp(
+                pos.ts_opened // 1_000_000_000, tz=UTC
+            )
+            exit_ts = datetime.fromtimestamp(
+                (pos.ts_closed or pos.ts_last) // 1_000_000_000, tz=UTC
             )
             records.append(
                 TradeRecord(
@@ -395,9 +312,6 @@ class BacktestRunner:
                     exit_price=Decimal(str(pos.avg_px_close or pos.avg_px_open)),
                     quantity=Decimal(str(pos.quantity)),
                     pnl=_pos_pnl_decimal(pos.realized_pnl),
-                    sl_price=sl_price,
-                    tp_price=tp_price,
-                    sl_updates=sl_updates,
                 )
             )
         return records

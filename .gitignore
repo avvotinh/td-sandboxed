@@ -87,5 +87,3 @@ specs/
 
 # External reference repos (read-only, not part of Sandboxed)
 TradingView-API/
-# Backtest chart-viewer HTML output (large, regenerable via scripts/run_backtest_chart.py)
-services/trading-engine/reports/
