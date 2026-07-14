@@ -369,6 +369,46 @@ def _build_strategy(
     return entry.strategy_cls(config=config)
 
 
+def build_instrument_and_bar_type(
+    symbol: str, bar_type_suffix: str
+) -> tuple[Instrument, BarType]:
+    """Public wrapper over the instrument + bar-type builders.
+
+    Consumers outside the run path (e.g. the chart viewer converting a
+    bar DataFrame into Nautilus ``Bar`` objects) need the same
+    instrument conventions a backtest uses without composing an engine.
+    """
+    instrument, _ = _build_instrument(symbol)
+    return instrument, _bar_type_for(instrument, bar_type_suffix)
+
+
+def load_parquet_bars_frame(path: Any) -> pd.DataFrame:
+    """Read a bar-shard parquet into the normalised tz-aware OHLCV frame.
+
+    Same read + index normalisation the backtest data path applies, so
+    a consumer slicing this frame sees exactly the rows a
+    :class:`ParquetDataSpec` run would feed the engine.
+    """
+    df = pd.read_parquet(path)
+    return _normalise_parquet_index(df, source=path)
+
+
+def load_job_market_data(
+    job: BacktestJobConfig,
+) -> tuple[Instrument, BarType, list[Bar]]:
+    """Build the ``(instrument, bar_type, bars)`` triple a job describes.
+
+    Public seam for consumers that need the exact market data a backtest
+    ran on without re-running it — e.g. the chart viewer recomputes
+    indicator series over the same ``Bar`` stream the strategy saw.
+    """
+    instrument, bar_type = build_instrument_and_bar_type(
+        job.instrument_symbol, job.bar_type_suffix
+    )
+    bars = _build_bars(job, instrument, bar_type)
+    return instrument, bar_type, bars
+
+
 def run_backtest(
     job: BacktestJobConfig,
     *,
@@ -405,9 +445,7 @@ def run_backtest(
     """
     merged_params = {**job.strategy_params, **(strategy_overrides or {})}
 
-    instrument, _ = _build_instrument(job.instrument_symbol)
-    bar_type = _bar_type_for(instrument, job.bar_type_suffix)
-    bars = _build_bars(job, instrument, bar_type)
+    instrument, bar_type, bars = load_job_market_data(job)
 
     currency = _resolve_currency(job.venue.currency)
 

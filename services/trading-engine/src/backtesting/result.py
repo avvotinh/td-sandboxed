@@ -12,8 +12,24 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class SlUpdate:
+    """One stop-loss modification (breakeven move / trailing ratchet)."""
+
+    ts: datetime
+    price: Decimal
+
+
+@dataclass(frozen=True)
 class TradeRecord:
-    """Single closed trade in backtest output."""
+    """Single closed trade in backtest output.
+
+    ``sl_price`` / ``tp_price`` are the bracket's initial stop-loss and
+    take-profit levels; ``sl_updates`` is the chronological history of
+    SL modifications (breakeven move, trailing ratchets). All three are
+    ``None``/empty when the trade was not bracket-managed or the order
+    legs could not be recovered from the engine cache — consumers must
+    treat them as best-effort enrichment, not guaranteed fields.
+    """
 
     trade_id: str
     symbol: str
@@ -24,6 +40,9 @@ class TradeRecord:
     exit_price: Decimal
     quantity: Decimal
     pnl: Decimal
+    sl_price: Decimal | None = None
+    tp_price: Decimal | None = None
+    sl_updates: tuple[SlUpdate, ...] = ()
 
 
 @dataclass(frozen=True)
