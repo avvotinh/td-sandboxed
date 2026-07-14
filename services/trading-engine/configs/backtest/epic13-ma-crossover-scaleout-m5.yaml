@@ -26,4 +26,4 @@ strategy_params:
   safety_tp_atr_mult: "6.0"
 data:
   kind: parquet
-  path: /home/hopdev/Dev/Sandboxed/data/historical/XAUUSD/M5/in_sample.parquet
+  path: data/historical/XAUUSD/M5/in_sample.parquet

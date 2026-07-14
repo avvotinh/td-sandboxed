@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from nautilus_trader.indicators.volatility import AverageTrueRange
 from nautilus_trader.model.data import Bar
@@ -45,6 +46,9 @@ from src.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
     RiskBasedSizerConfig,
 )
+
+if TYPE_CHECKING:
+    from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -231,3 +235,37 @@ class MeanReversionStrategy(
             )
             return
         self._submit_bracket_for_entry(signal, Decimal(str(atr_raw)))
+
+    def _export_indicators(
+        self, bar: Bar, recorder: IndicatorRecorder
+    ) -> None:
+        """Record Bollinger bands (overlay) + RSI (own pane, with levels)."""
+        from src.backtesting.recorder.indicator_recorder import ns_to_utc
+
+        ts = ns_to_utc(bar.ts_init)
+        bb = self._bb
+        if bb.initialized:
+            if not recorder.is_registered("bb_upper"):
+                recorder.register(
+                    "bb_upper", title="BB upper", pane="overlay", color="#2962ff"
+                )
+                recorder.register(
+                    "bb_middle", title="BB middle", pane="overlay", color="#9e9e9e"
+                )
+                recorder.register(
+                    "bb_lower", title="BB lower", pane="overlay", color="#2962ff"
+                )
+            recorder.record("bb_upper", ts, bb.upper)
+            recorder.record("bb_middle", ts, bb.middle)
+            recorder.record("bb_lower", ts, bb.lower)
+        rsi = self._rsi
+        if rsi.initialized:
+            if not recorder.is_registered("rsi"):
+                recorder.register(
+                    "rsi",
+                    title=f"RSI ({self.config.rsi_period})",
+                    pane="rsi",
+                    color="#ab47bc",
+                    levels=(self.config.oversold, self.config.overbought),
+                )
+            recorder.record("rsi", ts, rsi.value)

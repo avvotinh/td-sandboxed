@@ -12,6 +12,7 @@ Nautilus objects.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -54,6 +55,49 @@ _SUPPORTED_SYMBOLS: frozenset[str] = frozenset(
 
 class UnsupportedInstrumentError(ValueError):
     """Raised when a job references an instrument symbol we cannot build."""
+
+
+# --- Data-path portability (Contract v2 P1, gap G4) --------------------
+
+_REPO_ROOT_ENV = "TD_REPO_ROOT"
+
+
+def repo_root() -> Path:
+    """Locate the repository root for resolving relative data paths.
+
+    Resolution order:
+
+    1. ``TD_REPO_ROOT`` env var (explicit override — CI, unusual
+       checkouts).
+    2. Walk up from this module's file to the first directory containing
+       ``.git``.
+    3. Fallback to the current working directory (only reachable when
+       the package runs outside a git checkout, e.g. an installed
+       wheel) — relative paths then behave like plain CWD-relative
+       paths instead of failing outright.
+    """
+    override = os.environ.get(_REPO_ROOT_ENV)
+    if override:
+        return Path(override)
+    here = Path(__file__).resolve().parent
+    for candidate in (here, *here.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return Path.cwd()
+
+
+def resolve_data_path(path: Path) -> Path:
+    """Resolve a job data path: relative → repo root, absolute → as-is.
+
+    A path with a filesystem root but no drive (POSIX-style
+    ``/home/...`` read on Windows) is treated as absolute too — such
+    stale paths should fail loudly at read time rather than silently
+    resolving under the repo root.
+    """
+    p = Path(path)
+    if p.is_absolute() or p.root:
+        return p
+    return repo_root() / p
 
 
 def supported_symbols() -> tuple[str, ...]:

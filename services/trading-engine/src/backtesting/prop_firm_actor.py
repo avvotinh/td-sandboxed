@@ -34,6 +34,7 @@ from nautilus_trader.model.identifiers import Venue
 from nautilus_trader.model.objects import Currency
 
 from src.backtesting.account_state_builder import build_account_state
+from src.backtesting.portfolio_equity import read_account_balance
 from src.backtesting.result import BreachEvent
 from src.rules.base_rule import RuleAction
 from src.rules.engine import RuleEngine
@@ -283,8 +284,13 @@ class PropFirmComplianceActor(Actor):
            live mode must never silently read the Nautilus portfolio
            (which can drift from MT5 mid-reconciliation).
         2. Nautilus ``Portfolio`` keyed by ``config.venue`` — backtest
-           path. Pre-fill bars or missing ``balance_total`` fall back to
-           ``config.initial_balance`` so the equity curve still populates.
+           path, via the shared :func:`read_account_balance` helper (the
+           equity recorder builds on the same read, so the two cannot
+           drift). Pre-fill bars or missing ``balance_total`` fall back
+           to ``config.initial_balance`` so the equity curve still
+           populates. Deliberately REALIZED balance only — compliance
+           semantics unchanged (equity-based compliance is a live-path
+           follow-up; see docs/v2/decisions.md known gaps).
         3. ``None`` — no live provider and no venue (unit-test path); the
            caller (``on_bar``) skips the rule check.
         """
@@ -294,14 +300,12 @@ class PropFirmComplianceActor(Actor):
         if self._config.venue is None:
             # Unit-test path — no portfolio wiring available.
             return None
-        account = self.portfolio.account(self._config.venue)
-        if account is None:
-            # Pre-fill warm-up: fall back to starting balance.
-            return self._config.initial_balance
-        balance = account.balance_total(self._config.currency)
-        if balance is None:
-            return self._config.initial_balance
-        return Decimal(str(balance.as_double()))
+        return read_account_balance(
+            self.portfolio,
+            self._config.venue,
+            self._config.currency,
+            self._config.initial_balance,
+        )
 
 
 class _BarSignal:

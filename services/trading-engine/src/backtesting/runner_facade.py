@@ -36,7 +36,9 @@ from src.backtesting.job_config import (
     ParquetDataSpec,
     SyntheticDataSpec,
     TimescaleDataSpec,
+    resolve_data_path,
 )
+from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
 from src.backtesting.strategy_registry import resolve_strategy
 from src.backtesting.synthetic_bars import generate_bars
 from src.regime.state_store import RegimeStateStore
@@ -258,8 +260,11 @@ def _build_bars(
             noise_scale=data.noise_scale,
         )
     if isinstance(data, ParquetDataSpec):
-        df = pd.read_parquet(data.path)
-        df = _normalise_parquet_index(df, source=data.path)
+        # Relative paths resolve against the repo root (gap G4) so job
+        # YAMLs stay portable across machines/checkouts.
+        path = resolve_data_path(data.path)
+        df = pd.read_parquet(path)
+        df = _normalise_parquet_index(df, source=path)
         return dataframe_to_bars(df, bar_type=bar_type, instrument=instrument)
     if isinstance(data, TimescaleDataSpec):
         raise NotImplementedError(
@@ -369,6 +374,46 @@ def _build_strategy(
     return entry.strategy_cls(config=config)
 
 
+def build_instrument_and_bar_type(
+    symbol: str, bar_type_suffix: str
+) -> tuple[Instrument, BarType]:
+    """Public wrapper over the instrument + bar-type builders.
+
+    Consumers outside the run path (e.g. the chart viewer converting a
+    bar DataFrame into Nautilus ``Bar`` objects) need the same
+    instrument conventions a backtest uses without composing an engine.
+    """
+    instrument, _ = _build_instrument(symbol)
+    return instrument, _bar_type_for(instrument, bar_type_suffix)
+
+
+def load_parquet_bars_frame(path: Any) -> pd.DataFrame:
+    """Read a bar-shard parquet into the normalised tz-aware OHLCV frame.
+
+    Same read + index normalisation the backtest data path applies, so
+    a consumer slicing this frame sees exactly the rows a
+    :class:`ParquetDataSpec` run would feed the engine.
+    """
+    df = pd.read_parquet(path)
+    return _normalise_parquet_index(df, source=path)
+
+
+def load_job_market_data(
+    job: BacktestJobConfig,
+) -> tuple[Instrument, BarType, list[Bar]]:
+    """Build the ``(instrument, bar_type, bars)`` triple a job describes.
+
+    Public seam for consumers that need the exact market data a backtest
+    ran on without re-running it — e.g. the chart viewer recomputes
+    indicator series over the same ``Bar`` stream the strategy saw.
+    """
+    instrument, bar_type = build_instrument_and_bar_type(
+        job.instrument_symbol, job.bar_type_suffix
+    )
+    bars = _build_bars(job, instrument, bar_type)
+    return instrument, bar_type, bars
+
+
 def run_backtest(
     job: BacktestJobConfig,
     *,
@@ -405,9 +450,7 @@ def run_backtest(
     """
     merged_params = {**job.strategy_params, **(strategy_overrides or {})}
 
-    instrument, _ = _build_instrument(job.instrument_symbol)
-    bar_type = _bar_type_for(instrument, job.bar_type_suffix)
-    bars = _build_bars(job, instrument, bar_type)
+    instrument, bar_type, bars = load_job_market_data(job)
 
     currency = _resolve_currency(job.venue.currency)
 
@@ -444,6 +487,17 @@ def run_backtest(
         )
         runner.add_instrument(instrument)
         runner.add_data(bars)
+
+        # Contract v2 P1 (gap G2): ALWAYS attach the equity recorder —
+        # before the strategy, same placement rule as the other actors —
+        # so every run (prop_firm block or not) gets a populated equity
+        # curve and metrics.
+        runner.attach_equity_recorder(
+            bar_type=bar_type,
+            venue=instrument.id.venue,
+            currency=currency,
+            initial_balance=Decimal(job.venue.starting_balance),
+        )
 
         # Add-order: regime actor → strategy → compliance actor (design §3).
         # The regime actor is attached BEFORE the strategy so its on_bar
@@ -490,10 +544,20 @@ def run_backtest(
                 )
             strategy._regime_state = regime_state
             strategy._allowed_regimes = StrategyRegistry.get_regimes(job.strategy)
+
+        # Contract v2 P1 (gap G6): runtime-attr injection, same pattern
+        # as the regime state store above — the strategy records its
+        # indicator series per bar via BaseStrategy._export_indicators.
+        indicator_recorder = IndicatorRecorder()
+        strategy._indicator_recorder = indicator_recorder
         runner.add_strategy(strategy)
 
         if job.prop_firm is not None:
-            preset = load_prop_firm_preset(job.prop_firm.preset_path)
+            # Same repo-root resolution as data paths (gap G4) so preset
+            # references in job YAMLs stay machine-portable too.
+            preset = load_prop_firm_preset(
+                resolve_data_path(job.prop_firm.preset_path)
+            )
             rule_engine = _build_prop_firm_rule_engine(
                 account_id=job.prop_firm.account_id,
                 preset=preset,
@@ -521,7 +585,10 @@ def run_backtest(
             currency=currency,
             fallback=Decimal(job.venue.starting_balance),
         )
-        return runner.get_result(final_balance=final_balance)
+        return runner.get_result(
+            final_balance=final_balance,
+            indicators=indicator_recorder.to_series(),
+        )
     finally:
         runner.dispose()
 

@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from nautilus_trader.model.orders.list import OrderList
     from nautilus_trader.model.position import Position
 
+    from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
     from src.regime.state_store import RegimeStateStore
 
 
@@ -72,6 +73,12 @@ class BaseStrategy(Strategy):
         # exactly as it did before this epic.
         self._regime_state: RegimeStateStore | None = None
         self._allowed_regimes: frozenset[RegimeState] | None = None
+
+        # Indicator recording (Contract v2 P1, gap G6). Injected as a
+        # runtime attribute AFTER construction by the backtest runner —
+        # same pattern as ``_regime_state`` above. ``None`` (default)
+        # keeps per-bar processing byte-identical to pre-P1 behaviour.
+        self._indicator_recorder: IndicatorRecorder | None = None
 
     # Position state properties (AC1, Task 4)
     @property
@@ -157,7 +164,11 @@ class BaseStrategy(Strategy):
     def on_bar(self, bar: Bar) -> None:
         """Process incoming bar data.
 
-        Calls generate_signal and executes if signal is not NONE.
+        Calls generate_signal and executes if signal is not NONE. All
+        strategies (including bracket strategies, whose
+        ``BracketScaleOutMixin.on_bar`` delegates here via ``super()``)
+        flow through this single per-bar choke point, so the indicator
+        export hook at the end fires exactly once per bar.
 
         Args:
             bar: The incoming bar data
@@ -165,6 +176,22 @@ class BaseStrategy(Strategy):
         signal = self.generate_signal(bar)
         if signal != SignalType.NONE:
             self._execute_signal(signal)
+
+        recorder = getattr(self, "_indicator_recorder", None)
+        if recorder is not None:
+            self._export_indicators(bar, recorder)
+
+    def _export_indicators(
+        self, bar: Bar, recorder: IndicatorRecorder
+    ) -> None:
+        """Record this strategy's indicator values for the current bar.
+
+        Called at the end of ``on_bar`` when an ``IndicatorRecorder``
+        has been injected (backtest runner, Contract v2 P1). The base
+        implementation records nothing; strategies override to register
+        (lazily) and record their own series — only once the backing
+        indicators report ``initialized``.
+        """
 
     def on_tick(self, tick) -> None:
         """Process incoming tick data.

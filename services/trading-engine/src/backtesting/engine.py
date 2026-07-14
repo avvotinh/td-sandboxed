@@ -12,20 +12,31 @@ correctness is covered by ``tests/integration/test_backtest_smoke.py``.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from nautilus_trader.backtest.engine import BacktestEngine, BacktestEngineConfig
 from nautilus_trader.model.currencies import USD
-from nautilus_trader.model.enums import PositionSide
+from nautilus_trader.model.enums import OrderSide, OrderType
+from nautilus_trader.model.events import OrderInitialized, OrderUpdated
 from nautilus_trader.model.objects import Currency, Money
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.backtesting.prop_firm_actor import PropFirmComplianceActor
 from src.backtesting.prop_firm_preset import PropFirmPreset
 from src.backtesting.metrics.calculator import calculate_metrics
-from src.backtesting.result import BacktestResult, TradeRecord
+from src.backtesting.recorder.equity_recorder import (
+    EquityRecorderActor,
+    EquityRecorderActorConfig,
+)
+from src.backtesting.result import (
+    BacktestResult,
+    IndicatorSeries,
+    SlUpdate,
+    TradeRecord,
+)
 
 if TYPE_CHECKING:
     from nautilus_trader.model.data import BarType
@@ -35,6 +46,8 @@ if TYPE_CHECKING:
     from src.regime.actor import RegimeActor, RegimeAuditHook
     from src.regime.state_store import RegimeStateStore
     from src.rules.engine import RuleEngine
+
+logger = logging.getLogger(__name__)
 
 
 def _pos_pnl_decimal(pnl: Any) -> Decimal:
@@ -54,6 +67,91 @@ def _pos_pnl_decimal(pnl: Any) -> Decimal:
     if isinstance(pnl, Money):
         return pnl.as_decimal()
     return Decimal(str(pnl))
+
+
+def _ns_to_utc(ns: int) -> datetime:
+    """Nautilus ns timestamp → tz-aware UTC datetime (second resolution)."""
+    return datetime.fromtimestamp(ns // 1_000_000_000, tz=UTC)
+
+
+def _to_decimal(value: Any) -> Decimal | None:
+    """Best-effort ``Decimal`` coercion for Nautilus price-like objects."""
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except ArithmeticError:
+        return None
+
+
+def _initial_sl_price(order: Any) -> Decimal | None:
+    """The SL leg's *initial* trigger price.
+
+    ``order.trigger_price`` reflects the latest modification, so a
+    trailed SL would read as its final value. The original trigger is
+    recorded on the ``OrderInitialized`` event's ``options`` mapping;
+    we fall back to the live attribute when the event (or the key) is
+    missing — correct for never-modified legs, best-effort otherwise.
+    """
+    for event in getattr(order, "events", ()) or ():
+        if isinstance(event, OrderInitialized):
+            options = getattr(event, "options", None) or {}
+            initial = _to_decimal(options.get("trigger_price"))
+            if initial is not None:
+                return initial
+            break
+    return _to_decimal(getattr(order, "trigger_price", None))
+
+
+def _sl_update_history(order: Any) -> tuple[SlUpdate, ...]:
+    """Chronological SL modifications (BE move + trailing ratchets)."""
+    updates: list[SlUpdate] = []
+    for event in getattr(order, "events", ()) or ():
+        if not isinstance(event, OrderUpdated):
+            continue
+        price = _to_decimal(event.trigger_price)
+        if price is None:
+            continue
+        updates.append(SlUpdate(ts=_ns_to_utc(event.ts_event), price=price))
+    updates.sort(key=lambda u: u.ts)
+    return tuple(updates)
+
+
+def _extract_bracket_levels(
+    cache: Any, position_id: Any
+) -> tuple[Decimal | None, Decimal | None, tuple[SlUpdate, ...]]:
+    """Recover (initial SL, TP, SL-update history) for one position.
+
+    Our strategies enter with market brackets whose children are a
+    STOP_MARKET SL leg and a LIMIT TP leg (``BaseStrategy._build_bracket_args``),
+    so order type identifies the leg. Multiple same-type legs (should
+    not happen with one bracket per position) resolve to the earliest
+    by ``ts_init``. Any cache/lookup failure degrades to ``(None, None, ())``
+    — the chart viewer treats levels as optional enrichment.
+    """
+    try:
+        orders = list(cache.orders_for_position(position_id))
+    except Exception as exc:  # noqa: BLE001 — enrichment is best-effort
+        logger.debug(
+            "orders_for_position(%s) failed; trade emitted without "
+            "bracket levels: %s",
+            position_id,
+            exc,
+        )
+        return None, None, ()
+
+    orders.sort(key=lambda o: getattr(o, "ts_init", 0))
+    sl_price: Decimal | None = None
+    tp_price: Decimal | None = None
+    sl_updates: tuple[SlUpdate, ...] = ()
+    for order in orders:
+        order_type = getattr(order, "order_type", None)
+        if order_type == OrderType.STOP_MARKET and sl_price is None:
+            sl_price = _initial_sl_price(order)
+            sl_updates = _sl_update_history(order)
+        elif order_type == OrderType.LIMIT and tp_price is None:
+            tp_price = _to_decimal(getattr(order, "price", None))
+    return sl_price, tp_price, sl_updates
 
 
 class BacktestRunnerConfig(BaseModel):
@@ -101,6 +199,7 @@ class BacktestRunner:
         self.config = config
         self._engine: BacktestEngine = BacktestEngine(config=BacktestEngineConfig())
         self._prop_firm_actor: PropFirmComplianceActor | None = None
+        self._equity_recorder: EquityRecorderActor | None = None
         self._regime_actor: RegimeActor | None = None
         self._start: datetime | None = None
         self._end: datetime | None = None
@@ -112,6 +211,10 @@ class BacktestRunner:
     @property
     def prop_firm_actor(self) -> PropFirmComplianceActor | None:
         return self._prop_firm_actor
+
+    @property
+    def equity_recorder(self) -> EquityRecorderActor | None:
+        return self._equity_recorder
 
     @property
     def regime_actor(self) -> RegimeActor | None:
@@ -172,6 +275,43 @@ class BacktestRunner:
         )
         self._engine.add_actor(actor)
         self._prop_firm_actor = actor
+        return actor
+
+    def attach_equity_recorder(
+        self,
+        *,
+        bar_type: Any = None,
+        venue: Venue | None = None,
+        currency: Currency = USD,
+        initial_balance: Decimal | None = None,
+    ) -> EquityRecorderActor:
+        """Build + register an ``EquityRecorderActor`` against this engine.
+
+        Contract v2 P1 (gap G2): the equity curve no longer depends on
+        the prop-firm compliance actor — attach this recorder on every
+        run so jobs without a ``prop_firm`` block still get a populated
+        curve (and thus drawdown/Sharpe metrics).
+
+        Mirrors :meth:`attach_prop_firm_compliance` parameter semantics:
+        ``bar_type`` should match ``add_data``; ``venue`` + ``currency``
+        let the actor read real portfolio equity (omit both for the
+        unit-test path where ``on_bar`` is a no-op). ``initial_balance``
+        defaults to the runner config's starting balance.
+        """
+        actor = EquityRecorderActor(
+            config=EquityRecorderActorConfig(
+                initial_balance=(
+                    initial_balance
+                    if initial_balance is not None
+                    else self.config.initial_balance
+                ),
+                bar_type=bar_type,
+                venue=venue,
+                currency=currency,
+            )
+        )
+        self._engine.add_actor(actor)
+        self._equity_recorder = actor
         return actor
 
     def attach_regime(
@@ -237,11 +377,20 @@ class BacktestRunner:
             kwargs["end"] = end
         self._engine.run(**kwargs)
 
-    def get_result(self, *, final_balance: Decimal) -> BacktestResult:
-        """Assemble a ``BacktestResult`` from engine + actor state."""
-        equity_curve = (
-            self._prop_firm_actor.equity_curve if self._prop_firm_actor is not None else []
-        )
+    def get_result(
+        self,
+        *,
+        final_balance: Decimal,
+        indicators: tuple[IndicatorSeries, ...] = (),
+    ) -> BacktestResult:
+        """Assemble a ``BacktestResult`` from engine + actor state.
+
+        The equity curve prefers the dedicated ``EquityRecorderActor``
+        (Contract v2 P1) when it recorded anything; otherwise it falls
+        back to the prop-firm actor's curve so old callers/tests that
+        only attach compliance keep working.
+        """
+        equity_curve = self._select_equity_curve()
         breaches = (
             self._prop_firm_actor.breaches if self._prop_firm_actor is not None else []
         )
@@ -275,8 +424,19 @@ class BacktestRunner:
             equity_curve=equity_curve,
             trades=trades,
             breaches=breaches,
+            indicators=indicators,
             metrics=metrics,
         )
+
+    def _select_equity_curve(self) -> list[tuple[datetime, Decimal]]:
+        """Equity recorder's curve when non-empty, else prop-firm actor's."""
+        if self._equity_recorder is not None:
+            curve = self._equity_recorder.equity_curve
+            if curve:
+                return curve
+        if self._prop_firm_actor is not None:
+            return self._prop_firm_actor.equity_curve
+        return []
 
     def _extract_trades(self) -> list[TradeRecord]:
         """Convert Nautilus closed positions into our ``TradeRecord`` list.
@@ -294,12 +454,27 @@ class BacktestRunner:
 
         records: list[TradeRecord] = []
         for pos in positions:
-            side = "BUY" if pos.side == PositionSide.LONG else "SELL"
-            entry_ts = datetime.fromtimestamp(
-                pos.ts_opened // 1_000_000_000, tz=UTC
-            )
-            exit_ts = datetime.fromtimestamp(
-                (pos.ts_closed or pos.ts_last) // 1_000_000_000, tz=UTC
+            # A CLOSED position reports ``side == PositionSide.FLAT`` —
+            # comparing against LONG here mislabelled every closed trade
+            # as SELL. ``pos.entry`` is the entry order's side and is
+            # stable for the position's whole lifecycle.
+            side = "BUY" if pos.entry == OrderSide.BUY else "SELL"
+            # A CLOSED position's ``quantity`` is its REMAINING size — 0.
+            # The traded size lives on ``peak_qty`` (max filled quantity),
+            # which is also the honest figure for scale-out trades. Only
+            # substitute when quantity reads zero so open/partial mocks
+            # keep their explicit quantity. NOTE: peak_qty assumes no
+            # re-entry after a full close within one position id — no
+            # current strategy does this (one bracket per position).
+            quantity = Decimal(str(pos.quantity))
+            if quantity == 0:
+                peak_qty = getattr(pos, "peak_qty", None)
+                if peak_qty is not None:
+                    quantity = Decimal(str(peak_qty))
+            entry_ts = _ns_to_utc(pos.ts_opened)
+            exit_ts = _ns_to_utc(pos.ts_closed or pos.ts_last)
+            sl_price, tp_price, sl_updates = _extract_bracket_levels(
+                self._engine.cache, pos.id
             )
             records.append(
                 TradeRecord(
@@ -310,8 +485,11 @@ class BacktestRunner:
                     exit_ts=exit_ts,
                     entry_price=Decimal(str(pos.avg_px_open)),
                     exit_price=Decimal(str(pos.avg_px_close or pos.avg_px_open)),
-                    quantity=Decimal(str(pos.quantity)),
+                    quantity=quantity,
                     pnl=_pos_pnl_decimal(pos.realized_pnl),
+                    sl_price=sl_price,
+                    tp_price=tp_price,
+                    sl_updates=sl_updates,
                 )
             )
         return records

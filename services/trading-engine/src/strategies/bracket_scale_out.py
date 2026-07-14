@@ -37,6 +37,7 @@ from src.instruments import get_contract_spec
 if TYPE_CHECKING:
     from nautilus_trader.model.data import Bar
 
+    from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
     from src.strategies.bracket_strategy import BracketStrategyConfig
 
 
@@ -352,6 +353,34 @@ class BracketScaleOutMixin:
         # is retried on the next bar instead of silently skipped.
         if self._modify_sl(new_sl):
             state.current_sl = new_sl
+
+    def _export_trail_indicator(
+        self, bar: "Bar", recorder: "IndicatorRecorder"
+    ) -> None:
+        """Record the trailing-Supertrend line for the current bar.
+
+        Shared by host ``_export_indicators`` overrides (Contract v2
+        P1). No-ops when trailing is off, the host has no
+        ``_supertrend_trail``, or the trail indicator has not
+        initialized / produced a value yet.
+        """
+        from src.backtesting.recorder.indicator_recorder import ns_to_utc
+
+        trail = getattr(self, "_supertrend_trail", None)
+        if trail is None or not trail.initialized or trail.value is None:
+            return
+        if not recorder.is_registered("supertrend_trail"):
+            cfg = self._cfg()
+            recorder.register(
+                "supertrend_trail",
+                title=(
+                    f"Trail ST({cfg.trailing_atr_period}, "
+                    f"{cfg.trailing_atr_multiplier})"
+                ),
+                pane="overlay",
+                color="#ffb74d",
+            )
+        recorder.record("supertrend_trail", ns_to_utc(bar.ts_init), trail.value)
 
     def _cfg(self) -> "BracketStrategyConfig":
         """Typed alias for ``self.config``.

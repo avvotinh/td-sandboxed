@@ -19,4 +19,4 @@ strategy_params:
   trailing_enabled: false
 data:
   kind: parquet
-  path: /home/hopdev/Dev/Sandboxed/data/historical/XAUUSD/M15/in_sample.parquet
+  path: data/historical/XAUUSD/M15/in_sample.parquet

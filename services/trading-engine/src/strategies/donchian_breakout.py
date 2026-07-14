@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from nautilus_trader.indicators.volatility import AverageTrueRange
 from nautilus_trader.model.data import Bar
@@ -38,6 +39,9 @@ from src.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
     RiskBasedSizerConfig,
 )
+
+if TYPE_CHECKING:
+    from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +212,41 @@ class DonchianBreakoutStrategy(
             return
         atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)
+
+    def _export_indicators(
+        self, bar: Bar, recorder: IndicatorRecorder
+    ) -> None:
+        """Record the Donchian channel bands + optional trail line."""
+        from src.backtesting.recorder.indicator_recorder import ns_to_utc
+
+        dc = self._donchian
+        if dc.initialized:
+            if not recorder.is_registered("donchian_upper"):
+                recorder.register(
+                    "donchian_upper",
+                    title="Donchian upper",
+                    pane="overlay",
+                    color="#2962ff",
+                )
+                recorder.register(
+                    "donchian_lower",
+                    title="Donchian lower",
+                    pane="overlay",
+                    color="#f57c00",
+                )
+                recorder.register(
+                    "donchian_middle",
+                    title="Donchian middle",
+                    pane="overlay",
+                    color="#9e9e9e",
+                )
+            ts = ns_to_utc(bar.ts_init)
+            recorder.record("donchian_upper", ts, dc.upper)
+            recorder.record("donchian_lower", ts, dc.lower)
+            # Nautilus DonchianChannel computes a middle band; guard
+            # with getattr in case a future indicator swap drops it.
+            recorder.record("donchian_middle", ts, getattr(dc, "middle", None))
+        self._export_trail_indicator(bar, recorder)
 
     # Story 13.10 originally inlined the scale-out wiring here per the
     # 13.5 Supertrend template. After Story 13.11 made Donchian the

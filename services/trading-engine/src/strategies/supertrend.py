@@ -41,6 +41,8 @@ from src.strategies.risk_based_position_sizer import (
 if TYPE_CHECKING:
     from nautilus_trader.indicators.volatility import AverageTrueRange
 
+    from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
+
 logger = logging.getLogger(__name__)
 
 
@@ -204,6 +206,36 @@ class SupertrendStrategy(
 
         atr_value = Decimal(str(atr_raw))
         self._submit_bracket_for_entry(signal, atr_value)
+
+    def _export_indicators(
+        self, bar: Bar, recorder: IndicatorRecorder
+    ) -> None:
+        """Record the Supertrend line (split up/down) + optional trail."""
+        from src.backtesting.recorder.indicator_recorder import ns_to_utc
+
+        st = self._supertrend
+        if st.initialized and st.value is not None:
+            if not recorder.is_registered("supertrend_up"):
+                recorder.register(
+                    "supertrend_up",
+                    title="Supertrend (up)",
+                    pane="overlay",
+                    color="#26a69a",
+                )
+                recorder.register(
+                    "supertrend_down",
+                    title="Supertrend (down)",
+                    pane="overlay",
+                    color="#ef5350",
+                )
+            ts = ns_to_utc(bar.ts_init)
+            recorder.record(
+                "supertrend_up", ts, st.value if st.trend == 1 else None
+            )
+            recorder.record(
+                "supertrend_down", ts, st.value if st.trend == -1 else None
+            )
+        self._export_trail_indicator(bar, recorder)
 
     # Story 13.5: scale-out lifecycle wiring lived here per-strategy
     # until Story 13.11 hit the rule of three. The five wiring methods

@@ -68,6 +68,44 @@ class TestBacktestRun:
         assert "ma_crossover" in result.output
         assert "100500" in result.output or "500" in result.output
 
+    def test_run_export_directory_writes_run_id_json(
+        self, tmp_path: Path
+    ) -> None:
+        """--export <dir> writes <dir>/<run_id>.json (Contract v2)."""
+        import json
+
+        job_path = _write_job(tmp_path)
+        export_dir = tmp_path / "results"
+        export_dir.mkdir()
+        with patch.object(backtest_cli, "run_backtest", return_value=_fake_result()):
+            result = runner.invoke(
+                backtest_cli.backtest_app,
+                ["run", "--job", str(job_path), "--export", str(export_dir)],
+            )
+        assert result.exit_code == 0, result.output
+        [written] = list(export_dir.glob("*.json"))
+        # Symbol EUR/USD must be sanitized in the file name.
+        assert written.stem.startswith("ma_crossover-eurusd-m1-")
+        payload = json.loads(written.read_text())
+        assert payload["schema_version"] == "2"
+        assert payload["run"]["run_id"] == written.stem
+        assert "run_id=" in result.output
+
+    def test_run_export_exact_path(self, tmp_path: Path) -> None:
+        """--export <file> writes exactly that path."""
+        import json
+
+        job_path = _write_job(tmp_path)
+        target = tmp_path / "custom-name.json"
+        with patch.object(backtest_cli, "run_backtest", return_value=_fake_result()):
+            result = runner.invoke(
+                backtest_cli.backtest_app,
+                ["run", "--job", str(job_path), "--export", str(target)],
+            )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(target.read_text())
+        assert payload["schema_version"] == "2"
+
     def test_run_json_flag_emits_json(self, tmp_path: Path) -> None:
         job_path = _write_job(tmp_path)
         with patch.object(backtest_cli, "run_backtest", return_value=_fake_result()):

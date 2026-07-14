@@ -96,6 +96,17 @@ def run_cmd(
             help="Write JSON result to this file (implies --json)",
         ),
     ] = None,
+    export: Annotated[
+        Path | None,
+        typer.Option(
+            "--export",
+            help=(
+                "Write the full Result Contract v2 JSON. A directory "
+                "(or path ending in a slash) gets <run_id>.json inside "
+                "it; any other path is written exactly."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run a single point backtest."""
     cfg = _load_job_or_exit(job)
@@ -104,6 +115,9 @@ def run_cmd(
     except Exception as exc:
         typer.echo(f"Backtest failed: {exc}", err=True)
         raise typer.Exit(code=2) from exc
+
+    if export is not None:
+        _export_contract_v2(result, cfg, export)
 
     payload = result_to_json_dict(result)
 
@@ -121,6 +135,33 @@ def run_cmd(
         return
 
     _print_run_summary(result)
+
+
+def _export_contract_v2(
+    result: BacktestResult, cfg: BacktestJobConfig, export: Path
+) -> None:
+    """Write the Result Contract v2 JSON for a finished run."""
+    from src.backtesting.export.result_writer import (
+        build_result_payload,
+        make_run_id,
+        timeframe_from_suffix,
+        write_result_json,
+    )
+
+    run_id = make_run_id(
+        cfg.strategy,
+        cfg.instrument_symbol,
+        timeframe_from_suffix(cfg.bar_type_suffix),
+    )
+    raw = str(export)
+    if export.is_dir() or raw.endswith(("/", "\\")):
+        target = export / f"{run_id}.json"
+    else:
+        target = export
+    write_result_json(
+        target, build_result_payload(result, job=cfg, run_id=run_id)
+    )
+    typer.echo(f"Contract v2 result written to {target} (run_id={run_id})")
 
 
 def _print_run_summary(result: BacktestResult) -> None:

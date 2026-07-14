@@ -87,3 +87,5 @@ specs/
 
 # External reference repos (read-only, not part of Sandboxed)
 TradingView-API/
+# Backtest result JSON (Result Contract v2) — large files, never commit
+results/
