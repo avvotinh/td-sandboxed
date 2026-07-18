@@ -1,16 +1,16 @@
 # Sandboxed Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2025-11-27
+Auto-generated from all feature plans. Last updated: 2026-07-14 (v2 — research-first)
 
 ## Active Technologies
 - **Python 3.11+** — trading-engine (NautilusTrader 1.x, SQLAlchemy, pyzmq, pydantic)
+- **Python + FastAPI** — chart-viewer (đọc Result Contract v2 JSON + parquet, lightweight-charts vendored)
 - **Rust** — mt5-bridge
-- **Go** — tv-api (TradingView webhook), notification (Telegram bot)
-- **TimescaleDB** (PostgreSQL 16+) — historical data, audit logs
-- **Redis 7.2+** — real-time cache, pub/sub
+- **TimescaleDB** (PostgreSQL 16+) — historical data, audit logs (chỉ live path — research loop không cần)
+- **Redis 7.2+** — real-time cache, pub/sub (chỉ live path)
 - **ZeroMQ** — inter-service communication (order flow)
 - **uv 0.8+** — Python package manager
-- **Docker Compose** — local development
+- **Docker Compose** — chỉ cho live path (research loop chạy local thuần — Quyết định D6)
 
 ## Project Structure
 
@@ -21,19 +21,13 @@ services/
 │   ├── tests/
 │   ├── configs/
 │   └── pyproject.toml
-├── mt5-bridge/        # Rust — MetaTrader 5 bridge
+├── chart-viewer/      # Python — FastAPI viewer đọc results/*.json (Contract v2), không Docker/DB
 │   ├── src/
-│   ├── tests/
-│   └── Cargo.toml
-├── tv-api/            # Go — TradingView webhook receiver
-│   ├── cmd/
-│   ├── internal/
-│   ├── pkg/
-│   └── go.mod
-└── notification/      # Go — Telegram bot notifications
-    ├── cmd/
-    ├── internal/
-    └── go.mod
+│   └── pyproject.toml
+└── mt5-bridge/        # Rust — MetaTrader 5 bridge
+    ├── src/
+    ├── tests/
+    └── Cargo.toml
 docs/
 ├── architecture.md
 ├── prd.md
@@ -49,9 +43,11 @@ configs/               # FTMO presets, shared config
 cd services/trading-engine && uv run pytest
 cd services/trading-engine && uv run ruff check .
 
-# Go services
-cd services/tv-api && go test ./...
-cd services/notification && go test ./...
+# Backtest (research loop — không cần Docker/DB)
+cd services/trading-engine && uv run python -m src backtest run --job <job.yaml> --export ../../results/
+
+# Chart viewer
+cd services/chart-viewer && uv run chart-viewer --results-dir ../../results --port 8777
 
 # Rust mt5-bridge
 cd services/mt5-bridge && cargo test
@@ -78,18 +74,17 @@ docker compose up -d
 | Phân rã story thành task | `planner` subagent |
 | Viết test trước (TDD) | `tdd-guide` subagent |
 | Review code Python | `python-reviewer` subagent |
-| Review code Go | `go-reviewer` subagent |
 | Review code Rust (mt5-bridge) | `rust-reviewer` subagent |
 | Review code MQL5 (mt5 EA — Epic 14) | `mql5-reviewer` subagent |
+| Review chiến lược / entry-exit model (chống lookahead, survivorship, overfit, leakage, sizing/fee) | `quant-reviewer` subagent — BẮT BUỘC cho mọi entry/exit model mới trước khi tin backtest |
+| Đọc `results/*.json` (Contract v2), sinh verdict vào `docs/v2/studies/` | `backtest-analyst` subagent (hoặc `/study <slug>`) |
 | Security gate (credentials/network/DB) | `security-reviewer` subagent |
-| Review schema / migration | `database-reviewer` subagent |
-| Lỗi build Go | `go-build-resolver` subagent |
+| Review schema / migration | `database-reviewer` subagent (quay lại ở live path P5) |
 | Lỗi build Python | Tự fix với context từ `python-patterns` skill |
 | Lỗi build Rust | Tự fix với `cargo check` + context từ rules/rust/ |
 | Lỗi build MQL5 | Tự fix với `metaeditor64.exe /compile /log` + context từ rules/mql5/ |
 | Viết MT5 EA / ZMQ binding (Epic 14) | `mql5-patterns` skill + `mql5-zmq-bridge` skill |
-| Refactor sau epic | `refactor-cleaner` subagent |
-| Sync docs sống (prd/architecture/epic-context/sprint-status) sau epic/story | `doc-updater` subagent |
+| Sync docs sống (`docs/v2/*`, studies) sau phase/story | `doc-updater` subagent |
 | Audit cấu hình ECC | `harness-optimizer` subagent (chạy `/harness-audit` trước) |
 | Tra cứu docs NautilusTrader/Redis | `docs-lookup` subagent + Context7 MCP |
 
@@ -106,6 +101,9 @@ docker compose up -d
 | `/lint` | Chạy linters across tất cả services |
 | `/logs [service]` | Xem logs từ containers |
 | `/review` | Review tất cả changes trong branch hiện tại |
+| `/backtest <job-yaml>` | Chạy point backtest + export Result Contract v2 vào `results/` — in run_id + metrics |
+| `/viewer [run-id]` | Start chart-viewer (port 8777), in URL — kèm run cụ thể nếu có |
+| `/study <slug>` | Vòng study trọn gói: backtests với `--export` → `backtest-analyst` sinh verdict vào `docs/v2/studies/` |
 | `/research <topic>` | Research topic trước khi implement — output vào `docs/research/` |
 | `/sprint-status` | Xem trạng thái sprint và suggest next story |
 | `/harness-audit` | Audit cấu hình `.claude/` (agents, commands, rules, hooks) |
