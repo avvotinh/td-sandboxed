@@ -15,13 +15,13 @@ from decimal import Decimal
 
 import pytest
 
-from src.backtesting.job_config import (
+from src.lab.job_config import (
     BacktestJobConfig,
     SyntheticDataSpec,
     VenueSpec,
 )
-from src.backtesting.result import BacktestResult
-from src.backtesting.runner_facade import run_backtest
+from src.lab.result import BacktestResult
+from src.lab.runner_facade import run_backtest
 
 
 pytestmark = pytest.mark.integration
@@ -212,9 +212,9 @@ def test_supertrend_scale_out_e2e_synthetic_bars() -> None:
     from nautilus_trader.model.enums import AccountType, OmsType, OrderType
     from nautilus_trader.model.objects import Money
 
-    from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
-    from src.backtesting.runner_facade import _build_instrument
-    from src.backtesting.synthetic_bars import generate_bars
+    from src.lab.engine import BacktestRunner, BacktestRunnerConfig
+    from src.lab.runner_facade import _build_instrument
+    from src.lab.synthetic_bars import generate_bars
     from src.kernel.strategies.supertrend import SupertrendConfig, SupertrendStrategy
 
     # The production XAUUSD instrument (size_increment 0.01 oz) accepts
@@ -361,9 +361,9 @@ def test_donchian_scale_out_e2e_synthetic_bars() -> None:
     from nautilus_trader.model.enums import AccountType, OmsType, OrderType
     from nautilus_trader.model.objects import Money
 
-    from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
-    from src.backtesting.runner_facade import _build_instrument
-    from src.backtesting.synthetic_bars import generate_bars
+    from src.lab.engine import BacktestRunner, BacktestRunnerConfig
+    from src.lab.runner_facade import _build_instrument
+    from src.lab.synthetic_bars import generate_bars
     from src.kernel.strategies.donchian_breakout import (
         DonchianBreakoutConfig,
         DonchianBreakoutStrategy,
@@ -480,9 +480,9 @@ def test_ma_crossover_scale_out_e2e_synthetic_bars() -> None:
     from nautilus_trader.model.enums import AccountType, OmsType, OrderType
     from nautilus_trader.model.objects import Money
 
-    from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
-    from src.backtesting.runner_facade import _build_instrument
-    from src.backtesting.synthetic_bars import generate_bars
+    from src.lab.engine import BacktestRunner, BacktestRunnerConfig
+    from src.lab.runner_facade import _build_instrument
+    from src.lab.synthetic_bars import generate_bars
     from src.kernel.strategies.ma_crossover import (
         MACrossoverConfig,
         MACrossoverStrategy,

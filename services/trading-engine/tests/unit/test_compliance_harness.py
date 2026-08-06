@@ -1,4 +1,4 @@
-"""Unit tests for ``src.backtesting.dataset.compliance``.
+"""Unit tests for ``src.lab.dataset.compliance``.
 
 The compliance harness wires the prop-firm rule set into the backtest
 with **timezone-aware daily reset** (Epic 9.5) and the
@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from src.backtesting.dataset.compliance import (
+from src.lab.dataset.compliance import (
     BreachSummary,
     ComplianceBreachError,
     ComplianceProfile,
@@ -25,7 +25,7 @@ from src.backtesting.dataset.compliance import (
     build_compliance_rule_engine,
     summarize_breaches,
 )
-from src.backtesting.metrics.schema import (
+from src.lab.metrics.schema import (
     DrawdownMetrics,
     PnlMetrics,
     PropFirmComplianceMetrics,
@@ -33,8 +33,8 @@ from src.backtesting.metrics.schema import (
     RiskMetrics,
     TradeMetrics,
 )
-from src.backtesting.prop_firm_preset import PropFirmPreset
-from src.backtesting.result import BacktestResult, BreachEvent
+from src.lab.prop_firm_preset import PropFirmPreset
+from src.lab.result import BacktestResult, BreachEvent
 from src.rules.types.consistency import ConsistencyRule
 from src.rules.types.drawdown import DailyLossLimitRule, MaxDrawdownRule
 

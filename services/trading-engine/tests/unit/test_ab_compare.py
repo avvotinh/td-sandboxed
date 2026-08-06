@@ -7,14 +7,14 @@ from decimal import Decimal
 
 import pytest
 
-from src.backtesting.ab_compare import (
+from src.lab.ab_compare import (
     ABComparisonResult,
     WinnerDistribution,
     compare_ab,
     compute_winner_distribution,
     winner_distribution_to_dict,
 )
-from src.backtesting.metrics.schema import (
+from src.lab.metrics.schema import (
     DrawdownMetrics,
     PnlMetrics,
     PropFirmComplianceMetrics,
@@ -22,7 +22,7 @@ from src.backtesting.metrics.schema import (
     RiskMetrics,
     TradeMetrics,
 )
-from src.backtesting.result import BacktestResult, TradeRecord
+from src.lab.result import BacktestResult, TradeRecord
 
 
 def _trade(pnl: float, *, trade_id: str = "t") -> TradeRecord:

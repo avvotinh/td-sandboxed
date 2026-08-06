@@ -43,8 +43,8 @@ from nautilus_trader.model.objects import Money
 from nautilus_trader.test_kit.providers import TestInstrumentProvider
 from nautilus_trader.trading.strategy import Strategy
 
-from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
-from src.backtesting.synthetic_bars import generate_bars
+from src.lab.engine import BacktestRunner, BacktestRunnerConfig
+from src.lab.synthetic_bars import generate_bars
 
 pytestmark = pytest.mark.integration
 

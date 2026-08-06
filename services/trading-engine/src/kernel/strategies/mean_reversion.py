@@ -48,7 +48,7 @@ from src.kernel.strategies.risk_based_position_sizer import (
 )
 
 if TYPE_CHECKING:
-    from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
+    from src.lab.recorder.indicator_recorder import IndicatorRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +240,7 @@ class MeanReversionStrategy(
         self, bar: Bar, recorder: IndicatorRecorder
     ) -> None:
         """Record Bollinger bands (overlay) + RSI (own pane, with levels)."""
-        from src.backtesting.recorder.indicator_recorder import ns_to_utc
+        from src.lab.recorder.indicator_recorder import ns_to_utc
 
         ts = ns_to_utc(bar.ts_init)
         bb = self._bb

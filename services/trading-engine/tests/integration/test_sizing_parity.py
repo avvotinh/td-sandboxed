@@ -36,9 +36,9 @@ from nautilus_trader.model.data import Bar, BarType
 from nautilus_trader.model.enums import AccountType, OmsType, OrderSide, PositionSide
 from nautilus_trader.model.objects import Money
 
-from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
-from src.backtesting.runner_facade import _build_instrument
-from src.backtesting.synthetic_bars import generate_bars
+from src.lab.engine import BacktestRunner, BacktestRunnerConfig
+from src.lab.runner_facade import _build_instrument
+from src.lab.synthetic_bars import generate_bars
 from src.orders.signal import SignalType
 from src.kernel.strategies.base_strategy import BaseStrategy
 from src.kernel.strategies.bracket_strategy import (

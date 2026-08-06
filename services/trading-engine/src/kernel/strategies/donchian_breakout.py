@@ -41,7 +41,7 @@ from src.kernel.strategies.risk_based_position_sizer import (
 )
 
 if TYPE_CHECKING:
-    from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
+    from src.lab.recorder.indicator_recorder import IndicatorRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +217,7 @@ class DonchianBreakoutStrategy(
         self, bar: Bar, recorder: IndicatorRecorder
     ) -> None:
         """Record the Donchian channel bands + optional trail line."""
-        from src.backtesting.recorder.indicator_recorder import ns_to_utc
+        from src.lab.recorder.indicator_recorder import ns_to_utc
 
         dc = self._donchian
         if dc.initialized:

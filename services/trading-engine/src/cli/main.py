@@ -17,7 +17,7 @@ from ..accounts.account_manager import AccountManager
 from ..config.loader import ConfigLoader, ConfigValidationError, ConfigSyntaxError
 from ..rules.audit_logger import AuditEntry
 from ..state.redis_state import RedisStateManager
-from ..backtesting.cli import backtest_app
+from src.lab.cli import backtest_app
 from .accounts import accounts_app
 from .audit import audit_app
 from .config import config_app

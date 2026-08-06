@@ -39,7 +39,7 @@ from nautilus_trader.model.identifiers import Venue
 from nautilus_trader.test_kit.providers import TestInstrumentProvider
 
 from src.adapters.zmq_models import OrderResult, OrderStatus
-from src.backtesting.strategy_registry import (
+from src.lab.strategy_registry import (
     BACKTEST_STRATEGIES,
     StrategyEntry,
 )

@@ -1,4 +1,4 @@
-"""Unit tests for ``src.backtesting.dataset.sweep_harness``.
+"""Unit tests for ``src.lab.dataset.sweep_harness``.
 
 The harness wraps the Phase 12.B parameter sweep around a manifest
 window with the Decision §3 / Risk R3 guards: cap ≤ 200 trials, fail
@@ -16,14 +16,14 @@ from typing import Any
 import pytest
 import yaml
 
-from src.backtesting.data_cache import ContentHashFingerprint
-from src.backtesting.dataset.baseline_harness import (
+from src.lab.data_cache import ContentHashFingerprint
+from src.lab.dataset.baseline_harness import (
     StrategySpec,
     timeframe_to_bar_suffix,
 )
-from src.backtesting.dataset.manifest import DatasetEntry, DatasetManifest
-from src.backtesting.dataset.spec import WindowKind
-from src.backtesting.dataset.sweep_harness import (
+from src.lab.dataset.manifest import DatasetEntry, DatasetManifest
+from src.lab.dataset.spec import WindowKind
+from src.lab.dataset.sweep_harness import (
     ParamSpace,
     SweepBudget,
     SweepCapExceededError,
@@ -31,8 +31,8 @@ from src.backtesting.dataset.sweep_harness import (
     render_sweep_section,
     run_parameter_sweep,
 )
-from src.backtesting.job_config import BacktestJobConfig, VenueSpec
-from src.backtesting.metrics.schema import (
+from src.lab.job_config import BacktestJobConfig, VenueSpec
+from src.lab.metrics.schema import (
     DrawdownMetrics,
     PnlMetrics,
     PropFirmComplianceMetrics,
@@ -40,8 +40,8 @@ from src.backtesting.metrics.schema import (
     RiskMetrics,
     TradeMetrics,
 )
-from src.backtesting.parameter_sweep import CombinationResult, SweepResult
-from src.backtesting.result import BacktestResult
+from src.lab.parameter_sweep import CombinationResult, SweepResult
+from src.lab.result import BacktestResult
 
 
 pytestmark = pytest.mark.unit
@@ -481,7 +481,7 @@ class TestRunParameterSweep:
         # If the objective ever returns NaN/inf the combo must be
         # demoted, not silently ranked. Patch the harness's local
         # ``_default_objective`` to force the path.
-        from src.backtesting.dataset import sweep_harness as sh
+        from src.lab.dataset import sweep_harness as sh
 
         def nan_objective(_: BacktestResult) -> float:
             return float("nan")

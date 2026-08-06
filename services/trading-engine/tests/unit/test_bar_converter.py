@@ -7,7 +7,7 @@ import pytest
 from nautilus_trader.model.data import Bar, BarType
 from nautilus_trader.test_kit.providers import TestInstrumentProvider
 
-from src.backtesting.bar_converter import dataframe_to_bars
+from src.lab.bar_converter import dataframe_to_bars
 
 
 pytestmark = pytest.mark.unit

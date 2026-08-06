@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from nautilus_trader.model.data import Bar
 
-from src.backtesting.synthetic_bars import generate_bars
+from src.lab.synthetic_bars import generate_bars
 
 
 pytestmark = pytest.mark.unit

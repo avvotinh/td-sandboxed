@@ -14,9 +14,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
-from src.backtesting.prop_firm_preset import PropFirmPreset
-from src.backtesting.result import BacktestResult
+from src.lab.engine import BacktestRunner, BacktestRunnerConfig
+from src.lab.prop_firm_preset import PropFirmPreset
+from src.lab.result import BacktestResult
 from src.config.firm_profile import (
     InstrumentRegimeConfig,
     RegimeConfig,
@@ -240,7 +240,7 @@ class TestGetResult:
         runner._prop_firm_actor = mock_actor
 
         with patch(
-            "src.backtesting.engine.calculate_metrics"
+            "src.lab.engine.calculate_metrics"
         ) as calc:
             calc.return_value = Mock()
             result = runner.get_result(final_balance=Decimal("100500"))
@@ -252,7 +252,7 @@ class TestGetResult:
         mock_engine = Mock()
         mock_engine.cache.positions_closed = Mock(return_value=[])
         runner._engine = mock_engine
-        with patch("src.backtesting.engine.calculate_metrics") as calc:
+        with patch("src.lab.engine.calculate_metrics") as calc:
             calc.return_value = Mock()
             result = runner.get_result(final_balance=Decimal("100000"))
             assert result.equity_curve == []
@@ -346,7 +346,7 @@ class TestExtractTradeBrackets:
     def test_trade_record_defaults_have_no_bracket_levels(self) -> None:
         from datetime import UTC, datetime
 
-        from src.backtesting.result import TradeRecord
+        from src.lab.result import TradeRecord
 
         record = TradeRecord(
             trade_id="t",

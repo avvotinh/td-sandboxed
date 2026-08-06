@@ -10,10 +10,10 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from src.backtesting import cli as backtest_cli
-from src.backtesting.parameter_sweep import CombinationResult, SweepResult
-from src.backtesting.result import BacktestResult
-from src.backtesting.walk_forward import FoldResult, FoldSpec, WalkForwardResult
+from src.lab import cli as backtest_cli
+from src.lab.parameter_sweep import CombinationResult, SweepResult
+from src.lab.result import BacktestResult
+from src.lab.walk_forward import FoldResult, FoldSpec, WalkForwardResult
 
 
 runner = CliRunner()
@@ -336,17 +336,17 @@ class TestBacktestAb:
 @pytest.mark.unit
 class TestDurationParser:
     def test_days(self) -> None:
-        from src.backtesting._cli_utils import parse_duration
+        from src.lab._cli_utils import parse_duration
 
         assert parse_duration("30d").days == 30
 
     def test_hours(self) -> None:
-        from src.backtesting._cli_utils import parse_duration
+        from src.lab._cli_utils import parse_duration
 
         assert parse_duration("6h").total_seconds() == 6 * 3600
 
     def test_bad_format_raises(self) -> None:
-        from src.backtesting._cli_utils import parse_duration
+        from src.lab._cli_utils import parse_duration
 
         with pytest.raises(ValueError):
             parse_duration("xyz")

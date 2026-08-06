@@ -1,4 +1,4 @@
-"""Unit tests for ``src.backtesting.dataset.baseline_harness``.
+"""Unit tests for ``src.lab.dataset.baseline_harness``.
 
 The harness orchestrates one ``BacktestJobConfig`` per strategy spec
 against a fixed dataset window, dispatches ``run_backtest``, and stamps
@@ -17,23 +17,23 @@ from typing import Any
 
 import pytest
 
-from src.backtesting.data_cache import ContentHashFingerprint
-from src.backtesting.dataset.baseline_harness import (
+from src.lab.data_cache import ContentHashFingerprint
+from src.lab.dataset.baseline_harness import (
     BaselineConfig,
     StrategySpec,
     UnknownDatasetEntryError,
     run_baseline,
     timeframe_to_bar_suffix,
 )
-from src.backtesting.dataset.manifest import DatasetEntry, DatasetManifest
-from src.backtesting.dataset.spec import WindowKind
-from src.backtesting.job_config import (
+from src.lab.dataset.manifest import DatasetEntry, DatasetManifest
+from src.lab.dataset.spec import WindowKind
+from src.lab.job_config import (
     BacktestJobConfig,
     ParquetDataSpec,
     PropFirmSpec,
     VenueSpec,
 )
-from src.backtesting.result import BacktestResult
+from src.lab.result import BacktestResult
 from src.config.firm_profile import (
     InstrumentRegimeConfig,
     RegimeConfig,

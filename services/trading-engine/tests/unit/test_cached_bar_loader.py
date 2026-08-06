@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-from src.backtesting.data_cache import ContentHashFingerprint
-from src.backtesting.data_loader import CachedBarLoader, ParquetBarLoader
+from src.lab.data_cache import ContentHashFingerprint
+from src.lab.data_loader import CachedBarLoader, ParquetBarLoader
 
 
 pytestmark = pytest.mark.unit

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.backtesting.strategy_registry import (
+from src.lab.strategy_registry import (
     BACKTEST_STRATEGIES,
     ArchivedStrategyError,
     StrategyEntry,

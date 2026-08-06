@@ -1,4 +1,4 @@
-"""Unit tests for ``src.backtesting.dataset.pipeline``.
+"""Unit tests for ``src.lab.dataset.pipeline``.
 
 The pipeline's job is to walk every (timeframe, window) entry in the
 spec, ensure a Parquet shard exists with the right fingerprint, and
@@ -14,15 +14,15 @@ from datetime import UTC, datetime, timedelta
 import pandas as pd
 import pytest
 
-from src.backtesting.data_cache import ContentHashFingerprint
-from src.backtesting.data_loader import ParquetBarLoader
-from src.backtesting.dataset.manifest import DatasetEntry, DatasetManifest
-from src.backtesting.dataset.pipeline import (
+from src.lab.data_cache import ContentHashFingerprint
+from src.lab.data_loader import ParquetBarLoader
+from src.lab.dataset.manifest import DatasetEntry, DatasetManifest
+from src.lab.dataset.pipeline import (
     DatasetPipeline,
     detect_gaps,
     timeframe_to_seconds,
 )
-from src.backtesting.dataset.spec import DatasetSpec
+from src.lab.dataset.spec import DatasetSpec
 
 
 pytestmark = pytest.mark.unit

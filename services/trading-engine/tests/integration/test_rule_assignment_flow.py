@@ -373,7 +373,7 @@ rules:
 
 # Story 10.13 — ``TestPresetFilesExist`` removed when the rule-engine
 # preset loader was deleted. Backtest still consumes the YAMLs
-# (relocated to ``src/backtesting/presets/``) — covered by the
+# (relocated to ``src/lab/presets/``) — covered by the
 # backtest's own preset tests.
 
 

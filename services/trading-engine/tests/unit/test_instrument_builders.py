@@ -19,7 +19,7 @@ import pytest
 
 from nautilus_trader.model.currencies import USD
 from nautilus_trader.model.objects import Currency, Price, Quantity
-from src.backtesting.runner_facade import (
+from src.lab.runner_facade import (
     _build_fx_pair_instrument,
     _build_instrument,
     _build_jpy_pair_instrument,

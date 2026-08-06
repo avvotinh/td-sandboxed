@@ -10,20 +10,20 @@ from pathlib import Path
 
 import pytest
 
-from src.backtesting.export.result_writer import (
+from src.lab.export.result_writer import (
     SCHEMA_VERSION,
     build_result_payload,
     make_run_id,
     timeframe_from_suffix,
     write_result_json,
 )
-from src.backtesting.job_config import (
+from src.lab.job_config import (
     BacktestJobConfig,
     ParquetDataSpec,
     SyntheticDataSpec,
     VenueSpec,
 )
-from src.backtesting.result import (
+from src.lab.result import (
     BacktestResult,
     BreachEvent,
     IndicatorSeries,

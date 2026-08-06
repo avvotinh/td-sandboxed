@@ -25,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from src.backtesting.dataset.go_manifest_loader import merge_go_manifests
-from src.backtesting.dataset.manifest import DatasetManifest
+from src.lab.dataset.go_manifest_loader import merge_go_manifests
+from src.lab.dataset.manifest import DatasetManifest
 
 
 pytestmark = [

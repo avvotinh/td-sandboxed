@@ -17,7 +17,7 @@ Located in `.claude/agents/` (project-local, not `~/.claude/agents/`):
 | researcher | Feature research (GitHub/Context7/web) before implementing | Before implementing a new feature or picking a library |
 | docs-lookup | Up-to-date library/framework/API docs via Context7 MCP | Docs/API/setup questions |
 | harness-optimizer | Audit and improve `.claude/` harness configuration | After running `/harness-audit` |
-| quant-reviewer | Quant-strategy review (lookahead bias, survivorship, overfit, train-test leakage, sizing/fee errors) | After writing/modifying strategy code under `src/strategies/` or `src/kernel/` — MUST run for every new entry/exit model before backtest results are trusted |
+| quant-reviewer | Quant-strategy review (lookahead bias, survivorship, overfit, train-test leakage, sizing/fee errors) | After writing/modifying strategy code under `src/kernel/` — MUST run for every new entry/exit model before backtest results are trusted |
 | backtest-analyst | Reads `results/*.json` (Result Contract v2), compares against promotion gate D7, writes verdict markdown to `docs/v2/studies/` with run_ids | After backtest/sweep/walk-forward runs when a study verdict is needed (`/study`) |
 
 > Removed in v2: `go-reviewer`, `go-build-resolver` (Go frozen — tv-cli fetch only), `refactor-cleaner`. `database-reviewer` returns at the live-path phase (P5) when schema work resumes.

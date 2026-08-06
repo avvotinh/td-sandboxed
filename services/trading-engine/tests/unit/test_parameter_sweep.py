@@ -8,19 +8,19 @@ from unittest.mock import patch
 
 import pytest
 
-from src.backtesting.job_config import (
+from src.lab.job_config import (
     BacktestJobConfig,
     SyntheticDataSpec,
     VenueSpec,
 )
-from src.backtesting.parameter_sweep import (
+from src.lab.parameter_sweep import (
     EarlyStopConfig,
     ParameterSweep,
     SweepResult,
     expand_grid,
     sample_random,
 )
-from src.backtesting.result import BacktestResult
+from src.lab.result import BacktestResult
 
 
 def _job() -> BacktestJobConfig:
@@ -97,7 +97,7 @@ class TestParameterSweep:
         fake = _fake_result(final_balance=100500)
 
         with patch(
-            "src.backtesting.parameter_sweep.run_backtest", return_value=fake
+            "src.lab.parameter_sweep.run_backtest", return_value=fake
         ) as rb:
             sweep = ParameterSweep(
                 job=_job(),
@@ -116,7 +116,7 @@ class TestParameterSweep:
         fake = _fake_result()
 
         with patch(
-            "src.backtesting.parameter_sweep.run_backtest", return_value=fake
+            "src.lab.parameter_sweep.run_backtest", return_value=fake
         ) as rb:
             sweep = ParameterSweep(
                 job=_job(),
@@ -140,7 +140,7 @@ class TestParameterSweep:
                 raise RuntimeError("engine failed")
             return _fake_result()
 
-        with patch("src.backtesting.parameter_sweep.run_backtest", side_effect=flaky):
+        with patch("src.lab.parameter_sweep.run_backtest", side_effect=flaky):
             sweep = ParameterSweep(
                 job=_job(), param_grid=grid, search="grid"
             )
@@ -174,7 +174,7 @@ class TestParameterSweep:
                 (res.initial_balance - res.final_balance) / res.initial_balance * 100
             )
 
-        with patch("src.backtesting.parameter_sweep.run_backtest", side_effect=mock_run):
+        with patch("src.lab.parameter_sweep.run_backtest", side_effect=mock_run):
             sweep = ParameterSweep(
                 job=_job(),
                 param_grid=grid,
@@ -202,7 +202,7 @@ class TestParameterSweep:
         def pnl(res: BacktestResult) -> float:
             return float(res.final_balance - res.initial_balance)
 
-        with patch("src.backtesting.parameter_sweep.run_backtest", side_effect=mock_run):
+        with patch("src.lab.parameter_sweep.run_backtest", side_effect=mock_run):
             sweep = ParameterSweep(
                 job=_job(),
                 param_grid=grid,
@@ -225,7 +225,7 @@ class TestParameterSweep:
     def test_empty_grid_produces_one_combo(self) -> None:
         fake = _fake_result()
         with patch(
-            "src.backtesting.parameter_sweep.run_backtest", return_value=fake
+            "src.lab.parameter_sweep.run_backtest", return_value=fake
         ) as rb:
             sweep = ParameterSweep(job=_job(), param_grid={}, search="grid")
             result = sweep.run(max_workers=1)

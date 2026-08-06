@@ -33,10 +33,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.backtesting.data_cache import ContentHashFingerprint
-from src.backtesting.dataset.manifest import DatasetEntry, DatasetManifest
-from src.backtesting.dataset.pipeline import detect_gaps
-from src.backtesting.dataset.spec import WindowKind
+from src.lab.data_cache import ContentHashFingerprint
+from src.lab.dataset.manifest import DatasetEntry, DatasetManifest
+from src.lab.dataset.pipeline import detect_gaps
+from src.lab.dataset.spec import WindowKind
 
 
 _MS_TO_NS = 1_000_000

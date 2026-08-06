@@ -44,18 +44,18 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 
-from src.backtesting.dataset.baseline_harness import (
+from src.lab.dataset.baseline_harness import (
     BaselineConfig,
     StrategySpec,
     run_baseline,
     timeframe_to_bar_suffix,
 )
-from src.backtesting.dataset.comparison_report import (
+from src.lab.dataset.comparison_report import (
     BaselineFilter,
     render_comparison_report,
 )
-from src.backtesting.dataset.manifest import DatasetManifest
-from src.backtesting.job_config import PropFirmSpec, VenueSpec
+from src.lab.dataset.manifest import DatasetManifest
+from src.lab.job_config import PropFirmSpec, VenueSpec
 
 
 ParamValue = int | float | str | bool | None
@@ -215,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--ftmo-preset",
         type=Path,
-        default=Path("src/backtesting/presets/ftmo.yaml"),
+        default=Path("src/lab/presets/ftmo.yaml"),
         help="FTMO preset YAML (default: %(default)s)",
     )
     parser.add_argument(

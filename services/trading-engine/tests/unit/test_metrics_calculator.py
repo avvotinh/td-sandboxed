@@ -8,9 +8,9 @@ from decimal import Decimal
 
 import pytest
 
-from src.backtesting.metrics.calculator import calculate_metrics
-from src.backtesting.metrics.schema import PropFirmMetricsSchema
-from src.backtesting.result import TradeRecord
+from src.lab.metrics.calculator import calculate_metrics
+from src.lab.metrics.schema import PropFirmMetricsSchema
+from src.lab.result import TradeRecord
 
 
 pytestmark = pytest.mark.unit
@@ -111,7 +111,7 @@ class TestCalculateMetricsEmptyInputs:
 
 class TestPropFirmCompliance:
     def test_breach_count_from_breach_events(self) -> None:
-        from src.backtesting.result import BreachEvent
+        from src.lab.result import BreachEvent
         breach = BreachEvent(
             ts=datetime(2026, 1, 1, tzinfo=UTC),
             rule_name="daily_loss_limit",

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from src.backtesting.reports.html_writer import render_html_report, write_html_report
-from src.backtesting.result import BacktestResult, BreachEvent, TradeRecord
+from src.lab.reports.html_writer import render_html_report, write_html_report
+from src.lab.result import BacktestResult, BreachEvent, TradeRecord
 
 
 def _trade(ts: datetime, pnl: float) -> TradeRecord:

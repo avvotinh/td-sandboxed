@@ -1,7 +1,7 @@
-"""Unit tests for ``src.backtesting.dataset.walk_forward_harness``.
+"""Unit tests for ``src.lab.dataset.walk_forward_harness``.
 
 The harness layers manifest-driven fold generation and OOS aggregation
-on top of the existing :mod:`src.backtesting.walk_forward` primitives.
+on top of the existing :mod:`src.lab.walk_forward` primitives.
 12.5's responsibility is the wrapper plus the Decision §4 ratio check
 (``mean(OOS sharpe) ≥ 0.7 × IS sharpe`` and ``std/mean ≤ 0.5``);
 12.6/12.7 swap the fixed-params driver here for the parameter sweep.
@@ -18,14 +18,14 @@ from typing import Any
 
 import pytest
 
-from src.backtesting.data_cache import ContentHashFingerprint
-from src.backtesting.dataset.baseline_harness import (
+from src.lab.data_cache import ContentHashFingerprint
+from src.lab.dataset.baseline_harness import (
     StrategySpec,
     timeframe_to_bar_suffix,
 )
-from src.backtesting.dataset.manifest import DatasetEntry, DatasetManifest
-from src.backtesting.dataset.spec import WindowKind
-from src.backtesting.dataset.walk_forward_harness import (
+from src.lab.dataset.manifest import DatasetEntry, DatasetManifest
+from src.lab.dataset.spec import WindowKind
+from src.lab.dataset.walk_forward_harness import (
     FoldGenerationConfig,
     OOSAcceptance,
     OOSAggregate,
@@ -37,12 +37,12 @@ from src.backtesting.dataset.walk_forward_harness import (
     render_walk_forward_section,
     run_walk_forward_fixed_params,
 )
-from src.backtesting.job_config import (
+from src.lab.job_config import (
     BacktestJobConfig,
     ParquetDataSpec,
     VenueSpec,
 )
-from src.backtesting.metrics.schema import (
+from src.lab.metrics.schema import (
     DrawdownMetrics,
     PnlMetrics,
     PropFirmComplianceMetrics,
@@ -50,7 +50,7 @@ from src.backtesting.metrics.schema import (
     RiskMetrics,
     TradeMetrics,
 )
-from src.backtesting.result import BacktestResult
+from src.lab.result import BacktestResult
 
 
 pytestmark = pytest.mark.unit
@@ -228,8 +228,8 @@ class TestGenerateFoldsFromManifest:
 
 class TestOOSAggregate:
     def _outcomes(self, sharpes: list[float]) -> WalkForwardOutcome:
-        from src.backtesting.dataset.walk_forward_harness import FoldOutcome
-        from src.backtesting.walk_forward import FoldSpec
+        from src.lab.dataset.walk_forward_harness import FoldOutcome
+        from src.lab.walk_forward import FoldSpec
 
         outcomes: list[FoldOutcome] = []
         for i, sh in enumerate(sharpes):
@@ -269,8 +269,8 @@ class TestOOSAggregate:
 
     def test_zero_folds_with_metrics_handled(self) -> None:
         # All folds errored → metrics are NaN sentinels rather than crash.
-        from src.backtesting.dataset.walk_forward_harness import FoldOutcome
-        from src.backtesting.walk_forward import FoldSpec
+        from src.lab.dataset.walk_forward_harness import FoldOutcome
+        from src.lab.walk_forward import FoldSpec
 
         fold = FoldSpec(
             train_start=datetime(2024, 1, 1, tzinfo=UTC),
@@ -308,8 +308,8 @@ class TestOOSAggregate:
         assert agg.total_oos_trades == 150
 
     def test_mean_trades_is_nan_when_no_folds_have_metrics(self) -> None:
-        from src.backtesting.dataset.walk_forward_harness import FoldOutcome
-        from src.backtesting.walk_forward import FoldSpec
+        from src.lab.dataset.walk_forward_harness import FoldOutcome
+        from src.lab.walk_forward import FoldSpec
 
         fold = FoldSpec(
             train_start=datetime(2024, 1, 1, tzinfo=UTC),

@@ -103,7 +103,7 @@ class TestSpecMatchesBacktestInstruments:
         "symbol", ["XAUUSD", "EURUSD", "GBPUSD", "AUDUSD", "USDJPY"]
     )
     def test_spec_consistent_with_instrument(self, symbol: str) -> None:
-        from src.backtesting.runner_facade import _build_instrument
+        from src.lab.runner_facade import _build_instrument
 
         instrument, _ = _build_instrument(symbol)
         spec = get_contract_spec(symbol)

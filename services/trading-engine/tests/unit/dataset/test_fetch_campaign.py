@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.backtesting.dataset.fetch_campaign import (
+from src.lab.dataset.fetch_campaign import (
     build_fetch_argv,
     chunk_path,
     to_oanda_symbol,

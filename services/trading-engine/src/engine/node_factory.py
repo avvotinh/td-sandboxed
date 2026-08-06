@@ -42,7 +42,7 @@ from nautilus_trader.model.identifiers import (
     Venue,
 )
 
-from ..backtesting.strategy_registry import resolve_strategy
+from src.lab.strategy_registry import resolve_strategy
 from .clients.bar_translator import make_bar_type
 from .clients.redis_data_client import RedisDataClient
 from .clients.zmq_execution_client import ZmqExecutionClient

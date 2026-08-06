@@ -11,4 +11,4 @@ Then report:
 2. The exported path: `results/<run_id>.json` (repo root, gitignored — do NOT commit)
 3. One-line metrics summary from the CLI output: net PnL, trades, win rate, max overall DD
 
-If the run fails, show the error and check the job YAML against `src/backtesting/job_config.py` (see skill: `strategy-lab`). To inspect the run visually, suggest `/viewer <run-id>`.
+If the run fails, show the error and check the job YAML against `src/lab/job_config.py` (see skill: `strategy-lab`). To inspect the run visually, suggest `/viewer <run-id>`.

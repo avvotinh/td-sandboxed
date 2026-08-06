@@ -1,4 +1,4 @@
-"""Unit tests for ``src.backtesting.dataset.go_manifest_loader``.
+"""Unit tests for ``src.lab.dataset.go_manifest_loader``.
 
 Story 12.7.0d — covers the merge logic that combines per-shard
 manifests written by the tv-api Go CLI into a single canonical
@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from src.backtesting.dataset.go_manifest_loader import merge_go_manifests
-from src.backtesting.dataset.manifest import DatasetManifest
+from src.lab.dataset.go_manifest_loader import merge_go_manifests
+from src.lab.dataset.manifest import DatasetManifest
 
 
 pytestmark = pytest.mark.unit

@@ -1,4 +1,4 @@
-"""Unit tests for ``src.backtesting.dataset.comparison_report``.
+"""Unit tests for ``src.lab.dataset.comparison_report``.
 
 The report renders one markdown table for the list of
 :class:`BacktestResult` produced by the baseline harness, applies the
@@ -16,14 +16,14 @@ from typing import Any
 
 import pytest
 
-from src.backtesting.dataset.comparison_report import (
+from src.lab.dataset.comparison_report import (
     BaselineFilter,
     FilterVerdict,
     FingerprintMismatchError,
     evaluate_filter,
     render_comparison_report,
 )
-from src.backtesting.metrics.schema import (
+from src.lab.metrics.schema import (
     DrawdownMetrics,
     PnlMetrics,
     PropFirmComplianceMetrics,
@@ -31,7 +31,7 @@ from src.backtesting.metrics.schema import (
     RiskMetrics,
     TradeMetrics,
 )
-from src.backtesting.result import BacktestResult
+from src.lab.result import BacktestResult
 
 
 pytestmark = pytest.mark.unit

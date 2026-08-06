@@ -17,7 +17,7 @@ import pytest
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
 
-from src.backtesting.prop_firm_actor import (
+from src.lab.prop_firm_actor import (
     PropFirmComplianceActor,
     PropFirmComplianceActorConfig,
 )

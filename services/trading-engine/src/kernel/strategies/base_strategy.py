@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from nautilus_trader.model.orders.list import OrderList
     from nautilus_trader.model.position import Position
 
-    from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
+    from src.lab.recorder.indicator_recorder import IndicatorRecorder
     from src.kernel.regime.state_store import RegimeStateStore
 
 

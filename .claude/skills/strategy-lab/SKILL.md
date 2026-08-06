@@ -8,7 +8,7 @@ origin: Sandboxed
 
 Vòng lặp research: sửa chiến lược → backtest → xem chart → verdict. Chạy hoàn toàn local,
 **KHÔNG cần Docker/TimescaleDB/Redis** (Quyết định D6) — data là Parquet, output là JSON.
-CLI source: `services/trading-engine/src/backtesting/cli.py`.
+CLI source: `services/trading-engine/src/lab/cli.py`.
 
 ## Invocation
 
@@ -80,7 +80,7 @@ Hai job phải cùng dataset + venue; chỉ strategy params khác nhau. Output: 
 ## Job YAML anatomy
 
 Ví dụ thật: `services/trading-engine/configs/backtest/epic13-donchian-baseline-m5.yaml`.
-Schema: `BacktestJobConfig` (`src/backtesting/job_config.py`) — Pydantic, `extra="forbid"`.
+Schema: `BacktestJobConfig` (`src/lab/job_config.py`) — Pydantic, `extra="forbid"`.
 
 ```yaml
 strategy: donchian_breakout          # phải có trong strategy registry

@@ -4,7 +4,7 @@ from __future__ import annotations
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-from src.backtesting.prop_firm_actor import PropFirmComplianceActor
+from src.lab.prop_firm_actor import PropFirmComplianceActor
 from src.engine.actors import build_compliance_actor
 
 

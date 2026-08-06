@@ -8,17 +8,17 @@ from unittest.mock import patch
 
 import pytest
 
-from src.backtesting.job_config import (
+from src.lab.job_config import (
     BacktestJobConfig,
     SyntheticDataSpec,
     VenueSpec,
 )
-from src.backtesting.parameter_sweep import (
+from src.lab.parameter_sweep import (
     CombinationResult,
     SweepResult,
 )
-from src.backtesting.result import BacktestResult
-from src.backtesting.walk_forward import (
+from src.lab.result import BacktestResult
+from src.lab.walk_forward import (
     FoldSpec,
     WalkForward,
     WalkForwardFolds,
@@ -186,10 +186,10 @@ class TestWalkForwardRun:
 
         with (
             patch(
-                "src.backtesting.walk_forward.ParameterSweep"
+                "src.lab.walk_forward.ParameterSweep"
             ) as sweep_cls,
             patch(
-                "src.backtesting.walk_forward.run_backtest",
+                "src.lab.walk_forward.run_backtest",
                 side_effect=lambda job, strategy_overrides=None: next(oos_iter),
             ),
         ):
@@ -227,10 +227,10 @@ class TestWalkForwardRun:
 
         with (
             patch(
-                "src.backtesting.walk_forward.ParameterSweep"
+                "src.lab.walk_forward.ParameterSweep"
             ) as sweep_cls,
             patch(
-                "src.backtesting.walk_forward.run_backtest",
+                "src.lab.walk_forward.run_backtest",
                 return_value=_fake_result(100500),
             ),
         ):
@@ -270,10 +270,10 @@ class TestWalkForwardRun:
 
         with (
             patch(
-                "src.backtesting.walk_forward.ParameterSweep"
+                "src.lab.walk_forward.ParameterSweep"
             ) as sweep_cls,
             patch(
-                "src.backtesting.walk_forward.run_backtest",
+                "src.lab.walk_forward.run_backtest",
             ) as rb,
         ):
             sweep_cls.return_value.run.side_effect = capture_run

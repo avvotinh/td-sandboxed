@@ -19,9 +19,9 @@ from nautilus_trader.model.enums import AccountType, OmsType
 from nautilus_trader.model.objects import Money
 from nautilus_trader.test_kit.providers import TestInstrumentProvider
 
-from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
-from src.backtesting.result import BacktestResult
-from src.backtesting.synthetic_bars import generate_bars
+from src.lab.engine import BacktestRunner, BacktestRunnerConfig
+from src.lab.result import BacktestResult
+from src.lab.synthetic_bars import generate_bars
 from src.rules.engine import RuleEngine
 from src.rules.types.drawdown import DailyLossLimitRule
 from src.kernel.strategies.ma_crossover import MACrossoverConfig, MACrossoverStrategy

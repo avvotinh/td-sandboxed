@@ -45,7 +45,7 @@ from pathlib import Path
 from nautilus_trader.model.data import Bar, BarType
 from nautilus_trader.model.objects import Price, Quantity
 
-from src.backtesting.synthetic_bars import generate_bars
+from src.lab.synthetic_bars import generate_bars
 
 FIXTURES = Path(__file__).parent
 # Only used to construct transient Bar objects during generation — the bar

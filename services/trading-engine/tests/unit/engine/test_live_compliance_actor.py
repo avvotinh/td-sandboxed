@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.backtesting.prop_firm_actor import (
+from src.lab.prop_firm_actor import (
     PropFirmComplianceActor,
     PropFirmComplianceActorConfig,
 )

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from src.backtesting.data_cache import (
+from src.lab.data_cache import (
     ContentHashFingerprint,
     build_cache_key,
     build_cache_path,

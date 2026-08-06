@@ -6,11 +6,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from src.backtesting.recorder.indicator_recorder import (
+from src.lab.recorder.indicator_recorder import (
     IndicatorRecorder,
     ns_to_utc,
 )
-from src.backtesting.result import IndicatorSeries
+from src.lab.result import IndicatorSeries
 
 pytestmark = pytest.mark.unit
 

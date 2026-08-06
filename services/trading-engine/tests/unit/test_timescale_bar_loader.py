@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.backtesting.data_cache import ContentHashFingerprint
-from src.backtesting.data_loader import TimescaleBarLoader, _dt_to_ns
+from src.lab.data_cache import ContentHashFingerprint
+from src.lab.data_loader import TimescaleBarLoader, _dt_to_ns
 
 
 pytestmark = pytest.mark.unit

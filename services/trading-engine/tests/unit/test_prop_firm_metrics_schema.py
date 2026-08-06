@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from src.backtesting.metrics.schema import (
+from src.lab.metrics.schema import (
     DrawdownMetrics,
     PropFirmComplianceMetrics,
     PropFirmMetricsSchema,

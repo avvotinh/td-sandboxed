@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.backtesting.job_config import (
+from src.lab.job_config import (
     BacktestJobConfig,
     PropFirmSpec,
     ParquetDataSpec,
@@ -65,7 +65,7 @@ class TestBacktestJobConfig:
         )
 
     def test_unknown_strategy_fails_fast(self) -> None:
-        from src.backtesting.strategy_registry import UnknownStrategyError
+        from src.lab.strategy_registry import UnknownStrategyError
 
         with pytest.raises(UnknownStrategyError):
             _synth_job(strategy="does_not_exist")

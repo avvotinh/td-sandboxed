@@ -22,13 +22,13 @@ import pytest
 
 from nautilus_trader.model.currencies import EUR, USD
 
-from src.backtesting.spread_fee_model import SpreadAwareFeeModel
-from src.backtesting.commission import (
+from src.lab.spread_fee_model import SpreadAwareFeeModel
+from src.lab.commission import (
     commission_per_lot_to_fee_model,
     commission_profile_to_fee_model,
     resolve_commission_profile,
 )
-from src.backtesting.job_config import (
+from src.lab.job_config import (
     BacktestJobConfig,
     SyntheticDataSpec,
     VenueSpec,
@@ -209,8 +209,8 @@ class TestRunnerFacadeWiresFeeModel:
     """run_backtest must pass fee_model to add_venue iff commission > 0."""
 
     def _patch_runner_and_run(self, job: BacktestJobConfig) -> MagicMock:
-        from src.backtesting import runner_facade
-        from src.backtesting.result import BacktestResult
+        from src.lab import runner_facade
+        from src.lab.result import BacktestResult
 
         with (
             patch.object(runner_facade, "BacktestRunner") as runner_cls,

@@ -27,7 +27,7 @@ import yaml as _yaml
 # Story 10.13 — drop-in for the deleted RulePresetLoader. See
 # test_order_validation_flow.py for design rationale.
 _PRESETS_DIR = (
-    Path(__file__).resolve().parents[2] / "src" / "backtesting" / "presets"
+    Path(__file__).resolve().parents[2] / "src" / "lab" / "presets"
 )
 
 

@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     from ..accounts.pnl_registry import PnLTrackerRegistry
     from ..accounts.risk_registry import RiskStateRegistry
     from ..audit.audit_service import AuditService
-    from ..backtesting.prop_firm_actor import LiveEquityProvider
+    from src.lab.prop_firm_actor import LiveEquityProvider
     from ..config.firm_registry import FirmRegistry
     from ..rules.audit_logger import AuditEntry
     from ..execution.validated_adapter import ValidatedZmqAdapter

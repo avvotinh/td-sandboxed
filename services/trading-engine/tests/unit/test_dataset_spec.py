@@ -1,4 +1,4 @@
-"""Unit tests for ``src.backtesting.dataset.spec``.
+"""Unit tests for ``src.lab.dataset.spec``.
 
 Covers the YAML-loadable :class:`DatasetSpec` that pins the validation
 dataset (Epic 12.1): symbol whitelist, timeframe whitelist, tz-aware
@@ -14,7 +14,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from src.backtesting.dataset.spec import (
+from src.lab.dataset.spec import (
     DatasetSpec,
     WindowKind,
     WindowSpec,

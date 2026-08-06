@@ -36,7 +36,7 @@ from src.rules.parser import RuleParser as _RuleParser
 # rule set the old FTMO preset produced now load it directly from the
 # backtest-local preset YAML and parse with :class:`RuleParser`.
 _PRESETS_DIR = (
-    _Path(__file__).resolve().parents[2] / "src" / "backtesting" / "presets"
+    _Path(__file__).resolve().parents[2] / "src" / "lab" / "presets"
 )
 
 

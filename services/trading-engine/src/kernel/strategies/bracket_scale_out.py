@@ -37,7 +37,7 @@ from src.kernel.instruments import get_contract_spec
 if TYPE_CHECKING:
     from nautilus_trader.model.data import Bar
 
-    from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
+    from src.lab.recorder.indicator_recorder import IndicatorRecorder
     from src.kernel.strategies.bracket_strategy import BracketStrategyConfig
 
 
@@ -364,7 +364,7 @@ class BracketScaleOutMixin:
         ``_supertrend_trail``, or the trail indicator has not
         initialized / produced a value yet.
         """
-        from src.backtesting.recorder.indicator_recorder import ns_to_utc
+        from src.lab.recorder.indicator_recorder import ns_to_utc
 
         trail = getattr(self, "_supertrend_trail", None)
         if trail is None or not trail.initialized or trail.value is None:

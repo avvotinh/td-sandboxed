@@ -15,14 +15,14 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from src.backtesting.job_config import (
+from src.lab.job_config import (
     BacktestJobConfig,
     PropFirmSpec,
     SyntheticDataSpec,
     VenueSpec,
 )
-from src.backtesting.result import BacktestResult
-from src.backtesting.runner_facade import _normalise_parquet_index
+from src.lab.result import BacktestResult
+from src.lab.runner_facade import _normalise_parquet_index
 from src.kernel.regime.states import RegimeState
 
 
@@ -61,7 +61,7 @@ def fake_result() -> BacktestResult:
 @pytest.mark.unit
 class TestRunBacktestComposition:
     def test_calls_runner_in_correct_order(self, fake_result) -> None:
-        from src.backtesting import runner_facade
+        from src.lab import runner_facade
 
         with (
             patch.object(runner_facade, "BacktestRunner") as runner_cls,
@@ -91,7 +91,7 @@ class TestRunBacktestComposition:
             assert result is fake_result
 
     def test_strategy_overrides_merge_into_config(self, fake_result) -> None:
-        from src.backtesting import runner_facade
+        from src.lab import runner_facade
 
         with (
             patch.object(runner_facade, "BacktestRunner") as runner_cls,
@@ -119,7 +119,7 @@ class TestRunBacktestComposition:
             assert kwargs["params"]["slow_period"] == 20
 
     def test_dispose_called_even_on_run_failure(self, fake_result) -> None:
-        from src.backtesting import runner_facade
+        from src.lab import runner_facade
 
         with (
             patch.object(runner_facade, "BacktestRunner") as runner_cls,
@@ -138,7 +138,7 @@ class TestRunBacktestComposition:
             mock_runner.dispose.assert_called_once()
 
     def test_window_forwarded_to_run(self, fake_result) -> None:
-        from src.backtesting import runner_facade
+        from src.lab import runner_facade
 
         start = datetime(2024, 1, 5)
         end = datetime(2024, 1, 20)
@@ -211,7 +211,7 @@ class TestRunBacktestRegimeWiring:
             yield mock_runner
 
     def test_regime_off_by_default(self, fake_result) -> None:
-        from src.backtesting import runner_facade
+        from src.lab import runner_facade
 
         strategy = _StrategyStub()
         with self._facade(runner_facade, fake_result, strategy) as mock_runner:
@@ -224,7 +224,7 @@ class TestRunBacktestRegimeWiring:
         assert strategy._allowed_regimes is None
 
     def test_disabled_config_does_not_attach_or_inject(self, fake_result) -> None:
-        from src.backtesting import runner_facade
+        from src.lab import runner_facade
 
         strategy = _StrategyStub()
         with self._facade(runner_facade, fake_result, strategy) as mock_runner:
@@ -239,7 +239,7 @@ class TestRunBacktestRegimeWiring:
     def test_regime_enabled_injects_store_and_allowlist_before_strategy(
         self, fake_result
     ) -> None:
-        from src.backtesting import runner_facade
+        from src.lab import runner_facade
 
         strategy = _StrategyStub()
         allow = frozenset({RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN})
@@ -275,7 +275,7 @@ class TestRunBacktestRegimeWiring:
     def test_enabled_but_strategy_unregistered_raises(self, fake_result) -> None:
         # HIGH-1 guard: regime on + strategy missing from StrategyRegistry (e.g.
         # a test cleared it) → fast, contextual failure, not a bare mid-run error.
-        from src.backtesting import runner_facade
+        from src.lab import runner_facade
 
         strategy = _StrategyStub()
         with (
@@ -291,7 +291,7 @@ class TestRunBacktestRegimeWiring:
             )
 
     def test_compliance_attached_after_strategy(self, fake_result) -> None:
-        from src.backtesting import runner_facade
+        from src.lab import runner_facade
 
         job = _base_job(
             prop_firm=PropFirmSpec(

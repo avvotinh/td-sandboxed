@@ -41,7 +41,7 @@ from src.kernel.strategies.risk_based_position_sizer import (
 if TYPE_CHECKING:
     from nautilus_trader.indicators.volatility import AverageTrueRange
 
-    from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
+    from src.lab.recorder.indicator_recorder import IndicatorRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +211,7 @@ class SupertrendStrategy(
         self, bar: Bar, recorder: IndicatorRecorder
     ) -> None:
         """Record the Supertrend line (split up/down) + optional trail."""
-        from src.backtesting.recorder.indicator_recorder import ns_to_utc
+        from src.lab.recorder.indicator_recorder import ns_to_utc
 
         st = self._supertrend
         if st.initialized and st.value is not None:

@@ -18,12 +18,12 @@ from decimal import Decimal
 
 import pytest
 
-from src.backtesting.job_config import (
+from src.lab.job_config import (
     BacktestJobConfig,
     SyntheticDataSpec,
     VenueSpec,
 )
-from src.backtesting.runner_facade import run_backtest
+from src.lab.runner_facade import run_backtest
 
 pytestmark = pytest.mark.integration
 

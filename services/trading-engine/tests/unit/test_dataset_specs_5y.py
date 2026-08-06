@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from src.backtesting.dataset.spec import DatasetSpec, WindowKind
+from src.lab.dataset.spec import DatasetSpec, WindowKind
 
 # test file → unit → tests → trading-engine → services → repo root
 _DATASETS_DIR = (
@@ -59,8 +59,8 @@ class TestFiveYearDatasetSpecs:
         # MetaTrader label in BOTH vocabularies, else materialize/lookup
         # silently misses. (The tv-cli minute value "5"/"240" is the fetch
         # flag only and must never reach the manifest.)
-        from src.backtesting.dataset.baseline_harness import _TIMEFRAME_BAR_SUFFIX
-        from src.backtesting.dataset.pipeline import _TIMEFRAME_SECONDS
+        from src.lab.dataset.baseline_harness import _TIMEFRAME_BAR_SUFFIX
+        from src.lab.dataset.pipeline import _TIMEFRAME_SECONDS
 
         spec = DatasetSpec.from_yaml(_DATASETS_DIR / filename)
         for tf in spec.timeframes:

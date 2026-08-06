@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.backtesting.job_config import repo_root, resolve_data_path
+from src.lab.job_config import repo_root, resolve_data_path
 
 pytestmark = pytest.mark.unit
 
@@ -54,7 +54,7 @@ class TestResolveDataPath:
     ) -> None:
         """Pin the composition run_backtest uses for prop-firm presets:
         ``load_prop_firm_preset(resolve_data_path(preset_path))``."""
-        from src.backtesting.prop_firm_preset import (
+        from src.lab.prop_firm_preset import (
             DEFAULT_PROP_FIRM_PRESET_PATH,
             load_prop_firm_preset,
         )

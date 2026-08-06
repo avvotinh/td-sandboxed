@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from nautilus_trader.model.currencies import USD
 
-from ..backtesting.prop_firm_actor import (
+from src.lab.prop_firm_actor import (
     LiveEquityProvider,
     PropFirmComplianceActor,
     PropFirmComplianceActorConfig,
@@ -55,7 +55,7 @@ def build_compliance_actor(
 ) -> PropFirmComplianceActor:
     """Construct a :class:`PropFirmComplianceActor` with shared defaults.
 
-    Both :class:`~src.backtesting.engine.BacktestRunner` and
+    Both :class:`~src.lab.engine.BacktestRunner` and
     :class:`~src.engine.live_orchestrator.LiveOrchestrator` call this
     function so the actor's behaviour cannot drift between simulation
     and production.
@@ -106,7 +106,7 @@ def build_regime_actor(
     """Construct a :class:`RegimeActor` for one ``bar_type``, or ``None`` if off.
 
     The regime counterpart of :func:`build_compliance_actor`: both the backtest
-    runner (:meth:`~src.backtesting.engine.BacktestRunner.attach_regime`, story
+    runner (:meth:`~src.lab.engine.BacktestRunner.attach_regime`, story
     15.8) and the live path (``node_factory`` / ``LiveOrchestrator``, stories
     15.10/15.11) call this so the classify → hysteresis → audit pipeline cannot
     drift between simulation and production.

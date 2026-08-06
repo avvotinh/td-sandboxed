@@ -1,5 +1,5 @@
 # Pinned XAUUSD validation dataset for Epic 12 (Backtest Validation +
-# Parameter Optimization). Loaded by src.backtesting.dataset.spec.DatasetSpec.from_yaml
+# Parameter Optimization). Loaded by src.lab.dataset.spec.DatasetSpec.from_yaml
 # and consumed by DatasetPipeline (12.1) → in-sample harness (12.2) →
 # walk-forward + parameter sweep (12.5–12.7).
 #

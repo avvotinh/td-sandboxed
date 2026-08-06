@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.backtesting.metrics.trade_metrics import (
+from src.lab.metrics.trade_metrics import (
     compute_avg_loss,
     compute_avg_win,
     compute_expectancy,

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.backtesting.prop_firm_preset import (
+from src.lab.prop_firm_preset import (
     DEFAULT_PROP_FIRM_PRESET_PATH,
     PropFirmPreset,
     load_prop_firm_preset,

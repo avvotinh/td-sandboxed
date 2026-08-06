@@ -209,7 +209,7 @@ class TestNodeBuild:
         # Track 2 hard stop: regimes=[] archival only bites when regime
         # gating is enabled for the account, so the node factory refuses
         # archived strategies outright regardless of regime config.
-        from src.backtesting.strategy_registry import ArchivedStrategyError
+        from src.lab.strategy_registry import ArchivedStrategyError
 
         with pytest.raises(ArchivedStrategyError, match="ARCHIVED"):
             build_account_trading_node(
@@ -246,7 +246,7 @@ class TestNodeBuild:
     def test_unknown_strategy_propagates_registry_error(self) -> None:
         account = _account(strategy="not_a_real_strategy")
         spec = _spec(strategy="not_a_real_strategy")
-        from src.backtesting.strategy_registry import UnknownStrategyError
+        from src.lab.strategy_registry import UnknownStrategyError
 
         with pytest.raises(UnknownStrategyError):
             build_account_trading_node(

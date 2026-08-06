@@ -7,7 +7,7 @@ origin: Sandboxed
 # Result Contract v2
 
 Một schema JSON duy nhất, versioned — keystone của research loop v2
-(`docs/v2/01-architecture.md` §4). Writer: `services/trading-engine/src/backtesting/export/result_writer.py`
+(`docs/v2/01-architecture.md` §4). Writer: `services/trading-engine/src/lab/export/result_writer.py`
 (sẽ move vào `lab/export/` ở P3). Readers: chart-viewer, `backtest-analyst` agent, study scripts.
 
 ## Where files live

@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.backtesting.account_state_builder import build_account_state
+from src.lab.account_state_builder import build_account_state
 
 
 pytestmark = pytest.mark.unit

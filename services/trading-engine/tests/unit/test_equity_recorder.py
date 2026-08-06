@@ -18,7 +18,7 @@ import pytest
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
 
-from src.backtesting.recorder.equity_recorder import (
+from src.lab.recorder.equity_recorder import (
     EquityRecorderActor,
     EquityRecorderActorConfig,
 )

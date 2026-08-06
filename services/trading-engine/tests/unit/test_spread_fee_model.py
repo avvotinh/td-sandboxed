@@ -18,8 +18,8 @@ from unittest.mock import MagicMock
 import pytest
 from nautilus_trader.model.currencies import EUR, USD
 
-from src.backtesting.commission import commission_profile_to_fee_model
-from src.backtesting.spread_fee_model import SpreadAwareFeeModel
+from src.lab.commission import commission_profile_to_fee_model
+from src.lab.spread_fee_model import SpreadAwareFeeModel
 from src.config.firm_profile import CommissionProfile
 
 

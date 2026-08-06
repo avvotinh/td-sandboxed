@@ -1,6 +1,6 @@
 ---
 name: quant-reviewer
-description: Expert quantitative-strategy reviewer specializing in lookahead bias, survivorship/selection bias, overfitting, train-test leakage, and sizing/fee-model errors. Use PROACTIVELY when strategy or backtest code under services/trading-engine/src/strategies/ or services/trading-engine/src/kernel/ is written or modified. MUST BE USED for every new entry/exit model before backtest results are trusted.
+description: Expert quantitative-strategy reviewer specializing in lookahead bias, survivorship/selection bias, overfitting, train-test leakage, and sizing/fee-model errors. Use PROACTIVELY when strategy or backtest code under services/trading-engine/src/kernel/ is written or modified. MUST BE USED for every new entry/exit model before backtest results are trusted.
 tools: ["Read", "Grep", "Glob"]
 model: opus
 ---

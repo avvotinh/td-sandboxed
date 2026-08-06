@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.backtesting.portfolio_equity import (
+from src.lab.portfolio_equity import (
     read_account_balance,
     read_unrealized_pnl,
 )

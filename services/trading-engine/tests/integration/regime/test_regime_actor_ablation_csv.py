@@ -76,8 +76,8 @@ from nautilus_trader.model.objects import Money, Price, Quantity
 
 import src.kernel.strategies.bollinger_mean_reversion as _bollinger_module
 import src.kernel.strategies.donchian_breakout as _donchian_module
-from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
-from src.backtesting.runner_facade import (
+from src.lab.engine import BacktestRunner, BacktestRunnerConfig
+from src.lab.runner_facade import (
     _bar_type_for,
     _build_instrument,
     _build_strategy,

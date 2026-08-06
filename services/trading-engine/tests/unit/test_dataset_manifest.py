@@ -1,4 +1,4 @@
-"""Unit tests for ``src.backtesting.dataset.manifest``.
+"""Unit tests for ``src.lab.dataset.manifest``.
 
 The manifest is the materialisation receipt: one row per
 (timeframe, window) Parquet shard with the fingerprint that lets a
@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from src.backtesting.data_cache import ContentHashFingerprint
-from src.backtesting.dataset.manifest import (
+from src.lab.data_cache import ContentHashFingerprint
+from src.lab.dataset.manifest import (
     BarGap,
     DatasetEntry,
     DatasetManifest,
 )
-from src.backtesting.dataset.spec import WindowKind
+from src.lab.dataset.spec import WindowKind
 
 
 pytestmark = pytest.mark.unit

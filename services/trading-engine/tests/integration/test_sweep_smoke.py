@@ -16,13 +16,13 @@ from decimal import Decimal
 
 import pytest
 
-from src.backtesting.job_config import (
+from src.lab.job_config import (
     BacktestJobConfig,
     SyntheticDataSpec,
     VenueSpec,
 )
-from src.backtesting.parameter_sweep import ParameterSweep
-from src.backtesting.walk_forward import FoldSpec, WalkForward
+from src.lab.parameter_sweep import ParameterSweep
+from src.lab.walk_forward import FoldSpec, WalkForward
 
 
 pytestmark = pytest.mark.integration

@@ -1,5 +1,5 @@
 # Epic 16 — XAUUSD 5-year multi-timeframe acquisition dataset.
-# Loaded by src.backtesting.dataset.spec.DatasetSpec.from_yaml; consumed
+# Loaded by src.lab.dataset.spec.DatasetSpec.from_yaml; consumed
 # by DatasetPipeline → backtest validation (Epic 15) + meta-label / signal
 # -quality training (future epic).
 #

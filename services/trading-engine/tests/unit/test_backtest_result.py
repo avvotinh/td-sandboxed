@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.backtesting.result import BacktestResult, BreachEvent, TradeRecord
+from src.lab.result import BacktestResult, BreachEvent, TradeRecord
 
 
 pytestmark = pytest.mark.unit

@@ -44,13 +44,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.backtesting.dataset.fetch_campaign import (
+from src.lab.dataset.fetch_campaign import (
     build_fetch_argv,
     chunk_path,
     to_oanda_symbol,
     tv_timeframe,
 )
-from src.backtesting.dataset.spec import DatasetSpec, WindowSpec
+from src.lab.dataset.spec import DatasetSpec, WindowSpec
 
 # scripts/ → trading-engine → services → repo root
 _REPO_ROOT = Path(__file__).resolve().parents[3]
