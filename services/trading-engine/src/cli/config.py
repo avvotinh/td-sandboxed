@@ -9,7 +9,7 @@ import typer
 import yaml
 from typing_extensions import Annotated
 
-from ..config.loader import ConfigLoader, ConfigValidationError, ConfigSyntaxError
+from src.config.loader import ConfigLoader, ConfigValidationError, ConfigSyntaxError
 from .constants import STATUS_COLORS
 
 config_app = typer.Typer(help="Configuration management")

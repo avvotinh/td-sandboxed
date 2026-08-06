@@ -26,7 +26,7 @@ from src.lab.prop_firm_actor import (
     PropFirmComplianceActor,
     PropFirmComplianceActorConfig,
 )
-from src.engine.actors import build_compliance_actor
+from src.lab.actors import build_compliance_actor
 from src.engine.collaborators import LiveServiceBundle
 from src.engine.live_orchestrator import LiveOrchestrator
 from src.rules.base_rule import RuleAction, RuleResult

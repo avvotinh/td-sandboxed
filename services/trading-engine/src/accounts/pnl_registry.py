@@ -15,7 +15,7 @@ from .pnl_tracker import PnLTracker
 
 if TYPE_CHECKING:
     from .risk_registry import RiskStateRegistry
-    from ..state.redis_state import RedisStateManager
+    from src.live.state.redis_state import RedisStateManager
 
 logger = logging.getLogger(__name__)
 

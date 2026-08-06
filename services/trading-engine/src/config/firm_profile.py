@@ -21,7 +21,7 @@ from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from ..rules.base_rule import BaseRule
+from src.rules.base_rule import BaseRule
 
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 

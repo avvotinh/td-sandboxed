@@ -13,10 +13,10 @@ import typer
 from tabulate import tabulate
 from typing_extensions import Annotated
 
-from ..accounts.account_manager import AccountManager
-from ..config.loader import ConfigLoader, ConfigValidationError, ConfigSyntaxError
-from ..rules.audit_logger import AuditEntry
-from ..state.redis_state import RedisStateManager
+from src.accounts.account_manager import AccountManager
+from src.config.loader import ConfigLoader, ConfigValidationError, ConfigSyntaxError
+from src.rules.audit_logger import AuditEntry
+from src.live.state.redis_state import RedisStateManager
 from src.lab.cli import backtest_app
 from .accounts import accounts_app
 from .audit import audit_app

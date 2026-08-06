@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from .risk_state import RiskState
 
 if TYPE_CHECKING:
-    from ..state.redis_state import RedisStateManager
+    from src.live.state.redis_state import RedisStateManager
 
 
 class AccountRiskManager:

@@ -40,7 +40,7 @@ class TestRedisAdapterIntegration:
     @pytest.mark.asyncio
     async def test_connect_to_redis(self, skip_without_redis):
         """Test connecting to Redis server."""
-        from src.adapters.redis_adapter import RedisAdapter
+        from src.live.adapters.redis_adapter import RedisAdapter
 
         adapter = RedisAdapter()
         await adapter.connect()
@@ -53,7 +53,7 @@ class TestRedisAdapterIntegration:
     @pytest.mark.asyncio
     async def test_subscribe_to_channels(self, skip_without_redis):
         """Test subscribing to bar channels."""
-        from src.adapters.redis_adapter import RedisAdapter
+        from src.live.adapters.redis_adapter import RedisAdapter
 
         async with RedisAdapter() as adapter:
             await adapter.subscribe(["XAUUSD", "BTCUSD"], timeframe="1m")
@@ -66,7 +66,7 @@ class TestRedisAdapterIntegration:
     @pytest.mark.asyncio
     async def test_unsubscribe_from_channels(self, skip_without_redis):
         """Test unsubscribing from bar channels."""
-        from src.adapters.redis_adapter import RedisAdapter
+        from src.live.adapters.redis_adapter import RedisAdapter
 
         async with RedisAdapter() as adapter:
             await adapter.subscribe(["XAUUSD", "BTCUSD"], timeframe="1m")
@@ -82,8 +82,8 @@ class TestRedisAdapterIntegration:
         """Test full pub/sub round trip with bar data."""
         import redis.asyncio as redis
 
-        from src.adapters.redis_adapter import RedisAdapter
-        from src.adapters.redis_models import Bar
+        from src.live.adapters.redis_adapter import RedisAdapter
+        from src.live.adapters.redis_models import Bar
 
         adapter = RedisAdapter()
         await adapter.connect()
@@ -131,8 +131,8 @@ class TestRedisAdapterIntegration:
         """Test receiving bars from multiple symbols."""
         import redis.asyncio as redis
 
-        from src.adapters.redis_adapter import RedisAdapter
-        from src.adapters.redis_models import Bar
+        from src.live.adapters.redis_adapter import RedisAdapter
+        from src.live.adapters.redis_models import Bar
 
         adapter = RedisAdapter()
         await adapter.connect()
@@ -182,8 +182,8 @@ class TestRedisAdapterIntegration:
         """Test bar callback is invoked."""
         import redis.asyncio as redis
 
-        from src.adapters.redis_adapter import RedisAdapter
-        from src.adapters.redis_models import Bar
+        from src.live.adapters.redis_adapter import RedisAdapter
+        from src.live.adapters.redis_models import Bar
 
         adapter = RedisAdapter()
         await adapter.connect()
@@ -227,7 +227,7 @@ class TestRedisAdapterIntegration:
     @pytest.mark.asyncio
     async def test_context_manager(self, skip_without_redis):
         """Test async context manager with real Redis."""
-        from src.adapters.redis_adapter import RedisAdapter
+        from src.live.adapters.redis_adapter import RedisAdapter
 
         async with RedisAdapter() as adapter:
             assert adapter.is_connected is True

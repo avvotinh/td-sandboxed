@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.state.trading_resumer import (
+from src.live.state.trading_resumer import (
     AccountResumeResult,
     ResumeResult,
     TradingResumer,
@@ -96,7 +96,7 @@ def make_recalculation_result(
 
 def test_trading_resumer_imports() -> None:
     """Verify TradingResumer can be imported."""
-    from src.state.trading_resumer import (
+    from src.live.state.trading_resumer import (
         TradingResumer,
     )
 

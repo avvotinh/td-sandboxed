@@ -10,12 +10,12 @@ import os
 
 import pytest
 
-from src.adapters.zmq_adapter import ZmqAdapter
-from src.adapters.zmq_models import OrderSide
-from src.orders.execution_service import OrderExecutionService
-from src.orders.order import OrderState
-from src.orders.position_tracker import PositionTracker
-from src.orders.signal import Signal, SignalType
+from src.live.adapters.zmq_adapter import ZmqAdapter
+from src.live.adapters.zmq_models import OrderSide
+from src.live.orders.execution_service import OrderExecutionService
+from src.live.orders.order import OrderState
+from src.live.orders.position_tracker import PositionTracker
+from src.kernel.signal import Signal, SignalType
 
 
 # Skip all tests in this module unless MT5_BRIDGE_AVAILABLE is set

@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.snapshots.daily_snapshot_service import DailySnapshotService
-from src.snapshots.models import AccountSnapshotModel
-from src.snapshots.snapshot_db_writer import SnapshotDBWriter
+from src.live.snapshots.daily_snapshot_service import DailySnapshotService
+from src.live.snapshots.models import AccountSnapshotModel
+from src.live.snapshots.snapshot_db_writer import SnapshotDBWriter
 
 
 # ======================
@@ -79,7 +79,7 @@ class TestFullSnapshotFlow:
             db_session_factory=session_factory,
         )
 
-        from src.snapshots.daily_snapshot_service import DEFAULT_SESSION
+        from src.live.snapshots.daily_snapshot_service import DEFAULT_SESSION
         await service._take_snapshots_for_session(
             DEFAULT_SESSION,
             account_manager.get_active_account_ids.return_value,
@@ -142,7 +142,7 @@ class TestUpsertIdempotency:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("src.snapshots.snapshot_db_writer.create_async_engine") as mock_eng:
+        with patch("src.live.snapshots.snapshot_db_writer.create_async_engine") as mock_eng:
             engine = MagicMock()
             engine.dispose = AsyncMock()
             mock_conn = MagicMock()
@@ -152,7 +152,7 @@ class TestUpsertIdempotency:
             engine.connect = MagicMock(return_value=mock_conn)
             mock_eng.return_value = engine
 
-            with patch("src.snapshots.snapshot_db_writer.async_sessionmaker") as mock_factory:
+            with patch("src.live.snapshots.snapshot_db_writer.async_sessionmaker") as mock_factory:
                 mock_factory.return_value = MagicMock(return_value=mock_session)
 
                 writer = SnapshotDBWriter("postgresql+asyncpg://test@localhost/test")
@@ -219,8 +219,8 @@ class TestEngineLifecycle:
             database_url="postgresql+asyncpg://test@localhost/test",
         )
 
-        with patch("src.snapshots.snapshot_db_writer.create_async_engine") as mock_eng, \
-             patch("src.snapshots.snapshot_db_writer.async_sessionmaker"):
+        with patch("src.live.snapshots.snapshot_db_writer.create_async_engine") as mock_eng, \
+             patch("src.live.snapshots.snapshot_db_writer.async_sessionmaker"):
             mock_sa_engine = MagicMock()
             mock_sa_engine.dispose = AsyncMock()
             mock_conn = MagicMock()
@@ -343,7 +343,7 @@ class TestMultiAccountFlow:
 
         service._collect_snapshot_data = mock_collect
 
-        from src.snapshots.daily_snapshot_service import DEFAULT_SESSION
+        from src.live.snapshots.daily_snapshot_service import DEFAULT_SESSION
         await service._take_snapshots_for_session(
             DEFAULT_SESSION,
             account_manager.get_active_account_ids.return_value,

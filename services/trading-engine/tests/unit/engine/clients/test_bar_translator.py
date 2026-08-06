@@ -9,8 +9,8 @@ from nautilus_trader.model.data import BarType
 from nautilus_trader.model.enums import BarAggregation, PriceType
 from nautilus_trader.model.identifiers import Venue
 
-from src.adapters.redis_models import Bar as InternalBar
-from src.engine.clients.bar_translator import (
+from src.live.adapters.redis_models import Bar as InternalBar
+from src.live.clients.bar_translator import (
     make_bar_type,
     parse_timeframe,
     to_nautilus_bar,

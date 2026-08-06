@@ -10,7 +10,7 @@ from nautilus_trader.model.data import BarType
 
 from src.kernel.strategies.base_strategy import BaseStrategy
 from src.kernel.strategies.config import BaseStrategyConfig
-from src.orders.signal import SignalType
+from src.kernel.signal import SignalType
 
 
 class ConcreteStrategy(BaseStrategy):

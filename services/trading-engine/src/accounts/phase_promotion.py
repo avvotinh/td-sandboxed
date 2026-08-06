@@ -28,13 +28,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from ..config.firm_registry import FirmRegistryError
-from ..rules.audit_logger import AuditEntry, AuditEventType
+from src.config.firm_registry import FirmRegistryError
+from src.rules.audit_logger import AuditEntry, AuditEventType
 
 if TYPE_CHECKING:
-    from ..config.firm_profile import AccountPhase
-    from ..config.firm_registry import FirmRegistry
-    from ..state.redis_state import RedisStateManager
+    from src.config.firm_profile import AccountPhase
+    from src.config.firm_registry import FirmRegistry
+    from src.live.state.redis_state import RedisStateManager
 
 logger = logging.getLogger(__name__)
 

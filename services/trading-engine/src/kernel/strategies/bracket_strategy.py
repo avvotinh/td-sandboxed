@@ -29,7 +29,7 @@ from src.kernel.strategies.config import BaseStrategyConfig
 if TYPE_CHECKING:
     from nautilus_trader.model.data import Bar
 
-    from src.orders.signal import SignalType
+    from src.kernel.signal import SignalType
 
 
 logger = logging.getLogger(__name__)
@@ -466,7 +466,7 @@ class BracketStrategyMixin:
         lives on the ``BaseStrategy`` host and defaults to "admit" when regime
         gating is disabled (default-OFF parity).
         """
-        from src.orders.signal import SignalType as _SignalType
+        from src.kernel.signal import SignalType as _SignalType
 
         if signal == _SignalType.NONE:
             return

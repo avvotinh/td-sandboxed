@@ -256,13 +256,13 @@ class BacktestRunner:
         portfolio. When omitted (unit-test path) equity reads return
         ``None`` and ``on_bar`` is a no-op.
 
-        Delegates to :func:`src.engine.actors.build_compliance_actor` so
+        Delegates to :func:`src.lab.actors.build_compliance_actor` so
         backtest and live (story 10.5d) construct the actor identically.
         """
         # Lazy import to break the cycle:
         #   backtesting.engine → engine.actors → backtesting.prop_firm_actor
         # would otherwise re-enter backtesting.engine at module load time.
-        from src.engine.actors import build_compliance_actor
+        from src.lab.actors import build_compliance_actor
 
         actor = build_compliance_actor(
             account_id=account_id,
@@ -325,7 +325,7 @@ class BacktestRunner:
         """Build + register a ``RegimeActor`` against this engine (story 15.8).
 
         Mirrors :meth:`attach_prop_firm_compliance`: delegates to
-        :func:`src.engine.actors.build_regime_actor` so backtest and live
+        :func:`src.lab.actors.build_regime_actor` so backtest and live
         (stories 15.10/15.11) construct the regime pipeline identically. Returns
         ``None`` when ``regime_config.enabled`` is ``False`` — no actor is added,
         so a disabled regime block costs nothing (default-OFF parity).
@@ -346,7 +346,7 @@ class BacktestRunner:
         #   backtesting.engine → engine.actors → backtesting.prop_firm_actor
         # would otherwise re-enter backtesting.engine at module load time
         # (same reason attach_prop_firm_compliance imports locally).
-        from src.engine.actors import build_regime_actor
+        from src.lab.actors import build_regime_actor
 
         actor = build_regime_actor(
             regime_config=regime_config,

@@ -5,8 +5,8 @@ from decimal import Decimal
 
 import pytest
 
-from src.adapters.zmq_models import MT5Position, OrderSide
-from src.orders.close_order_builder import build_close_order
+from src.live.adapters.zmq_models import MT5Position, OrderSide
+from src.live.orders.close_order_builder import build_close_order
 
 
 def _position(

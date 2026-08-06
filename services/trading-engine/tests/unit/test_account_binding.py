@@ -15,7 +15,7 @@ from src.kernel.strategies.account_binding import (
 from src.kernel.strategies.base_strategy import BaseStrategy
 from src.kernel.strategies.config import BaseStrategyConfig
 from src.kernel.strategies.registry import StrategyRegistry
-from src.orders.signal import SignalType
+from src.kernel.signal import SignalType
 
 
 class MockStrategy(BaseStrategy):

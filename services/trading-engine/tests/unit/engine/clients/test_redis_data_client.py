@@ -21,8 +21,8 @@ from nautilus_trader.live.data_client import LiveMarketDataClient
 from nautilus_trader.model.enums import PriceType
 from nautilus_trader.model.identifiers import Venue
 
-from src.adapters.redis_models import Bar as InternalBar
-from src.engine.clients.redis_data_client import (
+from src.live.adapters.redis_models import Bar as InternalBar
+from src.live.clients.redis_data_client import (
     RedisDataClient,
     run_redis_bar_listener,
 )

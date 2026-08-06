@@ -15,7 +15,7 @@ from .risk_manager import AccountRiskManager
 from .risk_state import RiskState
 
 if TYPE_CHECKING:
-    from ..state.redis_state import RedisStateManager
+    from src.live.state.redis_state import RedisStateManager
 
 logger = logging.getLogger(__name__)
 

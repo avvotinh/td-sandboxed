@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.state.crash_recovery import (
+from src.live.state.crash_recovery import (
     CrashIndicatorResult,
     CrashRecoveryManager,
     RecoveryResult,
 )
-from src.state.snapshot import StateSnapshot
+from src.live.state.snapshot import StateSnapshot
 
 
 @pytest.fixture

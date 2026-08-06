@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.audit.audit_service import AuditService
-from src.orders.execution_service import OrderExecutionService
-from src.orders.position_tracker import PositionTracker
+from src.live.audit.audit_service import AuditService
+from src.live.orders.execution_service import OrderExecutionService
+from src.live.orders.position_tracker import PositionTracker
 from src.rules.audit_db_writer import AuditLogModel
 from src.rules.audit_logger import AuditEntry, AuditEventType, AuditLogger
 from src.rules.base_rule import RuleAction, RuleResult
@@ -262,7 +262,7 @@ class TestExecutionServiceAuditIntegration:
 
     @pytest.fixture
     def mock_zmq(self):
-        from src.adapters.zmq_models import OrderResult, OrderStatus
+        from src.live.adapters.zmq_models import OrderResult, OrderStatus
 
         zmq = AsyncMock()
         zmq.send_order_and_wait = AsyncMock(
@@ -287,7 +287,7 @@ class TestExecutionServiceAuditIntegration:
     @pytest.mark.asyncio
     async def test_entry_fill_fires_audit_task(self, mock_zmq, mock_audit_service):
         """_handle_entry_fill awaits a synchronous audit row before returning."""
-        from src.orders.signal import Signal, SignalType
+        from src.kernel.signal import Signal, SignalType
 
         tracker = PositionTracker()
         service = OrderExecutionService(
@@ -319,8 +319,8 @@ class TestExecutionServiceAuditIntegration:
     @pytest.mark.asyncio
     async def test_close_fill_fires_audit_task(self, mock_zmq, mock_audit_service):
         """_handle_close_fill awaits a synchronous audit row with order_id."""
-        from src.adapters.zmq_models import OrderResult, OrderStatus
-        from src.orders.signal import Signal, SignalType
+        from src.live.adapters.zmq_models import OrderResult, OrderStatus
+        from src.kernel.signal import Signal, SignalType
 
         tracker = PositionTracker()
         service = OrderExecutionService(

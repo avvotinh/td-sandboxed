@@ -2,9 +2,9 @@
 
 import pytest
 
-from src.adapters.zmq_models import OrderSide
-from src.orders.order import InternalOrder, OrderState
-from src.orders.signal import SignalType
+from src.live.adapters.zmq_models import OrderSide
+from src.live.orders.order import InternalOrder, OrderState
+from src.kernel.signal import SignalType
 
 
 class TestOrderState:

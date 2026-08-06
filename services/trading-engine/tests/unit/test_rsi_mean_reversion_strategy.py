@@ -10,7 +10,7 @@ from nautilus_trader.model.data import BarType
 from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 
-from src.orders.signal import SignalType
+from src.kernel.signal import SignalType
 from src.kernel.strategies.rsi_mean_reversion import (
     RSIMeanReversionConfig,
     RSIMeanReversionStrategy,

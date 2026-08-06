@@ -14,7 +14,7 @@ from typing import Union
 import yaml
 from pydantic import ValidationError
 
-from ..accounts.models import AccountConfig, AccountsConfig
+from src.accounts.models import AccountConfig, AccountsConfig
 
 logger = logging.getLogger(__name__)
 

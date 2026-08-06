@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.adapters.redis_models import Bar
+from src.live.adapters.redis_models import Bar
 
 
 class TestBarCreation:

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from nautilus_trader.model.data import Bar
 
 from src.kernel.indicators.supertrend import Supertrend
-from src.orders.signal import SignalType
+from src.kernel.signal import SignalType
 from src.kernel.strategies.base_strategy import BaseStrategy
 from src.kernel.strategies.bracket_scale_out import BracketScaleOutMixin
 from src.kernel.strategies.bracket_strategy import (

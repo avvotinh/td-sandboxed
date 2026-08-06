@@ -27,7 +27,7 @@ from datetime import UTC, datetime, time
 from typing import TYPE_CHECKING, Any
 
 from src.kernel.indicators import ADX
-from src.orders.signal import SignalType
+from src.kernel.signal import SignalType
 
 if TYPE_CHECKING:
     from nautilus_trader.model.data import Bar

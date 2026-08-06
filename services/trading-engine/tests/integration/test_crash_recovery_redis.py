@@ -21,9 +21,9 @@ from decimal import Decimal
 
 import pytest
 
-from src.state.crash_recovery import CrashRecoveryManager
-from src.state.redis_state import RedisStateManager
-from src.state.snapshot import StateSnapshot
+from src.live.state.crash_recovery import CrashRecoveryManager
+from src.live.state.redis_state import RedisStateManager
+from src.live.state.snapshot import StateSnapshot
 
 
 @pytest.fixture

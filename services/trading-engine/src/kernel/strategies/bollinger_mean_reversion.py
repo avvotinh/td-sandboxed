@@ -16,7 +16,7 @@ from nautilus_trader.indicators.volatility import AverageTrueRange
 from nautilus_trader.model.data import Bar
 
 from src.kernel.indicators import Bollinger
-from src.orders.signal import SignalType
+from src.kernel.signal import SignalType
 from src.kernel.strategies.base_strategy import BaseStrategy
 from src.kernel.strategies.bracket_strategy import (
     BracketStrategyConfig,

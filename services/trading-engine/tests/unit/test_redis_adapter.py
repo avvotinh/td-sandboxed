@@ -17,9 +17,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.adapters.redis_adapter import RedisAdapter, _ConnectionState
-from src.adapters.redis_config import RedisConfig
-from src.adapters.redis_models import Bar
+from src.live.adapters.redis_adapter import RedisAdapter, _ConnectionState
+from src.live.adapters.redis_config import RedisConfig
+from src.live.adapters.redis_models import Bar
 
 
 class TestConnectionState:
@@ -70,7 +70,7 @@ class TestRedisAdapterSubscription:
     @pytest.fixture
     def mock_redis(self):
         """Create mock Redis client and pubsub."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -203,7 +203,7 @@ class TestRedisAdapterReconnection:
     @pytest.mark.asyncio
     async def test_reconnect_resubscribes(self):
         """Test reconnect re-subscribes to all channels."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -237,7 +237,7 @@ class TestRedisAdapterListenBars:
     @pytest.mark.asyncio
     async def test_listen_bars_yields_bar(self):
         """Test listen_bars yields parsed Bar objects."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -277,7 +277,7 @@ class TestRedisAdapterListenBars:
     @pytest.mark.asyncio
     async def test_listen_bars_skips_non_message_types(self):
         """Test listen_bars skips subscribe/unsubscribe messages."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -314,7 +314,7 @@ class TestRedisAdapterListenBars:
     @pytest.mark.asyncio
     async def test_listen_bars_handles_invalid_json(self):
         """Test listen_bars handles invalid JSON gracefully."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -351,7 +351,7 @@ class TestRedisAdapterListenBars:
     @pytest.mark.asyncio
     async def test_listen_bars_handles_validation_error(self):
         """Test listen_bars handles bar validation errors."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -391,7 +391,7 @@ class TestRedisAdapterListenBars:
     @pytest.mark.asyncio
     async def test_listen_bars_continues_on_none_message(self):
         """Test listen_bars continues when get_message returns None."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -430,7 +430,7 @@ class TestRedisAdapterBarCallback:
     @pytest.mark.asyncio
     async def test_bar_callback_invoked(self):
         """Test bar callback is invoked for each bar."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -494,7 +494,7 @@ class TestRedisAdapterContextManager:
     @pytest.mark.asyncio
     async def test_context_manager_returns_adapter(self):
         """Test context manager returns adapter instance."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -528,7 +528,7 @@ class TestRedisAdapterConnection:
     @pytest.mark.asyncio
     async def test_connect_sets_connected_state(self):
         """Test connect sets is_connected to True."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -544,7 +544,7 @@ class TestRedisAdapterConnection:
     @pytest.mark.asyncio
     async def test_connect_resets_reconnect_attempt(self):
         """Test connect resets reconnect attempt counter."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -560,7 +560,7 @@ class TestRedisAdapterConnection:
     @pytest.mark.asyncio
     async def test_connect_already_connected_is_noop(self):
         """Test connect when already connected is no-op."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -577,7 +577,7 @@ class TestRedisAdapterConnection:
     @pytest.mark.asyncio
     async def test_disconnect_clears_connected_state(self):
         """Test disconnect clears is_connected."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             # pubsub() is a synchronous method in redis.asyncio
@@ -606,7 +606,7 @@ class TestRedisAdapterMaxReconnectAttempts:
     @pytest.mark.asyncio
     async def test_max_reconnect_attempts_raises_error(self):
         """Test max_reconnect_attempts raises MaxReconnectAttemptsError."""
-        from src.adapters.redis_adapter import MaxReconnectAttemptsError
+        from src.live.adapters.redis_adapter import MaxReconnectAttemptsError
 
         config = RedisConfig(reconnect_delays=[0], max_reconnect_attempts=2)
         adapter = RedisAdapter(config=config)
@@ -618,7 +618,7 @@ class TestRedisAdapterMaxReconnectAttempts:
     @pytest.mark.asyncio
     async def test_max_reconnect_attempts_zero_is_unlimited(self):
         """Test max_reconnect_attempts=0 means unlimited."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             mock_client.pubsub = MagicMock(return_value=mock_pubsub)
@@ -642,7 +642,7 @@ class TestRedisAdapterAsyncCallback:
     @pytest.mark.asyncio
     async def test_async_callback_invoked(self):
         """Test async callback is properly awaited."""
-        with patch("src.adapters.redis_adapter.redis") as mock:
+        with patch("src.live.adapters.redis_adapter.redis") as mock:
             mock_client = AsyncMock()
             mock_pubsub = AsyncMock()
             mock_client.pubsub = MagicMock(return_value=mock_pubsub)
@@ -695,7 +695,7 @@ class TestRedisAdapterImports:
 
     def test_import_from_adapters(self):
         """Test RedisAdapter can be imported from adapters."""
-        from src.adapters import Bar, MaxReconnectAttemptsError, RedisAdapter, RedisConfig
+        from src.live.adapters import Bar, MaxReconnectAttemptsError, RedisAdapter, RedisConfig
 
         assert RedisAdapter is not None
         assert RedisConfig is not None

@@ -15,8 +15,8 @@ from nautilus_trader.model.identifiers import (
 from nautilus_trader.model.objects import Quantity
 from nautilus_trader.model.orders import LimitOrder, MarketOrder
 
-from src.adapters.zmq_models import OrderSide as InternalOrderSide
-from src.engine.clients.order_translator import (
+from src.live.adapters.zmq_models import OrderSide as InternalOrderSide
+from src.live.clients.order_translator import (
     UnsupportedOrderError,
     to_internal_order,
 )

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.state.redis_state import RedisStateManager
+from src.live.state.redis_state import RedisStateManager
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ class TestRedisStateManagerConnect:
     @pytest.mark.asyncio
     async def test_connect_creates_client(self, redis_manager):
         """Test connect creates Redis client."""
-        with patch("src.state.redis_state.aioredis") as mock_aioredis:
+        with patch("src.live.state.redis_state.aioredis") as mock_aioredis:
             mock_client = MagicMock()
             # from_url needs to be an async function
             async_from_url = AsyncMock(return_value=mock_client)

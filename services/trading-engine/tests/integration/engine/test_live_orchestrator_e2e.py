@@ -38,7 +38,7 @@ from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import Venue
 from nautilus_trader.test_kit.providers import TestInstrumentProvider
 
-from src.adapters.zmq_models import OrderResult, OrderStatus
+from src.live.adapters.zmq_models import OrderResult, OrderStatus
 from src.lab.strategy_registry import (
     BACKTEST_STRATEGIES,
     StrategyEntry,
@@ -46,7 +46,7 @@ from src.lab.strategy_registry import (
 from src.engine.collaborators import LiveServiceBundle
 from src.engine.live_orchestrator import LiveOrchestrator
 from src.engine.node_factory import build_account_trading_node
-from src.execution.exceptions import OrderBlockedError
+from src.live.execution.exceptions import OrderBlockedError
 from src.kernel.strategies.base_strategy import BaseStrategy
 from src.kernel.strategies.config import BaseStrategyConfig
 

@@ -43,17 +43,17 @@ from nautilus_trader.model.identifiers import (
 )
 
 from src.lab.strategy_registry import resolve_strategy
-from .clients.bar_translator import make_bar_type
-from .clients.redis_data_client import RedisDataClient
-from .clients.zmq_execution_client import ZmqExecutionClient
+from src.live.clients.bar_translator import make_bar_type
+from src.live.clients.redis_data_client import RedisDataClient
+from src.live.clients.zmq_execution_client import ZmqExecutionClient
 
 if TYPE_CHECKING:
     from nautilus_trader.common.actor import Actor
     from nautilus_trader.trading.strategy import Strategy
     from redis.asyncio import Redis
 
-    from ..accounts.models import AccountConfig
-    from ..execution.validated_adapter import ValidatedZmqAdapter
+    from src.accounts.models import AccountConfig
+    from src.live.execution.validated_adapter import ValidatedZmqAdapter
     from src.kernel.regime.state_store import RegimeStateStore
 
 logger = logging.getLogger(__name__)

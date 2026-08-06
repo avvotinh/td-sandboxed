@@ -20,13 +20,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.config.firm_profile import SessionConfig
-from src.snapshots.daily_snapshot_service import (
+from src.live.snapshots.daily_snapshot_service import (
     DEFAULT_SESSION,
     DailySnapshotService,
     _query_window_for_date,
 )
-from src.snapshots.models import AccountSnapshotModel
-from src.snapshots.snapshot_db_writer import SnapshotDBWriter
+from src.live.snapshots.models import AccountSnapshotModel
+from src.live.snapshots.snapshot_db_writer import SnapshotDBWriter
 
 
 # -- Fixtures --
@@ -58,7 +58,7 @@ def sample_snapshot_data() -> dict:
 @pytest.fixture
 def mock_engine():
     """Mock SQLAlchemy async engine with connect() context manager."""
-    with patch("src.snapshots.snapshot_db_writer.create_async_engine") as mock:
+    with patch("src.live.snapshots.snapshot_db_writer.create_async_engine") as mock:
         engine = MagicMock()
         engine.dispose = AsyncMock()
         # Support start() connection validation: async with engine.connect() as conn
@@ -214,7 +214,7 @@ class TestSnapshotDBWriterWriteSnapshot:
     async def test_write_snapshot_executes_upsert(
         self, sample_snapshot_data, mock_engine, mock_session,
     ):
-        with patch("src.snapshots.snapshot_db_writer.async_sessionmaker") as mock_factory:
+        with patch("src.live.snapshots.snapshot_db_writer.async_sessionmaker") as mock_factory:
             mock_factory.return_value = MagicMock(return_value=mock_session)
 
             writer = SnapshotDBWriter("postgresql+asyncpg://test:test@localhost/test")
@@ -226,7 +226,7 @@ class TestSnapshotDBWriterWriteSnapshot:
 
     @pytest.mark.asyncio
     async def test_start_stop_lifecycle(self, mock_engine):
-        with patch("src.snapshots.snapshot_db_writer.async_sessionmaker"):
+        with patch("src.live.snapshots.snapshot_db_writer.async_sessionmaker"):
             writer = SnapshotDBWriter("postgresql+asyncpg://test:test@localhost/test")
 
             assert not writer.is_running
@@ -248,7 +248,7 @@ class TestSnapshotDBWriterUpsert:
         self, sample_snapshot_data, mock_engine, mock_session,
     ):
         """Verify the INSERT statement uses ON CONFLICT DO UPDATE."""
-        with patch("src.snapshots.snapshot_db_writer.async_sessionmaker") as mock_factory:
+        with patch("src.live.snapshots.snapshot_db_writer.async_sessionmaker") as mock_factory:
             mock_factory.return_value = MagicMock(return_value=mock_session)
 
             writer = SnapshotDBWriter("postgresql+asyncpg://test:test@localhost/test")
@@ -400,7 +400,7 @@ class TestCalculateSecondsUntilNextReset:
         delay = DailySnapshotService._calculate_seconds_until_next_reset(DEFAULT_SESSION)
         assert delay <= 86400  # 24 * 60 * 60
 
-    @patch("src.snapshots.daily_snapshot_service.datetime")
+    @patch("src.live.snapshots.daily_snapshot_service.datetime")
     def test_utc_session_at_2300_returns_approximately_1_hour(self, mock_dt):
         """At 23:00 UTC for UTC session, should return ~3600 seconds."""
         fixed_now = datetime(2025, 12, 3, 23, 0, 0, tzinfo=timezone.utc)
@@ -410,7 +410,7 @@ class TestCalculateSecondsUntilNextReset:
         delay = DailySnapshotService._calculate_seconds_until_next_reset(DEFAULT_SESSION)
         assert 3500 <= delay <= 3700  # ~1 hour with some tolerance
 
-    @patch("src.snapshots.daily_snapshot_service.datetime")
+    @patch("src.live.snapshots.daily_snapshot_service.datetime")
     def test_cet_session_in_winter_at_1400_utc(self, mock_dt):
         """CET session at 14:00 UTC (= 15:00 CET): next reset at 23:00 UTC = 9h."""
         fixed_now = datetime(2026, 1, 15, 14, 0, 0, tzinfo=timezone.utc)
@@ -861,7 +861,7 @@ class TestSessionGrouping:
 class TestSnapshotDateForSession:
     """``_snapshot_date_for_session`` returns the local date that just ended."""
 
-    @patch("src.snapshots.daily_snapshot_service.datetime")
+    @patch("src.live.snapshots.daily_snapshot_service.datetime")
     def test_utc_session_returns_yesterday_just_after_midnight(self, mock_dt):
         # At 00:00:30 UTC on 16 Jan, the day that just ended is 15 Jan.
         fixed_now = datetime(2026, 1, 16, 0, 0, 30, tzinfo=timezone.utc)
@@ -876,7 +876,7 @@ class TestSnapshotDateForSession:
 
         assert service._snapshot_date_for_session(DEFAULT_SESSION) == date(2026, 1, 15)
 
-    @patch("src.snapshots.daily_snapshot_service.datetime")
+    @patch("src.live.snapshots.daily_snapshot_service.datetime")
     def test_cet_session_uses_local_date(self, mock_dt):
         # At 23:00:30 UTC on 15 Jan = 00:00:30 CET on 16 Jan.
         # The CET day that just ended is 15 Jan.

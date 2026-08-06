@@ -17,8 +17,8 @@ from decimal import Decimal
 
 import pytest
 
-from src.state.cold_storage_writer import ColdStorageWriter
-from src.state.snapshot import StateSnapshot
+from src.live.state.cold_storage_writer import ColdStorageWriter
+from src.live.state.snapshot import StateSnapshot
 
 
 @pytest.fixture

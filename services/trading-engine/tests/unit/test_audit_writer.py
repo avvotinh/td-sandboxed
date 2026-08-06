@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.audit.audit_writer import AuditWriter
+from src.live.audit.audit_writer import AuditWriter
 from src.rules.audit_logger import AuditEntry
 
 
@@ -169,7 +169,7 @@ class TestAuditWriterEnqueueNowait:
         sink: list[list[Any]] = []
         writer = AuditWriter(_make_session_factory(sink))
 
-        with patch("src.audit.audit_writer.logger") as mock_logger:
+        with patch("src.live.audit.audit_writer.logger") as mock_logger:
             writer.enqueue_nowait(_make_entry())
 
         mock_logger.warning.assert_called_once()
@@ -450,7 +450,7 @@ class TestAuditWriterIntegration:
         writer = AuditWriter(_make_session_factory(sink), batch_timeout=0.02)
 
         with patch(
-            "src.audit.audit_writer.AuditLogModel.from_audit_entry"
+            "src.live.audit.audit_writer.AuditLogModel.from_audit_entry"
         ) as mock_from:
             mock_from.return_value = "MODEL"
             await writer.log_sync(_make_entry())

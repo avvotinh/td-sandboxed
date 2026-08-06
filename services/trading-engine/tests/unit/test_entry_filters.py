@@ -30,7 +30,7 @@ from nautilus_trader.model.data import BarType
 from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 
-from src.orders.signal import SignalType
+from src.kernel.signal import SignalType
 from src.kernel.strategies.donchian_breakout import (
     DonchianBreakoutConfig,
     DonchianBreakoutStrategy,

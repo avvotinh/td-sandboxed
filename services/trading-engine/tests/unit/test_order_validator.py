@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.adapters.zmq_models import Order, OrderSide
-from src.execution.order_validator import OrderValidator, ValidationResult
+from src.live.adapters.zmq_models import Order, OrderSide
+from src.live.execution.order_validator import OrderValidator, ValidationResult
 from src.rules.base_rule import RuleAction, RuleResult
 from src.rules.engine import RuleEngine
 

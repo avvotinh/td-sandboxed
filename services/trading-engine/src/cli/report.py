@@ -83,7 +83,7 @@ def generate(
         until_date = date.fromisoformat(until)
 
     # Gather report data
-    from ..reports.data_gatherer import ReportDataGatherer
+    from src.live.reports.data_gatherer import ReportDataGatherer
 
     gatherer = ReportDataGatherer()
 
@@ -95,14 +95,14 @@ def generate(
 
     # Dashboard comparison mode
     if compare_dashboard:
-        from ..reports.compliance_report import ComplianceReportGenerator
+        from src.live.reports.compliance_report import ComplianceReportGenerator
 
         gen = ComplianceReportGenerator()
         typer.echo(gen.generate_comparison(report_data))
         return
 
     # Generate report in requested format
-    from ..reports.compliance_report import ComplianceReportGenerator
+    from src.live.reports.compliance_report import ComplianceReportGenerator
 
     gen = ComplianceReportGenerator()
     today = date.today().isoformat()

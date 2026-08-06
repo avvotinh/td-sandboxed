@@ -38,7 +38,7 @@ from src.lab.portfolio_equity import read_account_balance
 from src.lab.result import BreachEvent
 from src.rules.base_rule import RuleAction
 from src.rules.engine import RuleEngine
-from src.snapshots.daily_profit_history import DailyProfitHistory
+from src.lab.daily_profit_history import DailyProfitHistory
 from src.kernel.strategies.mixins.session_filter_mixin import SessionFilterMixin
 
 # Story 10.5d — live mode pulls equity from the engine's per-account

@@ -11,11 +11,11 @@ from .state import AccountState
 if TYPE_CHECKING:
     from decimal import Decimal
 
-    from ..adapters.mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
-    from ..rules.assignment_service import RuleAssignmentService
-    from ..rules.base_rule import BaseRule
-    from ..rules.engine import RuleEngine
-    from ..state.redis_state import RedisStateManager
+    from src.live.adapters.mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
+    from src.rules.assignment_service import RuleAssignmentService
+    from src.rules.base_rule import BaseRule
+    from src.rules.engine import RuleEngine
+    from src.live.state.redis_state import RedisStateManager
     from .risk_registry import RiskStateRegistry
     from .risk_state import RiskState
     from .signal_router import SignalRouter
@@ -223,7 +223,7 @@ class AccountManager:
 
             # Create RuleEngine for the account (Story 4.1)
             if rules:
-                from ..rules.engine_factory import RuleEngineFactory
+                from src.rules.engine_factory import RuleEngineFactory
 
                 engine = RuleEngineFactory.create_for_account(account_id, rules)
                 self._rule_engines[account_id] = engine

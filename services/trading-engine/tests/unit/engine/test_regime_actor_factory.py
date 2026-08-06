@@ -17,7 +17,7 @@ from src.config.firm_profile import (
     RegimeConfig,
     RegimeThresholds,
 )
-from src.engine.actors import build_regime_actor
+from src.lab.actors import build_regime_actor
 from src.kernel.regime.actor import RegimeActor
 from src.kernel.regime.classifier import RuleBasedRegimeClassifier
 from src.kernel.regime.hysteresis import HysteresisFilter

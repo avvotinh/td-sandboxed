@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.snapshots.daily_profit_history import DailyProfitHistory
+from src.lab.daily_profit_history import DailyProfitHistory
 
 
 class TestDailyProfitHistoryRecordAndQuery:

@@ -20,9 +20,9 @@ from nautilus_trader.model.objects import Quantity
 from nautilus_trader.model.orders import LimitOrder, MarketOrder
 from nautilus_trader.model.objects import Price
 
-from src.adapters.zmq_models import OrderResult, OrderStatus
-from src.engine.clients.submit_dispatcher import dispatch_submit_order
-from src.execution.exceptions import OrderBlockedError
+from src.live.adapters.zmq_models import OrderResult, OrderStatus
+from src.live.clients.submit_dispatcher import dispatch_submit_order
+from src.live.execution.exceptions import OrderBlockedError
 
 
 VENUE = Venue("MT5")

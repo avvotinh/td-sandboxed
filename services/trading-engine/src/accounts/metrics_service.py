@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from .metrics import AccountMetrics
 
 if TYPE_CHECKING:
-    from ..state.redis_state import RedisStateManager
+    from src.live.state.redis_state import RedisStateManager
     from .account_manager import AccountManager
     from .pnl_registry import PnLTrackerRegistry
     from .risk_registry import RiskStateRegistry

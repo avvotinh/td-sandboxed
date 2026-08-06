@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from src.accounts.models import AccountConfig, AccountType, MT5Config, SignalFilter
-from src.adapters.mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
-from src.adapters.zmq_adapter import ZmqAdapter
+from src.live.adapters.mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
+from src.live.adapters.zmq_adapter import ZmqAdapter
 
 
 @pytest.fixture

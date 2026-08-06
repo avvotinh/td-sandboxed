@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
-from src.adapters.zmq_adapter import ZmqAdapter
-from src.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
-from src.orders.order_gateway import OrderGateway
+from src.live.adapters.zmq_adapter import ZmqAdapter
+from src.live.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
+from src.live.orders.order_gateway import OrderGateway
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +162,7 @@ class _RecordingValidator:
         self.calls: list[tuple[Order, Any]] = []
 
     async def validate_order(self, order: Order, account_state: Any):  # noqa: ANN401
-        from src.execution.order_validator import ValidationResult
+        from src.live.execution.order_validator import ValidationResult
 
         self.calls.append((order, account_state))
         return ValidationResult(
@@ -195,7 +195,7 @@ class TestValidatedAdapterAcceptsAnyGateway:
 
     @pytest.mark.asyncio
     async def test_stub_gateway_routes_through_validation(self) -> None:
-        from src.execution.validated_adapter import ValidatedZmqAdapter
+        from src.live.execution.validated_adapter import ValidatedZmqAdapter
 
         gw = _StubOrderGateway()
         await gw.connect()

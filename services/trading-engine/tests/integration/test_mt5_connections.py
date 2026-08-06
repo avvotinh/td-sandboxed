@@ -19,8 +19,8 @@ import pytest
 
 from src.accounts.account_manager import AccountManager
 from src.accounts.models import AccountConfig, AccountsConfig, AccountType, MT5Config, SignalFilter
-from src.adapters.mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
-from src.adapters.zmq_adapter import ZmqAdapter
+from src.live.adapters.mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
+from src.live.adapters.zmq_adapter import ZmqAdapter
 
 
 def create_test_account(

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 from nautilus_trader.live.execution_client import LiveExecutionClient
 
-from src.engine.clients.zmq_execution_client import ZmqExecutionClient
+from src.live.clients.zmq_execution_client import ZmqExecutionClient
 
 
 def _make_uninitialised_client() -> ZmqExecutionClient:
@@ -99,7 +99,7 @@ async def test_submit_order_delegates_to_dispatcher(monkeypatch) -> None:
         captured["clock"] = clock
 
     monkeypatch.setattr(
-        "src.engine.clients.zmq_execution_client.dispatch_submit_order",
+        "src.live.clients.zmq_execution_client.dispatch_submit_order",
         _fake_dispatch,
     )
 

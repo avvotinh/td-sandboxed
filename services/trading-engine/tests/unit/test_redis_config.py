@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.adapters.redis_config import RedisConfig
+from src.live.adapters.redis_config import RedisConfig
 
 
 class TestRedisConfigDefaults:

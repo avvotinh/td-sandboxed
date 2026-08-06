@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.state.graceful_shutdown import (
+from src.live.state.graceful_shutdown import (
     GracefulShutdown,
     ShutdownPhase,
     ShutdownResult,
@@ -100,7 +100,7 @@ def graceful_shutdown(
 
 def test_graceful_shutdown_imports() -> None:
     """Verify GracefulShutdown can be imported."""
-    from src.state.graceful_shutdown import (
+    from src.live.state.graceful_shutdown import (
         GracefulShutdown,
         ShutdownPhase,
         ShutdownResult,

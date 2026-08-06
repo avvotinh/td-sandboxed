@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.state.snapshot import StateSnapshot
-from src.state.snapshot_service import SnapshotService
+from src.live.state.snapshot import StateSnapshot
+from src.live.state.snapshot_service import SnapshotService
 
 
 @pytest.fixture

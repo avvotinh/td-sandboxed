@@ -21,9 +21,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.accounts.account_manager import AccountManager
-from src.state.crash_recovery import CrashRecoveryManager
-from src.state.graceful_shutdown import GracefulShutdown, ShutdownPhase, ShutdownResult
-from src.state.redis_state import RedisStateManager
+from src.live.state.crash_recovery import CrashRecoveryManager
+from src.live.state.graceful_shutdown import GracefulShutdown, ShutdownPhase, ShutdownResult
+from src.live.state.redis_state import RedisStateManager
 
 
 @pytest.fixture
@@ -174,7 +174,7 @@ class TestStateSnapshotsPersisted:
     ):
         """Final snapshot should be persisted to Redis during shutdown."""
         # Create a mock snapshot service that saves to Redis
-        from src.state.snapshot import StateSnapshot
+        from src.live.state.snapshot import StateSnapshot
         from datetime import datetime, timezone
 
         # Create test snapshot

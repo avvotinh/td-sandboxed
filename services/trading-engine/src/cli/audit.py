@@ -90,7 +90,7 @@ async def _query_trades(
     """Query trades from TimescaleDB."""
     from sqlalchemy import select
 
-    from ..orders.db_models import TradeRecord
+    from src.live.orders.db_models import TradeRecord
 
     stmt = select(TradeRecord).where(
         TradeRecord.account_id == account_id,
@@ -116,7 +116,7 @@ async def _query_violations(
     """Query rule violations from TimescaleDB."""
     from sqlalchemy import select
 
-    from ..rules.violation_db_writer import RuleViolationModel
+    from src.rules.violation_db_writer import RuleViolationModel
 
     stmt = (
         select(RuleViolationModel)
@@ -144,7 +144,7 @@ async def _query_snapshots(
     """Query account snapshots from TimescaleDB."""
     from sqlalchemy import select
 
-    from ..snapshots.models import AccountSnapshotModel
+    from src.live.snapshots.models import AccountSnapshotModel
 
     stmt = select(AccountSnapshotModel).where(
         AccountSnapshotModel.account_id == account_id,

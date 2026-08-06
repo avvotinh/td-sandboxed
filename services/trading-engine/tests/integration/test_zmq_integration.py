@@ -17,8 +17,8 @@ import os
 
 import pytest
 
-from src.adapters.zmq_adapter import ZmqAdapter, ZmqConfig
-from src.adapters.zmq_models import Order, OrderSide
+from src.live.adapters.zmq_adapter import ZmqAdapter, ZmqConfig
+from src.live.adapters.zmq_models import Order, OrderSide
 
 # Check if mt5-bridge is available for integration tests
 MT5_BRIDGE_HOST = os.getenv("MT5_BRIDGE_HOST", "localhost")

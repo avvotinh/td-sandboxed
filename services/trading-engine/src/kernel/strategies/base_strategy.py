@@ -19,7 +19,7 @@ from nautilus_trader.model.events import PositionClosed, PositionOpened
 from nautilus_trader.trading.strategy import Strategy
 
 from src.kernel.instruments.contract_specs import get_contract_spec
-from src.orders.signal import SignalType
+from src.kernel.signal import SignalType
 from src.kernel.regime.states import RegimeState
 from src.kernel.strategies.config import BaseStrategyConfig
 from src.kernel.strategies.mixins.atr_stop_mixin import ATRStopMixin

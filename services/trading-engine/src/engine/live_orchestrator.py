@@ -28,14 +28,14 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from ..orders.trade_db_writer import TradeDBWriter
-from ..rules.violation_service import ViolationService
-from ..state.cold_storage_service import ColdStorageService
+from src.live.orders.trade_db_writer import TradeDBWriter
+from src.rules.violation_service import ViolationService
+from src.live.state.cold_storage_service import ColdStorageService
 from nautilus_trader.model.identifiers import Venue
 
 from .account_session import LiveAccountSession, SessionState
-from .actors import build_compliance_actor, build_regime_actor
-from .clients.bar_translator import make_bar_type
+from src.lab.actors import build_compliance_actor, build_regime_actor
+from src.live.clients.bar_translator import make_bar_type
 from .collaborators import LiveServiceBundle
 from .node_factory import (
     DEFAULT_VENUE_NAME,
@@ -47,19 +47,19 @@ if TYPE_CHECKING:
     from nautilus_trader.common.actor import Actor
     from nautilus_trader.live.node import TradingNode
 
-    from ..accounts.account_manager import AccountManager
-    from ..accounts.models import AccountConfig
-    from ..accounts.pnl_registry import PnLTrackerRegistry
-    from ..accounts.risk_registry import RiskStateRegistry
-    from ..audit.audit_service import AuditService
+    from src.accounts.account_manager import AccountManager
+    from src.accounts.models import AccountConfig
+    from src.accounts.pnl_registry import PnLTrackerRegistry
+    from src.accounts.risk_registry import RiskStateRegistry
+    from src.live.audit.audit_service import AuditService
     from src.lab.prop_firm_actor import LiveEquityProvider
-    from ..config.firm_registry import FirmRegistry
-    from ..rules.audit_logger import AuditEntry
-    from ..execution.validated_adapter import ValidatedZmqAdapter
+    from src.config.firm_registry import FirmRegistry
+    from src.rules.audit_logger import AuditEntry
+    from src.live.execution.validated_adapter import ValidatedZmqAdapter
     from src.kernel.regime.actor import RegimeAuditHook
     from src.kernel.regime.state_store import RegimeStateStore
-    from ..rules.assignment_service import RuleAssignmentService
-    from ..state.redis_state import RedisStateManager
+    from src.rules.assignment_service import RuleAssignmentService
+    from src.live.state.redis_state import RedisStateManager
 
 logger = logging.getLogger(__name__)
 
@@ -463,7 +463,7 @@ class LiveOrchestrator:
         # Local import — RuleEngine pulls in heavy collaborators we
         # don't want at module import time for unit tests that use
         # ``EngineConfig.empty()``.
-        from ..rules.engine import RuleEngine
+        from src.rules.engine import RuleEngine
 
         rule_engine = RuleEngine(account_id=account_id, rules=rules)
 
@@ -597,7 +597,7 @@ class LiveOrchestrator:
         # account); a corrupt / unconfigured registry (FirmProfileLoadError,
         # FirmRegistryNotConfiguredError) is a deployment fault that must
         # surface, so catch only FirmNotFoundError.
-        from ..config.firm_registry import FirmNotFoundError
+        from src.config.firm_registry import FirmNotFoundError
 
         try:
             profile = self._firm_registry.get(account.firm_id)

@@ -19,7 +19,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ..rules.parser import RuleParseError, RuleParser
+from src.rules.parser import RuleParseError, RuleParser
 from .firm_profile import (
     AccountPhase,
     AccountProduct,

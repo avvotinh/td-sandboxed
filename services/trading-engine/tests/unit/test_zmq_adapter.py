@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.adapters.zmq_adapter import _ConnectionState, ZmqAdapter, ZmqConfig
-from src.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus, Tick
+from src.live.adapters.zmq_adapter import _ConnectionState, ZmqAdapter, ZmqConfig
+from src.live.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus, Tick
 
 
 class TestZmqConfig:

@@ -20,10 +20,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
-from src.execution.exceptions import OrderBlockedError
-from src.execution.exposure_reservation import ReservationResult
-from src.execution.validated_adapter import ValidatedZmqAdapter
+from src.live.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
+from src.live.execution.exceptions import OrderBlockedError
+from src.live.execution.exposure_reservation import ReservationResult
+from src.live.execution.validated_adapter import ValidatedZmqAdapter
 
 
 # --------------------------------------------------------------------------

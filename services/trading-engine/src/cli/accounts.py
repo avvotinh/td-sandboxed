@@ -9,18 +9,18 @@ import typer
 from sqlalchemy.exc import SQLAlchemyError
 from tabulate import tabulate
 
-from ..accounts.account_manager import AccountManager
-from ..accounts.metrics_service import AccountMetricsService
-from ..accounts.phase_promotion import (
+from src.accounts.account_manager import AccountManager
+from src.accounts.metrics_service import AccountMetricsService
+from src.accounts.phase_promotion import (
     PhasePromotionError,
     build_phase_transition_audit_entry,
     publish_phase_change_event,
     validate_phase_transition,
 )
-from ..accounts.risk_registry import RiskStateRegistry
-from ..config.firm_registry import FirmRegistry, FirmRegistryError
-from ..config.loader import ConfigLoader, ConfigValidationError
-from ..state.redis_state import RedisStateManager
+from src.accounts.risk_registry import RiskStateRegistry
+from src.config.firm_registry import FirmRegistry, FirmRegistryError
+from src.config.loader import ConfigLoader, ConfigValidationError
+from src.live.state.redis_state import RedisStateManager
 from .constants import STATUS_COLORS
 
 accounts_app = typer.Typer(help="Manage trading accounts")
@@ -380,7 +380,7 @@ def _load_firm_registry_or_exit(firms_dir: str) -> FirmRegistry:
 
 async def _persist_audit_entry(session_factory, entry) -> None:
     """Insert a single AuditEntry directly. Used for one-shot CLI writes."""
-    from ..rules.audit_db_writer import AuditLogModel
+    from src.rules.audit_db_writer import AuditLogModel
 
     async with session_factory() as session:
         async with session.begin():
@@ -607,7 +607,7 @@ def audit_rules_source(
     """
     import json
 
-    from ..accounts.audit_rules_source import classify_accounts
+    from src.accounts.audit_rules_source import classify_accounts
 
     accounts_config, config_path = _load_accounts_config_or_exit()
     report = classify_accounts(accounts_config.accounts)

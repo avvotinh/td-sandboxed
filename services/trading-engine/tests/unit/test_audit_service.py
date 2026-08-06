@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.audit.audit_service import AuditService
+from src.live.audit.audit_service import AuditService
 from src.rules.audit_db_writer import AuditLogModel
 from src.rules.audit_logger import AuditEntry, AuditEventType
 

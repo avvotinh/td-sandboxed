@@ -23,7 +23,7 @@ from src.accounts.pnl_tracker import (
     Position,
     get_multiplier,
 )
-from src.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
+from src.live.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
 
 
 @pytest.fixture

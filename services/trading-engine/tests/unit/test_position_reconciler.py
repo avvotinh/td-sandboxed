@@ -19,13 +19,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.adapters.zmq_models import MT5Position
-from src.state.position_reconciler import (
+from src.live.adapters.zmq_models import MT5Position
+from src.live.state.position_reconciler import (
     DiscrepancyType,
     PositionDiscrepancy,
     PositionReconciler,
 )
-from src.state.snapshot import StateSnapshot
+from src.live.state.snapshot import StateSnapshot
 
 
 class TestPositionReconciler:

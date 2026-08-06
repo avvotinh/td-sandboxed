@@ -3,8 +3,8 @@
 import pytest
 from datetime import datetime, timedelta, timezone
 
-from src.adapters.zmq_models import OrderSide
-from src.orders.trade import Trade
+from src.live.adapters.zmq_models import OrderSide
+from src.live.orders.trade import Trade
 
 
 class TestTradeCreation:

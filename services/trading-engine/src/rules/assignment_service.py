@@ -20,8 +20,8 @@ from .override_merger import merge_rule_overrides
 from .parser import RuleParser
 
 if TYPE_CHECKING:
-    from ..accounts.models import AccountConfig
-    from ..config.firm_registry import FirmRegistry
+    from src.accounts.models import AccountConfig
+    from src.config.firm_registry import FirmRegistry
     from .base_rule import BaseRule
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ class RuleAssignmentService:
 
         if assignment.assignment_type == "firm":
             if self._firm_registry is None:
-                from ..config.firm_registry import FirmRegistryNotConfiguredError
+                from src.config.firm_registry import FirmRegistryNotConfiguredError
 
                 raise FirmRegistryNotConfiguredError(
                     f"Account '{account.id}' is firm-bound "

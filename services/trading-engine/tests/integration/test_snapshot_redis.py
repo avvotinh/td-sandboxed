@@ -22,9 +22,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.state.redis_state import RedisStateManager
-from src.state.snapshot import StateSnapshot
-from src.state.snapshot_service import SnapshotService
+from src.live.state.redis_state import RedisStateManager
+from src.live.state.snapshot import StateSnapshot
+from src.live.state.snapshot_service import SnapshotService
 
 
 @pytest.fixture

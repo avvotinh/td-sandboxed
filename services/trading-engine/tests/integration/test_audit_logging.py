@@ -25,7 +25,7 @@ from redis.asyncio import Redis
 from typer.testing import CliRunner
 
 from src.cli.main import app
-from src.execution.order_validator import OrderValidator, ValidationResult
+from src.live.execution.order_validator import OrderValidator, ValidationResult
 from src.rules.audit_db_writer import AuditDBWriter, AuditLogModel
 from src.rules.audit_logger import AUDIT_TTL_SECONDS, AuditEntry, AuditLogger
 from src.rules.audit_registry import AuditLoggerRegistry

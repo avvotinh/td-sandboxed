@@ -21,13 +21,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
-from src.orders.db_models import TradeRecord
-from src.orders.execution_service import OrderExecutionService
-from src.orders.position_tracker import PositionTracker
-from src.orders.signal import Signal, SignalType
-from src.orders.trade import Trade
-from src.orders.trade_db_writer import TradeDBWriter
+from src.live.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
+from src.live.orders.db_models import TradeRecord
+from src.live.orders.execution_service import OrderExecutionService
+from src.live.orders.position_tracker import PositionTracker
+from src.kernel.signal import Signal, SignalType
+from src.live.orders.trade import Trade
+from src.live.orders.trade_db_writer import TradeDBWriter
 
 
 class TestTradeAuditIntegration:

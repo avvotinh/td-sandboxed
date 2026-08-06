@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from .account_manager import AccountManager
     from .models import AccountConfig
-    from ..adapters.redis_models import Bar
+    from src.live.adapters.redis_models import Bar
 
 logger = logging.getLogger(__name__)
 

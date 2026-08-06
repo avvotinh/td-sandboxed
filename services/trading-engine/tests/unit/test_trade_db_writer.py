@@ -18,10 +18,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.adapters.zmq_models import OrderSide
-from src.orders.db_models import TradeRecord
-from src.orders.trade import Trade
-from src.orders.trade_db_writer import TradeDBWriter
+from src.live.adapters.zmq_models import OrderSide
+from src.live.orders.db_models import TradeRecord
+from src.live.orders.trade import Trade
+from src.live.orders.trade_db_writer import TradeDBWriter
 
 
 class TestTradeRecord:

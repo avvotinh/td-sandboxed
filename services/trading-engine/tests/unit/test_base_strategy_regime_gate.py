@@ -27,7 +27,7 @@ from nautilus_trader.model.data import BarType
 from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 
-from src.orders.signal import SignalType
+from src.kernel.signal import SignalType
 from src.kernel.regime.decision import RegimeDecision
 from src.kernel.regime.state_store import RegimeStateStore
 from src.kernel.regime.states import RegimeState

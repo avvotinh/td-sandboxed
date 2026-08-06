@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, ClassVar
 
-from ...calendar.calendar_models import HIGH_IMPACT, EventIndex
+from src.calendar.calendar_models import HIGH_IMPACT, EventIndex
 from ..base_rule import RuleAction, RuleResult
 
 logger = logging.getLogger(__name__)

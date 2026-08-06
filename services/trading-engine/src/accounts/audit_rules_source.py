@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Literal
 
-from ..rules.assignment import RuleAssignment
+from src.rules.assignment import RuleAssignment
 
 if False:  # for type checkers — avoids the import cycle on src.accounts.models
     from .models import AccountConfig

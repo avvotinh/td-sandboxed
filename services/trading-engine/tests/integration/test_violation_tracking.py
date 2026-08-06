@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.execution.order_validator import OrderValidator, ValidationResult
+from src.live.execution.order_validator import OrderValidator, ValidationResult
 from src.rules.base_rule import RuleAction, RuleResult
 from src.rules.engine import RuleEngine, RuleEngineResult
 from src.rules.violation import RuleViolation

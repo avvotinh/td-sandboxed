@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.state.cold_storage_writer import ColdStorageWriter
-from src.state.snapshot import StateSnapshot
+from src.live.state.cold_storage_writer import ColdStorageWriter
+from src.live.state.snapshot import StateSnapshot
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def sample_snapshot() -> StateSnapshot:
 @pytest.fixture
 def mock_engine():
     """Create a mock SQLAlchemy async engine."""
-    with patch("src.state.cold_storage_writer.create_async_engine") as mock:
+    with patch("src.live.state.cold_storage_writer.create_async_engine") as mock:
         engine = MagicMock()
         engine.dispose = AsyncMock()
         mock.return_value = engine
@@ -129,7 +129,7 @@ class TestWriteSnapshot:
     ):
         """write_snapshot should create and persist a model."""
         with patch(
-            "src.state.cold_storage_writer.async_sessionmaker"
+            "src.live.state.cold_storage_writer.async_sessionmaker"
         ) as mock_session_maker:
             mock_session_maker.return_value = MagicMock(
                 return_value=mock_session
@@ -147,7 +147,7 @@ class TestWriteSnapshot:
     ):
         """write_snapshot should use transaction context."""
         with patch(
-            "src.state.cold_storage_writer.async_sessionmaker"
+            "src.live.state.cold_storage_writer.async_sessionmaker"
         ) as mock_session_maker:
             mock_session_maker.return_value = MagicMock(
                 return_value=mock_session
@@ -167,7 +167,7 @@ class TestWriteSnapshots:
     async def test_write_snapshots_empty_list(self, mock_engine, mock_session):
         """write_snapshots should handle empty list."""
         with patch(
-            "src.state.cold_storage_writer.async_sessionmaker"
+            "src.live.state.cold_storage_writer.async_sessionmaker"
         ) as mock_session_maker:
             mock_session_maker.return_value = MagicMock(
                 return_value=mock_session
@@ -187,7 +187,7 @@ class TestWriteSnapshots:
         snapshots = [sample_snapshot, sample_snapshot]
 
         with patch(
-            "src.state.cold_storage_writer.async_sessionmaker"
+            "src.live.state.cold_storage_writer.async_sessionmaker"
         ) as mock_session_maker:
             mock_session_maker.return_value = MagicMock(
                 return_value=mock_session
@@ -213,7 +213,7 @@ class TestGetLatestSnapshot:
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         with patch(
-            "src.state.cold_storage_writer.async_sessionmaker"
+            "src.live.state.cold_storage_writer.async_sessionmaker"
         ) as mock_session_maker:
             mock_session_maker.return_value = MagicMock(
                 return_value=mock_session
@@ -229,7 +229,7 @@ class TestGetLatestSnapshot:
         self, mock_engine, mock_session, sample_snapshot: StateSnapshot
     ):
         """get_latest_snapshot should return StateSnapshot when found."""
-        from src.state.snapshot_db_model import StateSnapshotModel
+        from src.live.state.snapshot_db_model import StateSnapshotModel
 
         mock_model = StateSnapshotModel.from_snapshot(sample_snapshot)
         mock_result = MagicMock()
@@ -237,7 +237,7 @@ class TestGetLatestSnapshot:
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         with patch(
-            "src.state.cold_storage_writer.async_sessionmaker"
+            "src.live.state.cold_storage_writer.async_sessionmaker"
         ) as mock_session_maker:
             mock_session_maker.return_value = MagicMock(
                 return_value=mock_session
@@ -260,7 +260,7 @@ class TestGetLatestSnapshot:
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         with patch(
-            "src.state.cold_storage_writer.async_sessionmaker"
+            "src.live.state.cold_storage_writer.async_sessionmaker"
         ) as mock_session_maker:
             mock_session_maker.return_value = MagicMock(
                 return_value=mock_session

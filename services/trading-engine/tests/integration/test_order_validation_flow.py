@@ -19,11 +19,11 @@ import pytest
 
 from src.accounts.risk_registry import RiskStateRegistry
 from src.accounts.risk_state import RiskState
-from src.adapters.zmq_adapter import ZmqAdapter
-from src.adapters.zmq_models import Order, OrderSide
-from src.execution.exceptions import OrderBlockedError
-from src.execution.order_validator import OrderValidator
-from src.execution.validated_adapter import ValidatedZmqAdapter
+from src.live.adapters.zmq_adapter import ZmqAdapter
+from src.live.adapters.zmq_models import Order, OrderSide
+from src.live.execution.exceptions import OrderBlockedError
+from src.live.execution.order_validator import OrderValidator
+from src.live.execution.validated_adapter import ValidatedZmqAdapter
 from src.rules import RuleEngine
 from pathlib import Path as _Path
 

@@ -19,7 +19,7 @@ from src.accounts.pnl_registry import PnLTrackerRegistry
 from src.accounts.pnl_tracker import PnLTracker, Position
 from src.accounts.risk_registry import RiskStateRegistry
 from src.accounts.risk_state import RiskState
-from src.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
+from src.live.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
 
 pytestmark = pytest.mark.asyncio
 
@@ -521,8 +521,8 @@ class TestValidatedAdapterIntegration:
         """Test that send_order_and_wait() correctly notifies PnL tracker."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from src.execution.order_validator import OrderValidator
-        from src.execution.validated_adapter import ValidatedZmqAdapter
+        from src.live.execution.order_validator import OrderValidator
+        from src.live.execution.validated_adapter import ValidatedZmqAdapter
 
         # Create mock ZmqAdapter that returns a filled result
         mock_zmq = MagicMock()

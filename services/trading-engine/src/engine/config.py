@@ -23,17 +23,17 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..accounts.account_manager import AccountManager
-from ..accounts.pnl_registry import PnLTrackerRegistry
-from ..accounts.risk_registry import RiskStateRegistry
-from ..adapters.zmq_adapter import ZmqAdapter
-from ..audit.audit_service import AuditService
-from ..config.firm_registry import FirmRegistry
-from ..execution.exposure_reservation import ExposureReservation
-from ..execution.validated_adapter import ValidatedZmqAdapter
-from ..rules.assignment_service import RuleAssignmentService
-from ..state.redis_state import RedisStateManager
-from ..state.snapshot_service import SnapshotService
+from src.accounts.account_manager import AccountManager
+from src.accounts.pnl_registry import PnLTrackerRegistry
+from src.accounts.risk_registry import RiskStateRegistry
+from src.live.adapters.zmq_adapter import ZmqAdapter
+from src.live.audit.audit_service import AuditService
+from src.config.firm_registry import FirmRegistry
+from src.live.execution.exposure_reservation import ExposureReservation
+from src.live.execution.validated_adapter import ValidatedZmqAdapter
+from src.rules.assignment_service import RuleAssignmentService
+from src.live.state.redis_state import RedisStateManager
+from src.live.state.snapshot_service import SnapshotService
 
 
 class EngineConfigError(ValueError):

@@ -169,7 +169,7 @@ class TestAttachRegime:
         store = RegimeStateStore()
         sentinel = Mock()
         with patch(
-            "src.engine.actors.build_regime_actor", return_value=sentinel
+            "src.lab.actors.build_regime_actor", return_value=sentinel
         ) as build:
             actor = runner.attach_regime(
                 regime_config=_enabled_regime_config(),
@@ -192,7 +192,7 @@ class TestAttachRegime:
         mock_engine = Mock()
         runner._engine = mock_engine
         # build_regime_actor returns None for a disabled config.
-        with patch("src.engine.actors.build_regime_actor", return_value=None):
+        with patch("src.lab.actors.build_regime_actor", return_value=None):
             actor = runner.attach_regime(
                 regime_config=Mock(enabled=False),
                 bar_type="XAUUSD.SIM-5-MINUTE-LAST-EXTERNAL",

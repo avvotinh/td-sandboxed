@@ -10,7 +10,7 @@ from src.kernel.regime.states import RegimeState
 from src.kernel.strategies.registry import StrategyRegistry, register_strategy
 from src.kernel.strategies.base_strategy import BaseStrategy
 from src.kernel.strategies.config import BaseStrategyConfig
-from src.orders.signal import SignalType
+from src.kernel.signal import SignalType
 
 
 class MockStrategy(BaseStrategy):

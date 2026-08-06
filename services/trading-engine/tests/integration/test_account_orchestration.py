@@ -16,7 +16,7 @@ import pytest
 
 from src.accounts.account_manager import AccountManager
 from src.accounts.models import AccountConfig, AccountsConfig, AccountType, MT5Config
-from src.state.redis_state import RedisStateManager
+from src.live.state.redis_state import RedisStateManager
 
 
 # Skip all tests if Redis is not available

@@ -3,9 +3,9 @@
 import pytest
 from datetime import datetime, timezone
 
-from src.adapters.zmq_models import OrderSide
-from src.orders.order import InternalOrder, OrderState
-from src.orders.position_tracker import Position, PositionTracker
+from src.live.adapters.zmq_models import OrderSide
+from src.live.orders.order import InternalOrder, OrderState
+from src.live.orders.position_tracker import Position, PositionTracker
 
 
 class TestPosition:

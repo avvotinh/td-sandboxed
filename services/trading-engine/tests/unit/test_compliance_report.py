@@ -13,9 +13,9 @@ import pytest
 from typer.testing import CliRunner
 
 from src.cli.main import app
-from src.reports.compliance_report import ComplianceReportGenerator
-from src.reports.data_gatherer import _compute_summary
-from src.reports.models import ReportData
+from src.live.reports.compliance_report import ComplianceReportGenerator
+from src.live.reports.data_gatherer import _compute_summary
+from src.live.reports.models import ReportData
 
 runner = CliRunner()
 
@@ -253,7 +253,7 @@ class TestReportDataGatherer:
         """Test gather() returns correct ReportData with mocked DB session."""
         import asyncio
 
-        from src.reports.data_gatherer import ReportDataGatherer
+        from src.live.reports.data_gatherer import ReportDataGatherer
 
         trades = [_make_trade_record()]
         violations = [_make_violation_record()]

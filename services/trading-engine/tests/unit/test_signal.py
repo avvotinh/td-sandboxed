@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime, timezone
 
-from src.orders.signal import Signal, SignalType
+from src.kernel.signal import Signal, SignalType
 
 
 class TestSignalType:

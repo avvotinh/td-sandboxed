@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.adapters.zmq_models import MT5Position
-from src.state.emergency_stop_handler import (
+from src.live.adapters.zmq_models import MT5Position
+from src.live.state.emergency_stop_handler import (
     EMERGENCY_STOP_CHANNEL,
     EMERGENCY_STOP_CONFIRMATION_CHANNEL,
     EmergencyStopHandler,

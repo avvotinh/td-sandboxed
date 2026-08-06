@@ -21,12 +21,12 @@ from src.accounts.pnl_registry import PnLTrackerRegistry
 from src.accounts.risk_manager import AccountRiskManager
 from src.accounts.risk_registry import RiskStateRegistry
 from src.accounts.risk_state import RiskState
-from src.state.daily_pnl_recalculator import (
+from src.live.state.daily_pnl_recalculator import (
     DailyPnLRecalculator,
     RecalculatedPnL,
     RecalculationResult,
 )
-from src.state.redis_state import RedisStateManager
+from src.live.state.redis_state import RedisStateManager
 
 
 @pytest.fixture

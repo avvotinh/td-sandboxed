@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from ..accounts.models import AccountConfig
+    from src.accounts.models import AccountConfig
     from .base_rule import BaseRule
 
 AssignmentType = Literal["firm", "preset", "personal", "none"]
@@ -98,7 +98,7 @@ class RuleAssignment:
         is still constructable for historical-data inspection but
         :class:`AccountConfig` no longer produces it.
         """
-        from ..accounts.models import AccountType
+        from src.accounts.models import AccountType
 
         if account.firm_id and account.product_id and account.phase:
             return cls(

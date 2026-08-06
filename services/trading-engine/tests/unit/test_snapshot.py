@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.state.snapshot import StateSnapshot
+from src.live.state.snapshot import StateSnapshot
 
 
 class TestStateSnapshotInitialization:

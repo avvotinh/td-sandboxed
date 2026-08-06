@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.state.cold_storage_service import ColdStorageService
-from src.state.cold_storage_writer import ColdStorageWriter
-from src.state.snapshot import StateSnapshot
+from src.live.state.cold_storage_service import ColdStorageService
+from src.live.state.cold_storage_writer import ColdStorageWriter
+from src.live.state.snapshot import StateSnapshot
 
 
 @pytest.fixture

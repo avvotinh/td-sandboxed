@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.state.redis_state import RedisStateManager
-from src.state.trading_resumer import (
+from src.live.state.redis_state import RedisStateManager
+from src.live.state.trading_resumer import (
     TradingResumer,
 )
 

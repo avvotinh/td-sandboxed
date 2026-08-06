@@ -19,16 +19,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.adapters.zmq_adapter import ZmqAdapter, ZmqConfig
-from src.adapters.zmq_models import MT5Position
-from src.state.crash_recovery import CrashRecoveryManager
-from src.state.position_reconciler import (
+from src.live.adapters.zmq_adapter import ZmqAdapter, ZmqConfig
+from src.live.adapters.zmq_models import MT5Position
+from src.live.state.crash_recovery import CrashRecoveryManager
+from src.live.state.position_reconciler import (
     DiscrepancyType,
     PositionReconciler,
     run_position_reconciliation,
 )
-from src.state.redis_state import RedisStateManager
-from src.state.snapshot import StateSnapshot
+from src.live.state.redis_state import RedisStateManager
+from src.live.state.snapshot import StateSnapshot
 
 
 def is_redis_available() -> bool:

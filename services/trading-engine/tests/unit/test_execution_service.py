@@ -6,15 +6,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
-from src.orders.execution_service import (
+from src.live.adapters.zmq_models import Order, OrderResult, OrderSide, OrderStatus
+from src.live.orders.execution_service import (
     DuplicateOrderError,
     NoPositionError,
     OrderExecutionService,
 )
-from src.orders.order import InternalOrder, OrderState
-from src.orders.position_tracker import PositionTracker
-from src.orders.signal import Signal, SignalType
+from src.live.orders.order import InternalOrder, OrderState
+from src.live.orders.position_tracker import PositionTracker
+from src.kernel.signal import Signal, SignalType
 
 
 class TestOrderExecutionServiceInit:
@@ -648,7 +648,7 @@ class TestTradeQueries:
         service = service_with_trades
 
         # Add some mock trades
-        from src.orders.trade import Trade
+        from src.live.orders.trade import Trade
 
         service._trades.append(
             Trade(

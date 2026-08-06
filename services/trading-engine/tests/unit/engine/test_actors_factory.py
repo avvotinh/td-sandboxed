@@ -5,7 +5,7 @@ from decimal import Decimal
 from unittest.mock import MagicMock
 
 from src.lab.prop_firm_actor import PropFirmComplianceActor
-from src.engine.actors import build_compliance_actor
+from src.lab.actors import build_compliance_actor
 
 
 def test_returns_prop_firm_compliance_actor() -> None:

@@ -10,7 +10,7 @@ import pytest
 from nautilus_trader.model.data import BarType
 from nautilus_trader.model.identifiers import InstrumentId
 
-from src.orders.signal import SignalType
+from src.kernel.signal import SignalType
 from src.kernel.strategies.bracket_strategy import (
     BracketStrategyConfig,
     BracketStrategyMixin,
