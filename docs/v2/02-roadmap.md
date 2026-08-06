@@ -6,17 +6,17 @@ chạy song song ngay từ đầu. Mỗi phase có exit criteria — không sang
 
 Gap references (G1–G7) xem [00-analysis.md](00-analysis.md) §4.
 
-## P0 — Nền tài liệu & dọn quyết định *(0.5 ngày)*
+## P0 — Nền tài liệu & dọn quyết định *(0.5 ngày)* — ✅ XONG (`08f429f`)
 
 - [x] Tạo `docs/v2/` + bộ tài liệu này.
-- [ ] Đánh dấu deprecated lên đầu `docs/architecture.md`, `docs/prd.md`, `docs/epics.md`
+- [x] Đánh dấu deprecated lên đầu `docs/architecture.md`, `docs/prd.md`, `docs/epics.md`
       (một dòng banner trỏ về `docs/v2/`).
-- [ ] Tạo `docs/v2/decisions.md` từ bảng D1–D7.
-- [ ] Cập nhật `CLAUDE.md` mục Active Technologies + Structure theo v2 (sau khi P-H xong).
+- [x] Tạo `docs/v2/decisions.md` từ bảng D1–D7.
+- [x] Cập nhật `CLAUDE.md` mục Active Technologies + Structure theo v2 (sau khi P-H xong).
 
 **Exit:** người mới đọc `docs/v2/README.md` hiểu được toàn cảnh, không lạc sang docs cũ.
 
-## P1 — Result Contract v2 *(1–2 ngày — keystone, làm đầu tiên)*
+## P1 — Result Contract v2 *(1–2 ngày — keystone, làm đầu tiên)* — ✅ XONG (`ffbc6e0`)
 
 | Task | Chi tiết | Gap |
 |---|---|---|
@@ -31,7 +31,7 @@ Gap references (G1–G7) xem [00-analysis.md](00-analysis.md) §4.
 **Exit:** một lệnh `backtest run` tạo ra file JSON chứa đủ candles-ref + trades + SL path
 + indicators + equity + metrics; test pass.
 
-## P2 — Chart viewer service *(2–3 ngày)*
+## P2 — Chart viewer service *(2–3 ngày)* — ✅ XONG (`3e25a58`)
 
 | Task | Chi tiết |
 |---|---|
@@ -45,7 +45,7 @@ Gap references (G1–G7) xem [00-analysis.md](00-analysis.md) §4.
 **Exit:** `uv run chart-viewer` → mở browser xem được kết quả một run donchian XAUUSD 2y
 với đầy đủ trades/SL/TP/indicators/PnL. **Đây là điểm demo đầu tiên cho user.**
 
-## P3 — Kernel v2 & prune engine *(3–5 ngày)*
+## P3 — Kernel v2 & prune engine *(3–5 ngày)* — 🔵 ĐANG LÀM
 
 | Task | Chi tiết |
 |---|---|
@@ -98,7 +98,7 @@ trailing hoạt động đúng trên live.
 
 **Exit:** chạy tài khoản quỹ với đầy đủ guard, 0 hardcode threshold.
 
-## P-H — Harness redesign *(song song, chi tiết ở [03-harness.md](03-harness.md))*
+## P-H — Harness redesign *(song song, chi tiết ở [03-harness.md](03-harness.md))* — ✅ XONG (`42bf4c8`, `18782a0`)
 
 Thứ tự: cập nhật rules/commands trước (đang gây nhiễu), agents/skills mới theo nhu cầu P1–P4.
 
