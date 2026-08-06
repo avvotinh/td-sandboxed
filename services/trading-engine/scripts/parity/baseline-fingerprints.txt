@@ -1,0 +1,66 @@
+
+donchian-m15.json  [1e03da4b462886b7]
+  trades=1685  equity=47383
+  schema_version   cc11310c456c3690
+  run              ae3bd1d7e886fca3
+  account          b9a6add85f19028f
+  trades           a582c818c21fe002
+  equity_curve     e6fb241573c76736
+  indicators       e526aedb86650c21
+  metrics          3a4dd710917c58f7
+  breaches         4f53cda18c2baa0c
+
+donchian-m5.json  [492bc2e8c758161c]
+  trades=4445  equity=142130
+  schema_version   cc11310c456c3690
+  run              f437254688e61dfb
+  account          32f1243096b84c7f
+  trades           0f13eeef2b8862a0
+  equity_curve     a7f0ec462a527f78
+  indicators       2eda73489457af80
+  metrics          31eceafed247bd31
+  breaches         4f53cda18c2baa0c
+
+mean-reversion-m5.json  [73a0b0e1b9558da0]
+  trades=11119  equity=142130
+  schema_version   cc11310c456c3690
+  run              34371f64661a7849
+  account          f1da8d4a5ede1813
+  trades           5adb6f31ee12fb85
+  equity_curve     cc941d0577f6a81f
+  indicators       b39cff9a03d7aee0
+  metrics          19e2ad9d14858147
+  breaches         4f53cda18c2baa0c
+
+supertrend-m15.json  [bf1a5bf2ced59427]
+  trades=1198  equity=47383
+  schema_version   cc11310c456c3690
+  run              8ed369f6f9eb961c
+  account          b7433e787c5a30bc
+  trades           e88232048e700d3a
+  equity_curve     61b7f4d76e8ad63d
+  indicators       82c220044b53c1f7
+  metrics          f44dd662d8c70053
+  breaches         4f53cda18c2baa0c
+
+supertrend-m5.json  [edbfcfd0dcf63e56]
+  trades=3676  equity=142130
+  schema_version   cc11310c456c3690
+  run              c84f43712409865e
+  account          728504f54b3cb619
+  trades           3a9caea776d2c06a
+  equity_curve     a413f43cb207c92e
+  indicators       ba5477f0ba18fa2e
+  metrics          2b97e8c1cd5f125e
+  breaches         4f53cda18c2baa0c
+
+supertrend-scaleout-m5.json  [522395d6667479fc]
+  trades=3871  equity=142130
+  schema_version   cc11310c456c3690
+  run              ddfdacd79f5de5ea
+  account          c6c09936f2a6652f
+  trades           548b59860c7024dd
+  equity_curve     c9eadcf3ccdf3f5b
+  indicators       17fbbd1b6d161436
+  metrics          8a794c36f3210ad1
+  breaches         4f53cda18c2baa0c
