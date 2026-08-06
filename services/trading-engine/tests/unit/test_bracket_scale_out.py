@@ -19,7 +19,7 @@ from unittest.mock import Mock
 import pytest
 from nautilus_trader.model.enums import OrderSide
 
-from src.strategies.bracket_scale_out import (
+from src.kernel.strategies.bracket_scale_out import (
     BracketScaleOutMixin,
     _ScaleOutSetup,
     _ScaleOutTradeState,
@@ -897,7 +897,7 @@ class TestContractSpecLookupGate:
     def test_no_spec_lookup_in_trail_only_mode(self, monkeypatch) -> None:
         # Trail-only + stray breakeven_offset_pips on an unknown symbol
         # must NOT crash the event path with the fail-loud lookup.
-        import src.strategies.bracket_scale_out as mod
+        import src.kernel.strategies.bracket_scale_out as mod
 
         def _boom(symbol):
             raise ValueError(f"no spec for {symbol}")
@@ -913,7 +913,7 @@ class TestContractSpecLookupGate:
         assert host._scale_state.setup.be_price is None
 
     def test_no_spec_lookup_when_be_disabled(self, monkeypatch) -> None:
-        import src.strategies.bracket_scale_out as mod
+        import src.kernel.strategies.bracket_scale_out as mod
 
         monkeypatch.setattr(
             mod,

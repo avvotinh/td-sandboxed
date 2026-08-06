@@ -109,7 +109,7 @@ def _reset_recording_node() -> None:
 
 def _store():
     """A real ``RegimeStateStore`` (it is a plain holder — no need to mock)."""
-    from src.regime.state_store import RegimeStateStore
+    from src.kernel.regime.state_store import RegimeStateStore
 
     return RegimeStateStore()
 
@@ -393,8 +393,8 @@ class TestRegimeWiring:
         dict. Reloading the module re-registers it idempotently regardless of
         suite ordering.
         """
-        import src.strategies.donchian_breakout as _strategy_module
-        from src.strategies.registry import StrategyRegistry
+        import src.kernel.strategies.donchian_breakout as _strategy_module
+        from src.kernel.strategies.registry import StrategyRegistry
 
         StrategyRegistry.unregister("donchian_breakout")
         importlib.reload(_strategy_module)
@@ -410,7 +410,7 @@ class TestRegimeWiring:
         assert actor in node.actors
 
     def test_regime_state_and_allowlist_injected_into_strategy(self) -> None:
-        from src.strategies.registry import StrategyRegistry
+        from src.kernel.strategies.registry import StrategyRegistry
 
         store = _store()
         node = build_account_trading_node(
@@ -482,7 +482,7 @@ class TestRegimeWiring:
             _spec(regime_actor=None, regime_state=_store())
 
     def test_regime_on_with_unregistered_strategy_raises(self) -> None:
-        from src.strategies.registry import StrategyRegistry
+        from src.kernel.strategies.registry import StrategyRegistry
 
         # donchian_breakout resolves in the backtest registry (so the node
         # builds) but is absent from StrategyRegistry → the allow-list lookup

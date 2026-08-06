@@ -8,11 +8,11 @@ from dataclasses import FrozenInstanceError
 import pytest
 from nautilus_trader.model.data import Bar
 
-from src.indicators.adx import ADX
-from src.indicators.bb_width import BollingerBandWidth
-from src.indicators.ema_slope import EMASlope
-from src.indicators.realized_vol import RealizedVolatility
-from src.regime.features import FeatureExtractor, RegimeFeatures
+from src.kernel.indicators.adx import ADX
+from src.kernel.indicators.bb_width import BollingerBandWidth
+from src.kernel.indicators.ema_slope import EMASlope
+from src.kernel.indicators.realized_vol import RealizedVolatility
+from src.kernel.regime.features import FeatureExtractor, RegimeFeatures
 
 pytestmark = pytest.mark.unit
 

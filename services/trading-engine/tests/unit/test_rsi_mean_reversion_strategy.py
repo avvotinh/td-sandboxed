@@ -11,7 +11,7 @@ from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 
 from src.orders.signal import SignalType
-from src.strategies.rsi_mean_reversion import (
+from src.kernel.strategies.rsi_mean_reversion import (
     RSIMeanReversionConfig,
     RSIMeanReversionStrategy,
 )
@@ -171,7 +171,7 @@ class TestOnReset:
         strategy._rsi = Mock()
         strategy._atr = Mock()
         # Spy on super().on_reset by patching at the class level.
-        from src.strategies.base_strategy import BaseStrategy
+        from src.kernel.strategies.base_strategy import BaseStrategy
         with pytest.MonkeyPatch.context() as mp:
             super_called = []
             mp.setattr(

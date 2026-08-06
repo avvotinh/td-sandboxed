@@ -18,10 +18,10 @@ from src.config.firm_profile import (
     RegimeThresholds,
 )
 from src.engine.actors import build_regime_actor
-from src.regime.actor import RegimeActor
-from src.regime.classifier import RuleBasedRegimeClassifier
-from src.regime.hysteresis import HysteresisFilter
-from src.regime.state_store import RegimeStateStore
+from src.kernel.regime.actor import RegimeActor
+from src.kernel.regime.classifier import RuleBasedRegimeClassifier
+from src.kernel.regime.hysteresis import HysteresisFilter
+from src.kernel.regime.state_store import RegimeStateStore
 from src.rules.audit_logger import AuditEntry
 
 pytestmark = pytest.mark.unit

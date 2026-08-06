@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.instruments.contract_specs import (
+from src.kernel.instruments.contract_specs import (
     ContractSpec,
     get_contract_spec,
     known_symbols,

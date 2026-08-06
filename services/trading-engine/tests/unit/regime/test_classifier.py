@@ -12,9 +12,9 @@ from __future__ import annotations
 import pytest
 
 from src.config.firm_profile import RegimeThresholds
-from src.regime.classifier import RuleBasedRegimeClassifier
-from src.regime.features import RegimeFeatures
-from src.regime.states import RegimeState
+from src.kernel.regime.classifier import RuleBasedRegimeClassifier
+from src.kernel.regime.features import RegimeFeatures
+from src.kernel.regime.states import RegimeState
 
 
 # ---------------------------------------------------------------------------

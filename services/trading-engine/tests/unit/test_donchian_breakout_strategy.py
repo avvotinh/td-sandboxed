@@ -17,7 +17,7 @@ from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
 
 from src.orders.signal import SignalType
-from src.strategies.donchian_breakout import (
+from src.kernel.strategies.donchian_breakout import (
     DonchianBreakoutConfig,
     DonchianBreakoutStrategy,
 )
@@ -398,7 +398,7 @@ class TestTrailIndicatorWiring:
             trailing_atr_multiplier=Decimal("2.1"),
         )
 
-        from src.indicators.supertrend import Supertrend
+        from src.kernel.indicators.supertrend import Supertrend
 
         assert isinstance(strategy._supertrend_trail, Supertrend)
         assert strategy._supertrend_trail.period == 7

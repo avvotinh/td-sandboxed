@@ -8,7 +8,7 @@ import pytest
 from nautilus_trader.indicators.base import Indicator
 from nautilus_trader.model.data import Bar
 
-from src.indicators.ema_slope import EMASlope
+from src.kernel.indicators.ema_slope import EMASlope
 
 pytestmark = pytest.mark.unit
 

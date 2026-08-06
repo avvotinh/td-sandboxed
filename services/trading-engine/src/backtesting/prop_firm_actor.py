@@ -39,7 +39,7 @@ from src.backtesting.result import BreachEvent
 from src.rules.base_rule import RuleAction
 from src.rules.engine import RuleEngine
 from src.snapshots.daily_profit_history import DailyProfitHistory
-from src.strategies.mixins.session_filter_mixin import SessionFilterMixin
+from src.kernel.strategies.mixins.session_filter_mixin import SessionFilterMixin
 
 # Story 10.5d — live mode pulls equity from the engine's per-account
 # state (``PnLTrackerRegistry`` / ``RiskStateRegistry``), not from the

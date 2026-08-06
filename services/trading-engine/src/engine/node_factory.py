@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 
     from ..accounts.models import AccountConfig
     from ..execution.validated_adapter import ValidatedZmqAdapter
-    from ..regime.state_store import RegimeStateStore
+    from src.kernel.regime.state_store import RegimeStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +376,7 @@ def _inject_regime_state(strategy: "Strategy", spec: AccountNodeSpec) -> None:
         return
     # Local import keeps the module-load graph identical to today and mirrors
     # run_backtest's defensive lazy import.
-    from ..strategies.registry import StrategyRegistry
+    from src.kernel.strategies.registry import StrategyRegistry
 
     if not StrategyRegistry.is_registered(spec.strategy_name):
         raise RuntimeError(

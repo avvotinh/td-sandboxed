@@ -15,10 +15,10 @@ from datetime import datetime, timezone
 import pytest
 
 from src.config.firm_profile import RegimeThresholds
-from src.regime.decision import RegimeDecision
-from src.regime.features import RegimeFeatures
-from src.regime.hysteresis import HysteresisFilter
-from src.regime.states import RegimeState
+from src.kernel.regime.decision import RegimeDecision
+from src.kernel.regime.features import RegimeFeatures
+from src.kernel.regime.hysteresis import HysteresisFilter
+from src.kernel.regime.states import RegimeState
 
 BAR_TYPE = "XAUUSD.BROKER-5-MINUTE-LAST-EXTERNAL"
 

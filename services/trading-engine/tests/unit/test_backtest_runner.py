@@ -22,7 +22,7 @@ from src.config.firm_profile import (
     RegimeConfig,
     RegimeThresholds,
 )
-from src.regime.state_store import RegimeStateStore
+from src.kernel.regime.state_store import RegimeStateStore
 
 
 pytestmark = pytest.mark.unit

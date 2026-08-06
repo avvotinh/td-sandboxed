@@ -74,8 +74,8 @@ from nautilus_trader.model.enums import AccountType, OmsType
 from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.model.objects import Money, Price, Quantity
 
-import src.strategies.bollinger_mean_reversion as _bollinger_module
-import src.strategies.donchian_breakout as _donchian_module
+import src.kernel.strategies.bollinger_mean_reversion as _bollinger_module
+import src.kernel.strategies.donchian_breakout as _donchian_module
 from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
 from src.backtesting.runner_facade import (
     _bar_type_for,
@@ -87,12 +87,12 @@ from src.config.firm_profile import (
     RegimeConfig,
     RegimeThresholds,
 )
-from src.regime.builders import build_extractor
-from src.regime.classifier import RuleBasedRegimeClassifier
-from src.regime.hysteresis import HysteresisFilter
-from src.regime.state_store import RegimeStateStore
-from src.regime.states import RegimeState
-from src.strategies.registry import StrategyRegistry
+from src.kernel.regime.builders import build_extractor
+from src.kernel.regime.classifier import RuleBasedRegimeClassifier
+from src.kernel.regime.hysteresis import HysteresisFilter
+from src.kernel.regime.state_store import RegimeStateStore
+from src.kernel.regime.states import RegimeState
+from src.kernel.strategies.registry import StrategyRegistry
 
 pytestmark = pytest.mark.integration
 

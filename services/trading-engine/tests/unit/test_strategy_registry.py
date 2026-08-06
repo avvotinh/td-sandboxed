@@ -6,10 +6,10 @@ from decimal import Decimal
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.data import BarType
 
-from src.regime.states import RegimeState
-from src.strategies.registry import StrategyRegistry, register_strategy
-from src.strategies.base_strategy import BaseStrategy
-from src.strategies.config import BaseStrategyConfig
+from src.kernel.regime.states import RegimeState
+from src.kernel.strategies.registry import StrategyRegistry, register_strategy
+from src.kernel.strategies.base_strategy import BaseStrategy
+from src.kernel.strategies.config import BaseStrategyConfig
 from src.orders.signal import SignalType
 
 

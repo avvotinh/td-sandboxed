@@ -284,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         # default via the field's `default` attribute on the model's
         # FieldInfo entry. New strategies instantiated after this point
         # pick up the new ceiling; nothing pre-existing is touched.
-        from src.strategies.risk_based_position_sizer import RiskBasedSizerConfig
+        from src.kernel.strategies.risk_based_position_sizer import RiskBasedSizerConfig
 
         RiskBasedSizerConfig.model_fields["max_lot_size"].default = Decimal(
             args.max_lot_size

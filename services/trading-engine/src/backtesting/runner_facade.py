@@ -41,7 +41,7 @@ from src.backtesting.job_config import (
 from src.backtesting.recorder.indicator_recorder import IndicatorRecorder
 from src.backtesting.strategy_registry import resolve_strategy
 from src.backtesting.synthetic_bars import generate_bars
-from src.regime.state_store import RegimeStateStore
+from src.kernel.regime.state_store import RegimeStateStore
 
 if TYPE_CHECKING:
     from nautilus_trader.model.data import Bar
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 
     from src.backtesting.result import BacktestResult
     from src.config.firm_profile import RegimeConfig
-    from src.strategies.base_strategy import BaseStrategy
+    from src.kernel.strategies.base_strategy import BaseStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -527,7 +527,7 @@ def run_backtest(
             # Runtime-attr injection (story 15.7 R8): the SAME store the actor
             # publishes to, plus the strategy's declared regime allow-list from
             # the production registry — same source the Epic-11 router used.
-            from src.strategies.registry import StrategyRegistry
+            from src.kernel.strategies.registry import StrategyRegistry
 
             if not StrategyRegistry.is_registered(job.strategy):
                 # The allow-list is a property of the strategy *class*, declared

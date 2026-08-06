@@ -17,7 +17,7 @@ from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 
 from src.orders.signal import SignalType
-from src.strategies.mean_reversion import (
+from src.kernel.strategies.mean_reversion import (
     MeanReversionConfig,
     MeanReversionStrategy,
 )
@@ -254,12 +254,12 @@ class TestRosterRegistration:
         """
         import importlib
 
-        import src.strategies.bollinger_mean_reversion as _bollinger
-        import src.strategies.ma_crossover as _ma
-        import src.strategies.mean_reversion as _mr
-        import src.strategies.rsi_mean_reversion as _rsi
+        import src.kernel.strategies.bollinger_mean_reversion as _bollinger
+        import src.kernel.strategies.ma_crossover as _ma
+        import src.kernel.strategies.mean_reversion as _mr
+        import src.kernel.strategies.rsi_mean_reversion as _rsi
 
-        from src.strategies.registry import StrategyRegistry
+        from src.kernel.strategies.registry import StrategyRegistry
 
         for name, module in [
             ("mean_reversion", _mr),
@@ -272,8 +272,8 @@ class TestRosterRegistration:
         yield
 
     def test_registered_for_ranging(self) -> None:
-        from src.regime.states import RegimeState
-        from src.strategies.registry import StrategyRegistry
+        from src.kernel.regime.states import RegimeState
+        from src.kernel.strategies.registry import StrategyRegistry
 
         assert StrategyRegistry.is_registered("mean_reversion")
         assert StrategyRegistry.get_regimes("mean_reversion") == frozenset(
@@ -284,7 +284,7 @@ class TestRosterRegistration:
         # Track 2.1/2.2 roster contract: the old MR pair stays registered
         # (for A/B re-runs) but never routes; ma_crossover is likewise
         # archived (edge shown to be an artifact of the missing SL).
-        from src.strategies.registry import StrategyRegistry
+        from src.kernel.strategies.registry import StrategyRegistry
 
         assert StrategyRegistry.get_regimes("rsi_mean_reversion") == frozenset()
         assert StrategyRegistry.get_regimes("bollinger_mean_reversion") == frozenset()

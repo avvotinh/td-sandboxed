@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
-from src.strategies.risk_based_position_sizer import (
+from src.kernel.strategies.mixins.risk_sized_mixin import RiskSizedMixin
+from src.kernel.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
     RiskBasedSizerConfig,
 )

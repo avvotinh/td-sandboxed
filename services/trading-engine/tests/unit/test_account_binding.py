@@ -7,14 +7,14 @@ from unittest.mock import Mock
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.data import BarType
 
-from src.strategies.account_binding import (
+from src.kernel.strategies.account_binding import (
     BoundAccount,
     bind_strategy_to_account,
     bind_strategies_to_accounts,
 )
-from src.strategies.base_strategy import BaseStrategy
-from src.strategies.config import BaseStrategyConfig
-from src.strategies.registry import StrategyRegistry
+from src.kernel.strategies.base_strategy import BaseStrategy
+from src.kernel.strategies.config import BaseStrategyConfig
+from src.kernel.strategies.registry import StrategyRegistry
 from src.orders.signal import SignalType
 
 

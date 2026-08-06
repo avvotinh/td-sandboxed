@@ -8,8 +8,8 @@ from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.data import BarType
 
-from src.strategies.base_strategy import BaseStrategy
-from src.strategies.config import BaseStrategyConfig
+from src.kernel.strategies.base_strategy import BaseStrategy
+from src.kernel.strategies.config import BaseStrategyConfig
 from src.orders.signal import SignalType
 
 

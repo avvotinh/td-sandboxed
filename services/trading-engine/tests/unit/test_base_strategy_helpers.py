@@ -24,8 +24,8 @@ from nautilus_trader.model.enums import OrderSide, OrderType
 from nautilus_trader.model.identifiers import InstrumentId
 
 from src.orders.signal import SignalType
-from src.strategies.base_strategy import BaseStrategy
-from src.strategies.config import BaseStrategyConfig
+from src.kernel.strategies.base_strategy import BaseStrategy
+from src.kernel.strategies.config import BaseStrategyConfig
 
 
 pytestmark = pytest.mark.unit

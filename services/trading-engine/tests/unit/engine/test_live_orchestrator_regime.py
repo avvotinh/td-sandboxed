@@ -32,7 +32,7 @@ from src.config.firm_registry import FirmNotFoundError
 from src.engine.account_session import LiveAccountSession
 from src.engine.collaborators import LiveServiceBundle
 from src.engine.live_orchestrator import LiveOrchestrator
-from src.regime.state_store import RegimeStateStore
+from src.kernel.regime.state_store import RegimeStateStore
 
 pytestmark = pytest.mark.unit
 

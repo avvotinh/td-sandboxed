@@ -16,7 +16,7 @@ A direct ``order_factory.market(...)`` + ``submit_order(...)`` is fine —
 that path already routes through ``submit_order`` which the validated
 adapter intercepts.
 
-These tests parse every ``src/strategies/**/*.py`` file with the AST
+These tests parse every ``src/kernel/strategies/**/*.py`` file with the AST
 module so they are robust against formatting changes; only an actual
 new ``order_factory.bracket`` call site (or a new ``submit_order_list``
 caller) outside the documented seam will trigger a failure.
@@ -30,7 +30,7 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-STRATEGIES_DIR = REPO_ROOT / "src" / "strategies"
+STRATEGIES_DIR = REPO_ROOT / "src" / "kernel" / "strategies"
 
 # Files allowed to call the centralised construction primitives. Adding
 # a new entry here is a deliberate architectural decision and should be
@@ -41,11 +41,16 @@ SEAM_FILES = {
 
 
 def _strategy_py_files() -> list[Path]:
-    return sorted(
+    files = sorted(
         p
         for p in STRATEGIES_DIR.rglob("*.py")
         if "__pycache__" not in p.parts
     )
+    # Without this, a moved/renamed strategies package turns every gate below
+    # into a vacuous pass over an empty list — the guard would go quiet exactly
+    # when a reorganize makes it most valuable.
+    assert files, f"no strategy sources found under {STRATEGIES_DIR}"
+    return files
 
 
 def _attribute_calls(tree: ast.AST, attr_name: str) -> list[ast.Call]:

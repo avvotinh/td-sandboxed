@@ -31,15 +31,15 @@ from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 
 from src.orders.signal import SignalType
-from src.strategies.donchian_breakout import (
+from src.kernel.strategies.donchian_breakout import (
     DonchianBreakoutConfig,
     DonchianBreakoutStrategy,
 )
-from src.strategies.mean_reversion import (
+from src.kernel.strategies.mean_reversion import (
     MeanReversionConfig,
     MeanReversionStrategy,
 )
-from src.strategies.supertrend import SupertrendConfig, SupertrendStrategy
+from src.kernel.strategies.supertrend import SupertrendConfig, SupertrendStrategy
 
 
 pytestmark = pytest.mark.unit

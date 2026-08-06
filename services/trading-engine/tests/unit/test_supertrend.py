@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from nautilus_trader.indicators.base import Indicator
 
-from src.indicators.supertrend import Supertrend
+from src.kernel.indicators.supertrend import Supertrend
 
 
 pytestmark = pytest.mark.unit

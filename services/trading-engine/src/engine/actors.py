@@ -28,11 +28,11 @@ from ..backtesting.prop_firm_actor import (
     PropFirmComplianceActorConfig,
 )
 from ..config.firm_profile import RegimeConfig
-from ..regime.actor import RegimeActor, RegimeActorConfig, RegimeAuditHook
-from ..regime.builders import build_extractor
-from ..regime.classifier import RuleBasedRegimeClassifier
-from ..regime.hysteresis import HysteresisFilter
-from ..regime.state_store import RegimeStateStore
+from src.kernel.regime.actor import RegimeActor, RegimeActorConfig, RegimeAuditHook
+from src.kernel.regime.builders import build_extractor
+from src.kernel.regime.classifier import RuleBasedRegimeClassifier
+from src.kernel.regime.hysteresis import HysteresisFilter
+from src.kernel.regime.state_store import RegimeStateStore
 
 if TYPE_CHECKING:
     from nautilus_trader.model.data import BarType
@@ -112,7 +112,7 @@ def build_regime_actor(
     drift between simulation and production.
 
     Single source of truth: the factory builds exactly one
-    :class:`FeatureExtractor` (via :func:`~src.regime.builders.build_extractor`),
+    :class:`FeatureExtractor` (via :func:`~src.kernel.regime.builders.build_extractor`),
     one :class:`RuleBasedRegimeClassifier`, and one :class:`HysteresisFilter` for
     this ``bar_type``, so the regime indicators are computed exactly once. The
     instrument is looked up by the symbol leg of ``bar_type`` (one actor per

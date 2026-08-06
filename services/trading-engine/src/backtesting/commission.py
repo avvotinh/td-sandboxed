@@ -18,7 +18,7 @@ Two converters cover the two call patterns:
 
 Both return a :class:`SpreadAwareFeeModel` (redesign plan Track 1.4):
 it converts the fill quantity from engine units to MT5 lots via the
-symbol's :class:`~src.instruments.contract_specs.ContractSpec` before
+symbol's :class:`~src.kernel.instruments.contract_specs.ContractSpec` before
 charging, so per-lot commission means per LOT — not per unit. The
 Nautilus :class:`PerContractFeeModel` used pre-2026-07 charged per
 engine unit, which (once sizing was fixed) would multiply fees by the

@@ -43,8 +43,8 @@ if TYPE_CHECKING:
     from nautilus_trader.model.identifiers import Venue
 
     from src.config.firm_profile import RegimeConfig
-    from src.regime.actor import RegimeActor, RegimeAuditHook
-    from src.regime.state_store import RegimeStateStore
+    from src.kernel.regime.actor import RegimeActor, RegimeAuditHook
+    from src.kernel.regime.state_store import RegimeStateStore
     from src.rules.engine import RuleEngine
 
 logger = logging.getLogger(__name__)

@@ -40,15 +40,15 @@ from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
 from src.backtesting.runner_facade import _build_instrument
 from src.backtesting.synthetic_bars import generate_bars
 from src.orders.signal import SignalType
-from src.strategies.base_strategy import BaseStrategy
-from src.strategies.bracket_strategy import (
+from src.kernel.strategies.base_strategy import BaseStrategy
+from src.kernel.strategies.bracket_strategy import (
     BracketStrategyConfig,
     BracketStrategyMixin,
     is_atr_unsafe,
 )
-from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
-from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
-from src.strategies.risk_based_position_sizer import (
+from src.kernel.strategies.mixins.atr_stop_mixin import ATRStopMixin
+from src.kernel.strategies.mixins.risk_sized_mixin import RiskSizedMixin
+from src.kernel.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
     RiskBasedSizerConfig,
 )

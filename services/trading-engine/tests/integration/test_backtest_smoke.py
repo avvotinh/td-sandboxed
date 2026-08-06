@@ -24,7 +24,7 @@ from src.backtesting.result import BacktestResult
 from src.backtesting.synthetic_bars import generate_bars
 from src.rules.engine import RuleEngine
 from src.rules.types.drawdown import DailyLossLimitRule
-from src.strategies.ma_crossover import MACrossoverConfig, MACrossoverStrategy
+from src.kernel.strategies.ma_crossover import MACrossoverConfig, MACrossoverStrategy
 
 
 pytestmark = pytest.mark.integration

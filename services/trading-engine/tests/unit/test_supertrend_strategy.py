@@ -17,7 +17,7 @@ from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
 
 from src.orders.signal import SignalType
-from src.strategies.supertrend import SupertrendConfig, SupertrendStrategy
+from src.kernel.strategies.supertrend import SupertrendConfig, SupertrendStrategy
 
 
 pytestmark = pytest.mark.unit
@@ -473,7 +473,7 @@ class TestTrailIndicatorWiring:
             trailing_atr_multiplier=Decimal("2.1"),
         )
 
-        from src.indicators.supertrend import Supertrend
+        from src.kernel.indicators.supertrend import Supertrend
 
         assert isinstance(strategy._supertrend_trail, Supertrend)
         # Indicator picks up the Phase 1 trailing-specific params, not

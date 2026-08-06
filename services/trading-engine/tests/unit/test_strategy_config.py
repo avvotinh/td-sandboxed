@@ -6,7 +6,7 @@ from decimal import Decimal
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.data import BarType
 
-from src.strategies.config import BaseStrategyConfig
+from src.kernel.strategies.config import BaseStrategyConfig
 
 
 class TestBaseStrategyConfig:

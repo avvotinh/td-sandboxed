@@ -28,11 +28,11 @@ from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 
 from src.orders.signal import SignalType
-from src.regime.decision import RegimeDecision
-from src.regime.state_store import RegimeStateStore
-from src.regime.states import RegimeState
-from src.strategies.base_strategy import BaseStrategy
-from src.strategies.config import BaseStrategyConfig
+from src.kernel.regime.decision import RegimeDecision
+from src.kernel.regime.state_store import RegimeStateStore
+from src.kernel.regime.states import RegimeState
+from src.kernel.strategies.base_strategy import BaseStrategy
+from src.kernel.strategies.config import BaseStrategyConfig
 
 pytestmark = pytest.mark.unit
 

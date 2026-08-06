@@ -16,10 +16,10 @@ from typing import Any
 
 import pytest
 
-from src.regime.audit import RegimeAuditAdapter
-from src.regime.decision import RegimeDecision
-from src.regime.features import RegimeFeatures
-from src.regime.states import RegimeState
+from src.kernel.regime.audit import RegimeAuditAdapter
+from src.kernel.regime.decision import RegimeDecision
+from src.kernel.regime.features import RegimeFeatures
+from src.kernel.regime.states import RegimeState
 from src.rules.audit_logger import AuditEntry
 
 BAR_TYPE = "XAUUSD.BROKER-5-MINUTE-LAST-EXTERNAL"

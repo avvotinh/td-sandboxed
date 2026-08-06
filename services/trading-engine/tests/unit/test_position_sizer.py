@@ -3,7 +3,7 @@
 import pytest
 from decimal import Decimal
 
-from src.strategies.position_sizer import PositionSizer, PositionSizerConfig
+from src.kernel.strategies.position_sizer import PositionSizer, PositionSizerConfig
 
 
 class TestPositionSizerConfig:

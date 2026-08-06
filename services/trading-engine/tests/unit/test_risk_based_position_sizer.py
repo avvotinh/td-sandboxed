@@ -6,12 +6,12 @@ from decimal import Decimal
 
 import pytest
 
-from src.strategies.position_sizer import PositionSizer, PositionSizerConfig
-from src.strategies.risk_based_position_sizer import (
+from src.kernel.strategies.position_sizer import PositionSizer, PositionSizerConfig
+from src.kernel.strategies.risk_based_position_sizer import (
     RiskBasedPositionSizer,
     RiskBasedSizerConfig,
 )
-from src.strategies.sizing import PositionSizerProtocol
+from src.kernel.strategies.sizing import PositionSizerProtocol
 
 
 pytestmark = pytest.mark.unit

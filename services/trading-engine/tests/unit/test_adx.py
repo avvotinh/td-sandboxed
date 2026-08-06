@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from nautilus_trader.indicators.base import Indicator
 
-from src.indicators.adx import ADX
+from src.kernel.indicators.adx import ADX
 
 
 pytestmark = pytest.mark.unit

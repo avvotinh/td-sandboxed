@@ -3,7 +3,7 @@
 Story 10.9 (D8) introduced spread-aware fees; the 2026-07 sizing fix
 (redesign plan Track 1.4) made this model **lot-aware**: Nautilus hands
 ``get_commission`` the fill quantity in ENGINE UNITS (1 oz / 1 unit of
-base currency — see :mod:`src.instruments.contract_specs`), while
+base currency — see :mod:`src.kernel.instruments.contract_specs`), while
 commission and spread are quoted per MT5 lot. The model converts
 ``fill_qty / contract_size → lots`` before charging. Pre-fix code
 multiplied per-lot cost by raw units, which is why FX fees "burned"
@@ -16,7 +16,7 @@ Per-fill cost:
     total_usd       = (per_lot_usd + spread_per_lot) × lots
 
 The pip value per lot is DERIVED from the symbol's
-:class:`~src.instruments.contract_specs.ContractSpec` (XAUUSD:
+:class:`~src.kernel.instruments.contract_specs.ContractSpec` (XAUUSD:
 0.01 × 100 = $1/pip/lot; EURUSD: 0.0001 × 100 000 = $10/pip/lot;
 USDJPY: 1000 JPY/pip/lot converted at the fill price) — the old
 caller-supplied ``pip_value_per_lot_usd`` knob is gone for the same
@@ -45,7 +45,7 @@ from nautilus_trader.backtest.models import FeeModel
 from nautilus_trader.model.currencies import USD
 from nautilus_trader.model.objects import Money
 
-from src.instruments.contract_specs import get_contract_spec
+from src.kernel.instruments.contract_specs import get_contract_spec
 
 logger = logging.getLogger(__name__)
 

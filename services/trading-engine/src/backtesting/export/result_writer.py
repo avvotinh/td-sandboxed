@@ -26,7 +26,7 @@ from src.backtesting.job_config import (
     SyntheticDataSpec,
 )
 from src.backtesting.result import BacktestResult, IndicatorSeries, TradeRecord
-from src.instruments.contract_specs import get_contract_spec
+from src.kernel.instruments.contract_specs import get_contract_spec
 
 SCHEMA_VERSION = "2"
 

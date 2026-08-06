@@ -11,7 +11,7 @@ from nautilus_trader.model.data import BarType
 from nautilus_trader.model.identifiers import InstrumentId
 
 from src.orders.signal import SignalType
-from src.strategies.bracket_strategy import (
+from src.kernel.strategies.bracket_strategy import (
     BracketStrategyConfig,
     BracketStrategyMixin,
 )
@@ -108,8 +108,8 @@ class TestBracketHostCompositionGuard:
     not at their first signal mid-backtest."""
 
     def test_missing_risk_sized_mixin_fails_at_definition(self) -> None:
-        from src.strategies.base_strategy import BaseStrategy
-        from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
+        from src.kernel.strategies.base_strategy import BaseStrategy
+        from src.kernel.strategies.mixins.atr_stop_mixin import ATRStopMixin
 
         with pytest.raises(TypeError, match="size_from_risk"):
 
@@ -120,8 +120,8 @@ class TestBracketHostCompositionGuard:
                     ...
 
     def test_missing_atr_stop_mixin_fails_at_definition(self) -> None:
-        from src.strategies.base_strategy import BaseStrategy
-        from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
+        from src.kernel.strategies.base_strategy import BaseStrategy
+        from src.kernel.strategies.mixins.risk_sized_mixin import RiskSizedMixin
 
         with pytest.raises(TypeError, match="calculate_atr_stop"):
 
@@ -132,9 +132,9 @@ class TestBracketHostCompositionGuard:
                     ...
 
     def test_complete_composition_passes(self) -> None:
-        from src.strategies.base_strategy import BaseStrategy
-        from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
-        from src.strategies.mixins.risk_sized_mixin import RiskSizedMixin
+        from src.kernel.strategies.base_strategy import BaseStrategy
+        from src.kernel.strategies.mixins.atr_stop_mixin import ATRStopMixin
+        from src.kernel.strategies.mixins.risk_sized_mixin import RiskSizedMixin
 
         class _Complete(
             BaseStrategy, ATRStopMixin, RiskSizedMixin, BracketStrategyMixin

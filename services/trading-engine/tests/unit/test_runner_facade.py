@@ -23,7 +23,7 @@ from src.backtesting.job_config import (
 )
 from src.backtesting.result import BacktestResult
 from src.backtesting.runner_facade import _normalise_parquet_index
-from src.regime.states import RegimeState
+from src.kernel.regime.states import RegimeState
 
 
 def _base_job(**overrides) -> BacktestJobConfig:
@@ -248,11 +248,11 @@ class TestRunBacktestRegimeWiring:
         with (
             self._facade(runner_facade, fake_result, strategy) as mock_runner,
             patch(
-                "src.strategies.registry.StrategyRegistry.is_registered",
+                "src.kernel.strategies.registry.StrategyRegistry.is_registered",
                 return_value=True,
             ),
             patch(
-                "src.strategies.registry.StrategyRegistry.get_regimes",
+                "src.kernel.strategies.registry.StrategyRegistry.get_regimes",
                 return_value=allow,
             ),
         ):
@@ -281,7 +281,7 @@ class TestRunBacktestRegimeWiring:
         with (
             self._facade(runner_facade, fake_result, strategy),
             patch(
-                "src.strategies.registry.StrategyRegistry.is_registered",
+                "src.kernel.strategies.registry.StrategyRegistry.is_registered",
                 return_value=False,
             ),
             pytest.raises(RuntimeError, match="StrategyRegistry"),

@@ -9,7 +9,7 @@ import pytest
 from nautilus_trader.indicators.base import Indicator
 from nautilus_trader.model.data import Bar
 
-from src.indicators.realized_vol import RealizedVolatility
+from src.kernel.indicators.realized_vol import RealizedVolatility
 
 pytestmark = pytest.mark.unit
 

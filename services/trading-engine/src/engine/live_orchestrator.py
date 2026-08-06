@@ -56,8 +56,8 @@ if TYPE_CHECKING:
     from ..config.firm_registry import FirmRegistry
     from ..rules.audit_logger import AuditEntry
     from ..execution.validated_adapter import ValidatedZmqAdapter
-    from ..regime.actor import RegimeAuditHook
-    from ..regime.state_store import RegimeStateStore
+    from src.kernel.regime.actor import RegimeAuditHook
+    from src.kernel.regime.state_store import RegimeStateStore
     from ..rules.assignment_service import RuleAssignmentService
     from ..state.redis_state import RedisStateManager
 
@@ -654,7 +654,7 @@ class LiveOrchestrator:
 
         # Local import — RegimeStateStore is cheap, but keep the regime module
         # graph off the hot import path for EngineConfig.empty() unit tests.
-        from ..regime.state_store import RegimeStateStore
+        from src.kernel.regime.state_store import RegimeStateStore
 
         store = RegimeStateStore()
         actor = build_regime_actor(

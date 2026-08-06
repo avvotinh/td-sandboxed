@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 from nautilus_trader.model.enums import OrderSide
 
-from src.strategies.mixins.atr_stop_mixin import ATRStopMixin
+from src.kernel.strategies.mixins.atr_stop_mixin import ATRStopMixin
 
 
 pytestmark = pytest.mark.unit

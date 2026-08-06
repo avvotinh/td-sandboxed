@@ -17,11 +17,11 @@ import pytest
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
 
-from src.regime.actor import RegimeActor, RegimeActorConfig
-from src.regime.decision import RegimeDecision
-from src.regime.features import RegimeFeatures
-from src.regime.state_store import RegimeStateStore
-from src.regime.states import RegimeState
+from src.kernel.regime.actor import RegimeActor, RegimeActorConfig
+from src.kernel.regime.decision import RegimeDecision
+from src.kernel.regime.features import RegimeFeatures
+from src.kernel.regime.state_store import RegimeStateStore
+from src.kernel.regime.states import RegimeState
 from src.rules.audit_logger import AuditEntry
 
 pytestmark = pytest.mark.unit

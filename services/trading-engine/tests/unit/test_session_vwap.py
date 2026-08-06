@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 import pytest
 from nautilus_trader.indicators.base import Indicator
 
-from src.indicators.session_vwap import SessionVWAP
+from src.kernel.indicators.session_vwap import SessionVWAP
 
 
 pytestmark = pytest.mark.unit

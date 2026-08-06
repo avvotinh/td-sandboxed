@@ -11,7 +11,7 @@ from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 
 from src.orders.signal import SignalType
-from src.strategies.bollinger_mean_reversion import (
+from src.kernel.strategies.bollinger_mean_reversion import (
     BollingerMeanReversionConfig,
     BollingerMeanReversionStrategy,
 )

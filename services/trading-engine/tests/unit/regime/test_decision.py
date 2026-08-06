@@ -13,9 +13,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.regime.decision import RegimeDecision
-from src.regime.features import RegimeFeatures
-from src.regime.states import RegimeState
+from src.kernel.regime.decision import RegimeDecision
+from src.kernel.regime.features import RegimeFeatures
+from src.kernel.regime.states import RegimeState
 
 
 def _features(**overrides: object) -> RegimeFeatures:

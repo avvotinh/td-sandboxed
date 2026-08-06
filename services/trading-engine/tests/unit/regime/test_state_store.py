@@ -6,10 +6,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-from src.regime.decision import RegimeDecision
-from src.regime.features import RegimeFeatures
-from src.regime.state_store import RegimeSnapshot, RegimeStateStore
-from src.regime.states import RegimeState
+from src.kernel.regime.decision import RegimeDecision
+from src.kernel.regime.features import RegimeFeatures
+from src.kernel.regime.state_store import RegimeSnapshot, RegimeStateStore
+from src.kernel.regime.states import RegimeState
 
 
 def _features() -> RegimeFeatures:

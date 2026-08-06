@@ -12,7 +12,7 @@ from nautilus_trader.model.enums import PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 
 from src.orders.signal import SignalType
-from src.strategies.orb import ORBConfig, ORBStrategy
+from src.kernel.strategies.orb import ORBConfig, ORBStrategy
 
 
 pytestmark = pytest.mark.unit

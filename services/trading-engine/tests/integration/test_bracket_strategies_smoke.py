@@ -215,7 +215,7 @@ def test_supertrend_scale_out_e2e_synthetic_bars() -> None:
     from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
     from src.backtesting.runner_facade import _build_instrument
     from src.backtesting.synthetic_bars import generate_bars
-    from src.strategies.supertrend import SupertrendConfig, SupertrendStrategy
+    from src.kernel.strategies.supertrend import SupertrendConfig, SupertrendStrategy
 
     # The production XAUUSD instrument (size_increment 0.01 oz) accepts
     # the fractional engine-unit sizes the risk sizer produces, and —
@@ -364,7 +364,7 @@ def test_donchian_scale_out_e2e_synthetic_bars() -> None:
     from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
     from src.backtesting.runner_facade import _build_instrument
     from src.backtesting.synthetic_bars import generate_bars
-    from src.strategies.donchian_breakout import (
+    from src.kernel.strategies.donchian_breakout import (
         DonchianBreakoutConfig,
         DonchianBreakoutStrategy,
     )
@@ -483,7 +483,7 @@ def test_ma_crossover_scale_out_e2e_synthetic_bars() -> None:
     from src.backtesting.engine import BacktestRunner, BacktestRunnerConfig
     from src.backtesting.runner_facade import _build_instrument
     from src.backtesting.synthetic_bars import generate_bars
-    from src.strategies.ma_crossover import (
+    from src.kernel.strategies.ma_crossover import (
         MACrossoverConfig,
         MACrossoverStrategy,
     )

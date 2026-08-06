@@ -1,4 +1,4 @@
-"""Smoke tests for indicator re-exports from ``src.indicators``.
+"""Smoke tests for indicator re-exports from ``src.kernel.indicators``.
 
 Verifies:
 - ATR, RSI, Bollinger, Donchian re-export Nautilus classes
@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from nautilus_trader.indicators.base import Indicator
 
-from src.indicators import (
+from src.kernel.indicators import (
     ADX,
     ATR,
     RSI,

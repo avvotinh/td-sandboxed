@@ -47,8 +47,8 @@ from src.engine.collaborators import LiveServiceBundle
 from src.engine.live_orchestrator import LiveOrchestrator
 from src.engine.node_factory import build_account_trading_node
 from src.execution.exceptions import OrderBlockedError
-from src.strategies.base_strategy import BaseStrategy
-from src.strategies.config import BaseStrategyConfig
+from src.kernel.strategies.base_strategy import BaseStrategy
+from src.kernel.strategies.config import BaseStrategyConfig
 
 
 pytestmark = pytest.mark.integration

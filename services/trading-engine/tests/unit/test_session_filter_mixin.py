@@ -6,7 +6,7 @@ from datetime import UTC, datetime, time
 
 import pytest
 
-from src.strategies.mixins.session_filter_mixin import SessionFilterMixin
+from src.kernel.strategies.mixins.session_filter_mixin import SessionFilterMixin
 
 
 pytestmark = pytest.mark.unit

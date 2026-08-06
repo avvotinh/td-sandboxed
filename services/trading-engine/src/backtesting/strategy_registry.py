@@ -3,7 +3,7 @@
 Maps a strategy name (as used in backtest job YAML) to the pair of
 (config class, strategy class) needed to instantiate the strategy for a
 Nautilus ``BacktestEngine``. Separate from the live-trading
-``src.strategies.registry.StrategyRegistry`` on purpose: the live
+``src.kernel.strategies.registry.StrategyRegistry`` on purpose: the live
 registry dispatches by name only, whereas backtests need to build the
 strategy config from a plain dict (sweep parameter overrides) which
 requires the config class too.
@@ -14,30 +14,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from src.strategies.bollinger_mean_reversion import (
+from src.kernel.strategies.bollinger_mean_reversion import (
     BollingerMeanReversionConfig,
     BollingerMeanReversionStrategy,
 )
-from src.strategies.donchian_breakout import (
+from src.kernel.strategies.donchian_breakout import (
     DonchianBreakoutConfig,
     DonchianBreakoutStrategy,
 )
-from src.strategies.ma_crossover import MACrossoverConfig, MACrossoverStrategy
-from src.strategies.mean_reversion import (
+from src.kernel.strategies.ma_crossover import MACrossoverConfig, MACrossoverStrategy
+from src.kernel.strategies.mean_reversion import (
     MeanReversionConfig,
     MeanReversionStrategy,
 )
-from src.strategies.orb import ORBConfig, ORBStrategy
-from src.strategies.rsi_mean_reversion import (
+from src.kernel.strategies.orb import ORBConfig, ORBStrategy
+from src.kernel.strategies.rsi_mean_reversion import (
     RSIMeanReversionConfig,
     RSIMeanReversionStrategy,
 )
-from src.strategies.supertrend import SupertrendConfig, SupertrendStrategy
+from src.kernel.strategies.supertrend import SupertrendConfig, SupertrendStrategy
 
 if TYPE_CHECKING:
     from nautilus_trader.config import StrategyConfig
 
-    from src.strategies.base_strategy import BaseStrategy
+    from src.kernel.strategies.base_strategy import BaseStrategy
 
 
 class UnknownStrategyError(KeyError):

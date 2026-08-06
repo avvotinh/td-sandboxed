@@ -14,10 +14,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.indicators.supertrend import Supertrend
+from src.kernel.indicators.supertrend import Supertrend
 from src.orders.signal import SignalType
-from src.strategies.ma_crossover import MACrossoverConfig, MACrossoverStrategy
-from src.strategies.registry import StrategyRegistry
+from src.kernel.strategies.ma_crossover import MACrossoverConfig, MACrossoverStrategy
+from src.kernel.strategies.registry import StrategyRegistry
 
 
 class TestMACrossoverConfig:

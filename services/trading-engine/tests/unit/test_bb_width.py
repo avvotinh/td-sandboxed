@@ -8,7 +8,7 @@ import pytest
 from nautilus_trader.indicators.base import Indicator
 from nautilus_trader.model.data import Bar
 
-from src.indicators.bb_width import BollingerBandWidth
+from src.kernel.indicators.bb_width import BollingerBandWidth
 
 pytestmark = pytest.mark.unit
 
