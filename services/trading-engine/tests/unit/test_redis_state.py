@@ -258,7 +258,7 @@ class TestRiskStateMethods:
     @pytest.mark.asyncio
     async def test_save_risk_state(self, redis_manager, mock_redis_client_with_hash):
         """Test saving risk state to Redis hash."""
-        from src.accounts.risk_state import RiskState
+        from src.live.state.risk_state import RiskState
 
         redis_manager._client = mock_redis_client_with_hash
         state = RiskState(
@@ -355,7 +355,7 @@ class TestRiskStateMethods:
     @pytest.mark.asyncio
     async def test_risk_state_key_pattern(self, redis_manager, mock_redis_client_with_hash):
         """Test risk state keys follow pattern risk:{account_id}:state."""
-        from src.accounts.risk_state import RiskState
+        from src.live.state.risk_state import RiskState
 
         redis_manager._client = mock_redis_client_with_hash
 

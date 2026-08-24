@@ -21,13 +21,37 @@ from src.live.state.cold_storage_writer import ColdStorageWriter
 from src.live.state.snapshot import StateSnapshot
 
 
-@pytest.fixture
-def database_url():
+def _database_url() -> str:
     """Get TimescaleDB URL from environment or use default test URL."""
     return os.getenv(
         "TEST_DATABASE_URL",
         "postgresql+asyncpg://postgres:password@localhost:5432/trading",
     )
+
+
+def _is_timescale_available() -> bool:
+    """Probe the test database socket so the suite skips instead of failing without infra."""
+    import socket
+    from urllib.parse import urlsplit
+
+    parsed = urlsplit(_database_url())
+    try:
+        with socket.create_connection((parsed.hostname, parsed.port or 5432), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+# The research loop runs without Docker (decision D6) — these are live-path tests.
+pytestmark = pytest.mark.skipif(
+    not _is_timescale_available(),
+    reason="TimescaleDB not available for integration tests",
+)
+
+
+@pytest.fixture
+def database_url():
+    return _database_url()
 
 
 @pytest.fixture

@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.accounts.risk_registry import RiskStateRegistry
-from src.accounts.risk_state import RiskState
+from src.live.state.risk_registry import RiskStateRegistry
+from src.live.state.risk_state import RiskState
 
 
 @pytest.fixture

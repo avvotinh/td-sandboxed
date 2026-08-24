@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from decimal import Decimal
 
-    from src.accounts.risk_state import RiskState
+    from src.live.state.risk_state import RiskState
     from .snapshot import StateSnapshot
 
 
@@ -222,7 +222,7 @@ class RedisStateManager:
         Returns:
             RiskState if found, None otherwise
         """
-        from src.accounts.risk_state import RiskState
+        from src.live.state.risk_state import RiskState
 
         key = f"risk:{account_id}:state"
         data = await self.client.hgetall(key)

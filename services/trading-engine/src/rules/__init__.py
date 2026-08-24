@@ -44,8 +44,6 @@ Story 4.8 Exports:
 Full rule implementations in Epic 4+.
 """
 
-from .assignment import RuleAssignment
-from .assignment_service import RuleAssignmentService
 from .audit_db_writer import AuditDBWriter, AuditLogModel
 from .audit_logger import (
     AUDIT_TTL_SECONDS,
@@ -86,8 +84,6 @@ __all__ = [
     "MinTradingDaysRule",
     "WeeklyTargetRule",
     # Assignment
-    "RuleAssignment",
-    "RuleAssignmentService",
     # Loaders
     "CustomRuleLoader",
     "RuleParser",

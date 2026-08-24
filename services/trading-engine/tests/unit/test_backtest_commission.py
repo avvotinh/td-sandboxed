@@ -18,6 +18,8 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import yaml
+
 import pytest
 
 from nautilus_trader.model.currencies import EUR, USD
@@ -41,7 +43,6 @@ from src.config.firm_profile import (
     FirmProfile,
     SessionConfig,
 )
-from src.config.firm_registry import FirmRegistry
 from src.rules.types.drawdown import DailyLossLimitRule
 
 
@@ -269,10 +270,20 @@ class TestRealFtmoYamlCommission:
     def test_ftmo_resolves_to_per_lot_fee_of_7_usd(
         self, firms_dir: Path
     ) -> None:
-        registry = FirmRegistry(firms_dir)
-        registry.load()
-        ftmo = registry.get("ftmo")
+        raw = yaml.safe_load((firms_dir / "ftmo.yaml").read_text(encoding="utf-8"))
 
+        # FirmRegistry used to build a FirmProfile from this YAML; it went with
+        # src/accounts/ in P3.2. The value guard is what mattered here, so read
+        # the block directly and feed the resolution path a profile built the
+        # same way every other test in this module does.
+        assert raw["commission"]["per_lot_usd"] == 7.0
+
+        ftmo = _make_firm(
+            product=_make_product(product_id="challenge"),
+            firm_commission=CommissionProfile(
+                per_lot_usd=raw["commission"]["per_lot_usd"]
+            ),
+        )
         profile = resolve_commission_profile(ftmo, "challenge")
         assert profile is not None
         assert profile.per_lot_usd == 7.0

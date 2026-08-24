@@ -49,6 +49,8 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 
+import yaml
+
 from src.lab.dataset.baseline_harness import (
     BaselineConfig,
     StrategySpec,
@@ -62,8 +64,11 @@ from src.lab.dataset.comparison_report import (
 from src.lab.dataset.manifest import DatasetManifest
 from src.lab.job_config import PropFirmSpec, VenueSpec
 from src.lab.result import BacktestResult
-from src.config.firm_profile import RegimeConfig
-from src.config.firm_registry import FirmRegistry
+from src.config.firm_profile import (
+    InstrumentRegimeConfig,
+    RegimeConfig,
+    RegimeThresholds,
+)
 
 
 ParamValue = int | float | str | bool | None
@@ -181,24 +186,55 @@ _CELLS: dict[str, tuple[Cell, ...]] = {
 def _load_regime_config(firms_dir: Path, symbol: str) -> RegimeConfig:
     """Load the ftmo regime block and flip it ON in-memory.
 
-    Raises ``ValueError`` (caught in ``main`` → stderr + exit 1) when the
+    Reads the YAML directly. ``FirmRegistry`` used to do this, but it was a
+    multi-firm registry and went with ``src/accounts/`` in P3.2 — only this
+    one block is still needed, and only for calibration.
+
+    Raises ``ValueError`` (caught in ``main`` -> stderr + exit 1) when the
     block is missing or has no calibration for ``symbol`` — classifying
     against another instrument's thresholds would silently invalidate
     the whole ablation.
     """
-    registry = FirmRegistry(firms_dir)
-    registry.load()
-    regime = registry.get("ftmo").regime_classifier
-    if regime is None:
+    ftmo_yaml = Path(firms_dir) / "ftmo.yaml"
+    if not ftmo_yaml.is_file():
+        raise ValueError(f"no ftmo.yaml under {firms_dir}")
+
+    raw = yaml.safe_load(ftmo_yaml.read_text(encoding="utf-8")) or {}
+    block = raw.get("regime_classifier")
+    if not block:
         raise ValueError(
             f"ftmo.yaml in {firms_dir} has no regime_classifier block"
         )
-    if symbol not in regime.instruments:
+
+    instruments_raw = block.get("instruments") or {}
+    if symbol not in instruments_raw:
         raise ValueError(
             f"regime_classifier has no calibration for {symbol!r} "
-            f"(available: {sorted(regime.instruments)})"
+            f"(available: {sorted(instruments_raw)})"
         )
-    return dataclasses.replace(regime, enabled=True)
+
+    instruments = {
+        name: InstrumentRegimeConfig(
+            timeframe=spec["timeframe"],
+            thresholds=RegimeThresholds(**spec["thresholds"]),
+            adx_period=spec["adx_period"],
+            bb_period=spec["bb_period"],
+            bb_stddev=spec["bb_stddev"],
+            bb_baseline_window=spec["bb_baseline_window"],
+            realized_vol_window=spec["realized_vol_window"],
+            ema_slope_period=spec["ema_slope_period"],
+            ema_slope_lookback=spec["ema_slope_lookback"],
+        )
+        for name, spec in instruments_raw.items()
+    }
+    # enabled=True: the shipped YAML stays default-OFF; only this run flips it.
+    return RegimeConfig(
+        enabled=True,
+        confirmation_bars=block["confirmation_bars"],
+        warmup_bars=block["warmup_bars"],
+        feature_window=block["feature_window"],
+        instruments=instruments,
+    )
 
 
 def _build_strategies(timeframe: str, *, arm: str) -> tuple[StrategySpec, ...]:

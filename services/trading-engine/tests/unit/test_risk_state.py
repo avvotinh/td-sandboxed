@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.accounts.risk_state import RiskState
+from src.live.state.risk_state import RiskState
 
 
 class TestRiskStateInitialization:

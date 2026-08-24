@@ -178,7 +178,7 @@ class _RiskRegistryStub:
     def get_risk_state(self, account_id: str) -> Any:  # noqa: ANN401
         from decimal import Decimal
 
-        from src.accounts.risk_state import RiskState
+        from src.live.state.risk_state import RiskState
 
         return RiskState(
             daily_pnl=Decimal("0"),

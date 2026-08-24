@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.accounts.risk_registry import RiskStateRegistry
-from src.accounts.risk_state import RiskState
+from src.live.state.risk_registry import RiskStateRegistry
+from src.live.state.risk_state import RiskState
 from src.live.adapters.zmq_adapter import ZmqAdapter
 from src.live.adapters.zmq_models import Order, OrderSide
 from src.live.execution.exceptions import OrderBlockedError

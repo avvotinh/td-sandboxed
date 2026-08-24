@@ -26,18 +26,19 @@ Execution flow:
 
 import logging
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable
 
-from src.accounts.risk_registry import RiskStateRegistry
-from src.accounts.risk_state import RiskState
+from src.live.state.risk_registry import RiskStateRegistry
+from src.live.state.risk_state import RiskState
 from ..adapters.zmq_models import Order, OrderResult
 from ..orders.order_gateway import OrderGateway
 from .exceptions import OrderBlockedError
 from .exposure_reservation import ExposureReservation, ReservationResult
 from .order_validator import OrderValidator
 
-if TYPE_CHECKING:
-    from src.accounts.pnl_registry import PnLTrackerRegistry
+# The P&L registry was a per-account registry that went with src/accounts/
+# (P3.2). It is an optional collaborator, duck-typed here; P5 reintroduces
+# a single-account equivalent.
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ class ValidatedZmqAdapter:
         zmq_adapter: OrderGateway,
         order_validator: OrderValidator,
         risk_registry: RiskStateRegistry,
-        pnl_registry: "PnLTrackerRegistry | None" = None,
+        pnl_registry: Any | None = None,
         exposure_reservation: ExposureReservation | None = None,
         max_lots_provider: MaxLotsProvider | None = None,
     ) -> None:
@@ -111,7 +112,7 @@ class ValidatedZmqAdapter:
         self._reservation = exposure_reservation
         self._max_lots_provider = max_lots_provider
 
-    def set_pnl_registry(self, registry: "PnLTrackerRegistry") -> None:
+    def set_pnl_registry(self, registry: Any) -> None:
         """Register P&L tracker registry for order execution notifications.
 
         Args:

@@ -26,10 +26,34 @@ from src.live.state.redis_state import RedisStateManager
 from src.live.state.snapshot import StateSnapshot
 
 
-@pytest.fixture
-def redis_url():
+def _redis_url() -> str:
     """Get Redis URL from environment or use default test URL."""
     return os.getenv("TEST_REDIS_URL", "redis://localhost:6379")
+
+
+def _is_redis_available() -> bool:
+    """Probe the test Redis so the suite skips instead of failing without infra."""
+    import redis
+
+    try:
+        client = redis.Redis.from_url(_redis_url(), socket_connect_timeout=1)
+        client.ping()
+        client.close()
+        return True
+    except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError):
+        return False
+
+
+# The research loop runs without Docker (decision D6) — these are live-path tests.
+pytestmark = pytest.mark.skipif(
+    not _is_redis_available(),
+    reason="Redis not available for integration tests",
+)
+
+
+@pytest.fixture
+def redis_url():
+    return _redis_url()
 
 
 @pytest.fixture

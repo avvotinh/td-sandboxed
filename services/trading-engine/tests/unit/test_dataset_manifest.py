@@ -9,6 +9,7 @@ on-disk format (machine-generated, easy to diff in code review).
 from __future__ import annotations
 
 import dataclasses
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -122,12 +123,12 @@ class TestDatasetManifest:
         manifest = self._manifest()
         path = tmp_path / "manifest.json"
         manifest.save_json(path)
-        tampered = path.read_text().replace(
-            "/tmp/cache/XAUUSD/M5/in_sample.parquet",
-            "/tmp/cache/../../etc/passwd",
-            1,
-        )
-        path.write_text(tampered)
+        # Edit the JSON structurally: ``str(Path(...))`` is separator-dependent,
+        # so a textual replace silently no-ops on Windows and the test would
+        # assert against an untampered file.
+        raw = json.loads(path.read_text())
+        raw["entries"][0]["parquet_path"] = str(Path("/tmp/cache/../../etc/passwd"))
+        path.write_text(json.dumps(raw))
         with pytest.raises(ValueError, match="traversal"):
             DatasetManifest.load_json(path)
 

@@ -15,23 +15,20 @@ import asyncio
 import json
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from redis.asyncio import Redis
-from typer.testing import CliRunner
 
-from src.cli.main import app
-from src.live.execution.order_validator import OrderValidator, ValidationResult
+from src.live.execution.order_validator import OrderValidator
 from src.rules.audit_db_writer import AuditDBWriter, AuditLogModel
-from src.rules.audit_logger import AUDIT_TTL_SECONDS, AuditEntry, AuditLogger
+from src.rules.audit_logger import AuditEntry, AuditLogger
 from src.rules.audit_registry import AuditLoggerRegistry
 from src.rules.base_rule import RuleAction, RuleResult
 from src.rules.engine import RuleEngine
-from src.rules.engine_result import RuleEngineResult
 
 
 class MockTradeAction(str, Enum):
@@ -291,132 +288,6 @@ class TestAuditLoggingPerformance:
 
 
 @pytest.mark.integration
-class TestCLILogsCommand:
-    """Integration tests for the CLI logs command."""
-
-    @pytest.fixture
-    def runner(self):
-        """Create a CLI runner."""
-        return CliRunner()
-
-    @pytest.mark.asyncio
-    async def test_logs_command_account_filter(self, redis_client, clean_audit_keys, runner):
-        """Test CLI logs command with --account filter."""
-        # Write some test entries
-        logger = AuditLogger(redis_client, "cli-test-001")
-        rule = MockRule(name="Test Rule")
-        result = RuleResult(action=RuleAction.ALLOW, current_value=3.5, threshold_value=5.0)
-
-        await logger.log_rule_check(rule, result, order_id="ORDER-123")
-
-        # Run CLI command
-        result = runner.invoke(app, ["logs", "--account", "cli-test-001"])
-
-        assert result.exit_code == 0
-        assert "Audit Logs for cli-test-001" in result.output
-        assert "Test Rule" in result.output
-
-    @pytest.mark.asyncio
-    async def test_logs_command_type_filter(self, redis_client, clean_audit_keys, runner):
-        """Test CLI logs command with --type filter."""
-        logger = AuditLogger(redis_client, "cli-test-002")
-
-        # Write ALLOW entry
-        allow_rule = MockRule(name="Allow Rule")
-        await logger.log_rule_check(
-            allow_rule,
-            RuleResult(action=RuleAction.ALLOW),
-        )
-
-        # Write BLOCK entry
-        block_rule = MockRule(name="Block Rule")
-        await logger.log_rule_check(
-            block_rule,
-            RuleResult(action=RuleAction.BLOCK, message="Blocked"),
-        )
-
-        # Query only trade_blocked
-        result = runner.invoke(
-            app, ["logs", "--account", "cli-test-002", "--type", "trade_blocked"]
-        )
-
-        assert result.exit_code == 0
-        assert "Block Rule" in result.output
-        # Allow Rule should not appear (filtered out)
-
-    @pytest.mark.asyncio
-    async def test_logs_command_json_output(self, redis_client, clean_audit_keys, runner):
-        """Test CLI logs command with --json output."""
-        logger = AuditLogger(redis_client, "cli-test-003")
-        rule = MockRule(name="JSON Test Rule")
-        await logger.log_rule_check(
-            rule,
-            RuleResult(action=RuleAction.ALLOW),
-            order_id="ORDER-JSON",
-        )
-
-        result = runner.invoke(app, ["logs", "--account", "cli-test-003", "--json"])
-
-        assert result.exit_code == 0
-        # Parse JSON output
-        output = json.loads(result.output)
-        assert isinstance(output, list)
-        assert len(output) == 1
-        assert output[0]["rule_name"] == "JSON Test Rule"
-
-    @pytest.mark.asyncio
-    async def test_logs_command_since_filter(self, redis_client, clean_audit_keys, runner):
-        """Test CLI logs command with --since filter."""
-        logger = AuditLogger(redis_client, "cli-test-004")
-        rule = MockRule(name="Recent Rule")
-        await logger.log_rule_check(rule, RuleResult(action=RuleAction.ALLOW))
-
-        # Query with 1 hour window
-        result = runner.invoke(app, ["logs", "--account", "cli-test-004", "--since", "1h"])
-
-        assert result.exit_code == 0
-        assert "Recent Rule" in result.output
-
-    @pytest.mark.asyncio
-    async def test_logs_command_empty_results(self, redis_client, clean_audit_keys, runner):
-        """Test CLI logs command with no matching entries."""
-        result = runner.invoke(app, ["logs", "--account", "nonexistent-account"])
-
-        # Should succeed even with no results
-        assert result.exit_code == 0
-        assert "No audit entries found" in result.output
-
-    def test_logs_command_invalid_time_format(self, runner):
-        """Test CLI logs command with invalid --since format."""
-        result = runner.invoke(app, ["logs", "--account", "test", "--since", "invalid"])
-
-        assert result.exit_code == 1
-        assert "Invalid time format" in result.output
-
-    @pytest.mark.asyncio
-    async def test_logs_command_table_formatting(self, redis_client, clean_audit_keys, runner):
-        """Test that table output is properly formatted."""
-        logger = AuditLogger(redis_client, "cli-test-005")
-        rule = MockRule(name="Table Test Rule")
-        await logger.log_rule_check(
-            rule,
-            RuleResult(action=RuleAction.ALLOW, current_value=3.5, threshold_value=5.0),
-            order_id="ORDER-TABLE",
-        )
-
-        result = runner.invoke(app, ["logs", "--account", "cli-test-005"])
-
-        assert result.exit_code == 0
-        # Check table headers
-        assert "Timestamp" in result.output
-        assert "Rule" in result.output
-        assert "Result" in result.output
-        assert "Current" in result.output
-        assert "Threshold" in result.output
-        assert "Total entries:" in result.output
-
-
-@pytest.mark.integration
 class TestOrderValidatorAuditIntegration:
     """Integration tests for OrderValidator -> AuditLogger flow."""
 
@@ -561,9 +432,9 @@ class TestAuditDBWriterBatchPersistence:
                 timestamp=datetime.now(timezone.utc),
                 account_id="batch-test",
                 event_type="rule_check",
-                rule_type="test",
                 rule_name=f"Rule {i}",
                 rule_result="ALLOW",
+                context={"rule_type": "test"},
             )
             await writer.add_entry(entry)
 
@@ -586,9 +457,9 @@ class TestAuditDBWriterBatchPersistence:
                     timestamp=datetime.now(timezone.utc),
                     account_id="flush-test",
                     event_type="rule_check",
-                    rule_type="test",
                     rule_name=f"Rule {i}",
                     rule_result="ALLOW",
+                    context={"rule_type": "test"},
                 )
                 await writer.add_entry(entry)
 
@@ -609,24 +480,26 @@ class TestAuditDBWriterBatchPersistence:
             timestamp=datetime.now(timezone.utc),
             account_id="model-test",
             event_type="trade_blocked",
-            rule_type="daily_loss_limit",
             rule_name="Daily Loss 5%",
             rule_result="BLOCK",
             current_value=5.5,
             threshold_value=5.0,
             order_id=str(uuid.uuid4()),
-            context={"blocking_reason": "Limit exceeded"},
+            context={"rule_type": "daily_loss_limit", "blocking_reason": "Limit exceeded"},
         )
 
         model = AuditLogModel.from_audit_entry(entry)
 
         assert model.account_id == "model-test"
         assert model.event_type == "trade_blocked"
-        assert model.rule_type == "daily_loss_limit"
         assert model.rule_result == "BLOCK"
         assert float(model.current_value) == 5.5
         assert float(model.threshold_value) == 5.0
-        assert model.context == {"blocking_reason": "Limit exceeded"}
+        # rule_type is not a column on audit_logs — it rides along in the JSONB context
+        assert model.context == {
+            "rule_type": "daily_loss_limit",
+            "blocking_reason": "Limit exceeded",
+        }
 
     @pytest.mark.asyncio
     async def test_graceful_shutdown_flushes_buffer(self):
@@ -647,9 +520,9 @@ class TestAuditDBWriterBatchPersistence:
                     timestamp=datetime.now(timezone.utc),
                     account_id="shutdown-test",
                     event_type="rule_check",
-                    rule_type="test",
                     rule_name=f"Rule {i}",
                     rule_result="ALLOW",
+                    context={"rule_type": "test"},
                 )
                 await writer.add_entry(entry)
 

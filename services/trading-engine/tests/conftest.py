@@ -4,17 +4,6 @@ import pytest
 from src.rules.base_rule import RuleResult
 
 
-@pytest.fixture
-def trading_engine():
-    """Create a TradingEngine instance for testing.
-
-    Returns:
-        TradingEngine: A fresh engine instance for each test.
-    """
-    from src.engine import TradingEngine
-    return TradingEngine()
-
-
 class FakeRule:
     """Minimal rule satisfying BaseRule protocol for testing."""
 

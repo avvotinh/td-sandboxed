@@ -7,7 +7,6 @@ This module handles:
 - Database adapter for TimescaleDB (planned)
 """
 
-from .mt5_connection_manager import ConnectionHealth, MT5ConnectionManager
 from .redis_adapter import MaxReconnectAttemptsError, RedisAdapter
 from .redis_config import RedisConfig
 from .redis_models import Bar
@@ -30,6 +29,4 @@ __all__ = [
     "OrderStatus",
     "MT5Position",
     # MT5 Connection Manager
-    "MT5ConnectionManager",
-    "ConnectionHealth",
 ]

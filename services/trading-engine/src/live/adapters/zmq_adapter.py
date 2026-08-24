@@ -40,7 +40,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import Any, AsyncIterator
 
 import zmq
 import zmq.asyncio
@@ -48,9 +48,10 @@ from pydantic import BaseModel
 
 from .zmq_models import MT5Position, Order, OrderResult, OrderStatus, Tick
 
-if TYPE_CHECKING:
-    from src.accounts.metrics_service import AccountMetricsService
-    from src.accounts.pnl_registry import PnLTrackerRegistry
+# The metrics service and P&L registry were per-account registries that went
+# with src/accounts/ (P3.2). Both are optional collaborators injected via the
+# setters below and only ever duck-typed here, so they stay untyped until P5
+# reintroduces single-account equivalents.
 
 logger = logging.getLogger(__name__)
 
@@ -124,10 +125,10 @@ class ZmqAdapter:
         self._pending_orders: dict[str, asyncio.Future[OrderResult]] = {}
         self._pending_positions: dict[str, asyncio.Future[list[MT5Position]]] = {}
         self._reconnect_attempt = 0
-        self._metrics_service: AccountMetricsService | None = None
-        self._pnl_registry: PnLTrackerRegistry | None = None
+        self._metrics_service: Any | None = None
+        self._pnl_registry: Any | None = None
 
-    def set_metrics_service(self, service: "AccountMetricsService") -> None:
+    def set_metrics_service(self, service: Any) -> None:
         """Register metrics service for balance/equity updates.
 
         When registered, account_info messages from MT5 will trigger
@@ -139,7 +140,7 @@ class ZmqAdapter:
         self._metrics_service = service
         logger.info("Metrics service registered with ZMQ adapter")
 
-    def set_pnl_registry(self, registry: "PnLTrackerRegistry") -> None:
+    def set_pnl_registry(self, registry: Any) -> None:
         """Register P&L tracker registry for tick routing.
 
         When registered, tick messages will be routed to the P&L registry

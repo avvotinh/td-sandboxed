@@ -29,11 +29,6 @@ Example:
     bound = bind_strategy_to_account(account_config, strategy_config)
 """
 
-from src.kernel.strategies.account_binding import (
-    BoundAccount,
-    bind_strategies_to_accounts,
-    bind_strategy_to_account,
-)
 from src.kernel.strategies.base_strategy import BaseStrategy
 from src.kernel.strategies.config import BaseStrategyConfig
 from src.kernel.strategies.ma_crossover import MACrossoverConfig, MACrossoverStrategy
@@ -43,13 +38,10 @@ from src.kernel.strategies.registry import StrategyRegistry, register_strategy
 __all__ = [
     "BaseStrategy",
     "BaseStrategyConfig",
-    "BoundAccount",
     "MACrossoverConfig",
     "MACrossoverStrategy",
     "PositionSizer",
     "PositionSizerConfig",
     "StrategyRegistry",
-    "bind_strategies_to_accounts",
-    "bind_strategy_to_account",
     "register_strategy",
 ]
