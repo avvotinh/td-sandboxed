@@ -64,7 +64,6 @@ Use these agents for code review (language-specific, not a generic `code-reviewe
 | Agent | Purpose |
 |-------|---------|
 | **python-reviewer** | Python (`services/trading-engine/`) — PEP 8, type hints, FTMO rule engine |
-| **go-reviewer** | Go (`services/tv-api/`, `services/notification/`) — idiomatic Go, concurrency |
 | **rust-reviewer** | Rust (`services/mt5-bridge/`) — memory safety, FFI, error handling |
 | **mql5-reviewer** | MQL5 (Epic 14 MT5 EA) — trade ops, ZMQ DLL safety, FTMO pre-trade guards |
 | **security-reviewer** | Security vulnerabilities, OWASP Top 10, FTMO secret discipline |

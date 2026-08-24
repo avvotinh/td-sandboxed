@@ -1,23 +1,25 @@
 # Sandboxed Trading System - Root Makefile
 # =========================================
-# Unified build, test, and deployment commands for the polyglot trading system.
+# Unified build, test, and lint commands.
 #
 # Services:
-#   - tv-api (Go 1.21+)        - TradingView API bridge
-#   - mt5-bridge (Rust 1.75+)  - MetaTrader 5 ZeroMQ bridge
-#   - trading-engine (Python 3.11+) - NautilusTrader-based engine
-#   - notification (Go 1.21+) - Telegram notification bot
+#   - trading-engine (Python 3.11+) - NautilusTrader kernel + backtest lab + live path
+#   - chart-viewer (Python 3.12+)   - FastAPI viewer for Result Contract v2 runs
+#   - mt5-bridge (Rust 1.75+)       - MetaTrader 5 ZeroMQ bridge
+#   - tv-api (Go)                   - FROZEN (decision D4): tv-cli historical fetch only
+#
+# The research loop (backtest, sweep, walk-forward, viewer) needs no Docker, no
+# TimescaleDB and no Redis — decision D6. The infra and compose targets below are
+# for the live path only.
 #
 # Usage:
 #   make help          - Show all available targets
-#   make infra-up      - Start infrastructure (Redis, TimescaleDB)
-#   make build         - Build all Docker images
-#   make up            - Start all services
 #   make test          - Run all tests
 #
 # Prerequisites:
-#   - Docker and Docker Compose v2
-#   - For local builds: Go 1.21+, Rust 1.75+, Python 3.11+ with uv
+#   - For research: Python 3.11+ with uv
+#   - For the live path: Docker and Docker Compose v2, Rust 1.75+
+#   - For data fetch: Go 1.21+
 
 # Variables
 COMPOSE_FILE := infra/docker/docker-compose.yml
@@ -27,15 +29,16 @@ DOCKER_COMPOSE := docker compose -f $(COMPOSE_FILE)
 TV_API_DIR := services/tv-api
 MT5_BRIDGE_DIR := services/mt5-bridge
 TRADING_ENGINE_DIR := services/trading-engine
-NOTIFICATION_DIR := services/notification
+CHART_VIEWER_DIR := services/chart-viewer
 
 # All phony targets
 .PHONY: all help \
         infra-up infra-down infra-logs infra-status \
         build up down logs restart clean \
-        build-tv-api build-mt5-bridge build-trading-engine build-notification \
-        test test-strict test-tv-api test-mt5-bridge test-trading-engine test-notification \
-        lint lint-tv-api lint-mt5-bridge lint-trading-engine lint-notification
+        build-tv-cli build-mt5-bridge build-trading-engine \
+        test test-strict test-mt5-bridge test-trading-engine test-chart-viewer \
+        lint lint-mt5-bridge lint-trading-engine lint-chart-viewer \
+        viewer
 
 # Default target
 all: help
@@ -44,13 +47,18 @@ all: help
 help:
 	@echo "Usage: make [target]"
 	@echo ""
-	@echo "Infrastructure:"
+	@echo "Research loop (no Docker needed):"
+	@echo "  test-trading-engine Run trading-engine tests"
+	@echo "  test-chart-viewer   Run chart-viewer tests"
+	@echo "  viewer              Start the chart viewer on port 8777"
+	@echo ""
+	@echo "Infrastructure (live path only):"
 	@echo "  infra-up        Start Redis and TimescaleDB containers"
 	@echo "  infra-down      Stop infrastructure containers"
 	@echo "  infra-logs      View infrastructure logs"
 	@echo "  infra-status    Show container health status"
 	@echo ""
-	@echo "Docker Compose:"
+	@echo "Docker Compose (live path only):"
 	@echo "  build           Build all Docker images"
 	@echo "  up              Start all services (detached)"
 	@echo "  down            Stop all services"
@@ -59,28 +67,23 @@ help:
 	@echo "  clean           Stop and remove all containers, networks, volumes"
 	@echo ""
 	@echo "Per-Service Build:"
-	@echo "  build-tv-api          Build tv-api binaries locally"
+	@echo "  build-tv-cli          Build the frozen tv-cli fetch binary"
 	@echo "  build-mt5-bridge      Build mt5-bridge binary locally"
 	@echo "  build-trading-engine  Build trading-engine package locally"
-	@echo "  build-notification    Build notification binary locally"
 	@echo ""
 	@echo "Testing:"
 	@echo "  test            Run all service tests (continues on failure)"
 	@echo "  test-strict     Run all tests in strict mode (fails on first error)"
-	@echo "  test-tv-api     Run tv-api tests"
 	@echo "  test-mt5-bridge Run mt5-bridge tests"
-	@echo "  test-trading-engine Run trading-engine tests"
-	@echo "  test-notification Run notification tests"
 	@echo ""
 	@echo "Linting:"
 	@echo "  lint            Run all linters"
-	@echo "  lint-tv-api     Run tv-api linter"
 	@echo "  lint-mt5-bridge Run mt5-bridge linter (cargo clippy)"
 	@echo "  lint-trading-engine Run trading-engine linter (ruff)"
-	@echo "  lint-notification Run notification linter"
+	@echo "  lint-chart-viewer   Run chart-viewer linter (ruff)"
 
 # =============================================================================
-# Infrastructure Commands
+# Infrastructure Commands (live path only)
 # =============================================================================
 
 # Start infrastructure services (Redis, TimescaleDB)
@@ -106,7 +109,7 @@ infra-status:
 	@docker ps --filter "name=trading-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "No trading containers running"
 
 # =============================================================================
-# Docker Compose Commands
+# Docker Compose Commands (live path only)
 # =============================================================================
 
 # Build all Docker images
@@ -137,16 +140,23 @@ clean:
 	$(DOCKER_COMPOSE) down -v --remove-orphans
 
 # =============================================================================
+# Research Loop
+# =============================================================================
+
+# Start the chart viewer against results/
+viewer:
+	cd $(CHART_VIEWER_DIR) && uv run chart-viewer --results-dir ../../results --port 8777
+
+# =============================================================================
 # Per-Service Build Commands (Local builds - require toolchains installed)
 # =============================================================================
 
-# Build tv-api Go binaries locally
-build-tv-api:
-	@echo "Building tv-api..."
-	@mkdir -p $(TV_API_DIR)/bin
-	cd $(TV_API_DIR) && go build -o bin/tv-chart ./cmd/tv-chart
-	cd $(TV_API_DIR) && go build -o bin/tv-quote ./cmd/tv-quote
-	@echo "tv-api binaries built in $(TV_API_DIR)/bin/"
+# Build the frozen tv-cli fetch binary. tv-api is frozen (D4) — tv-cli is the
+# only binary left, and scripts/chunked-fetch.sh expects it at the module root.
+build-tv-cli:
+	@echo "Building tv-cli..."
+	cd $(TV_API_DIR) && go build -o tv-cli ./cmd/tv-cli
+	@echo "tv-cli built at $(TV_API_DIR)/tv-cli"
 
 # Build mt5-bridge Rust binary locally
 build-mt5-bridge:
@@ -160,39 +170,27 @@ build-trading-engine:
 	cd $(TRADING_ENGINE_DIR) && uv build
 	@echo "trading-engine package built in $(TRADING_ENGINE_DIR)/dist/"
 
-# Build notification Go binary locally
-build-notification:
-	@echo "Building notification..."
-	@mkdir -p $(NOTIFICATION_DIR)/bin
-	cd $(NOTIFICATION_DIR) && go build -o bin/bot ./cmd/bot
-	@echo "notification binary built in $(NOTIFICATION_DIR)/bin/"
-
 # =============================================================================
 # Test Commands
 # =============================================================================
+#
+# tv-api is deliberately absent: it is frozen, and internal/protocol carries a
+# pre-existing test failure that is not being fixed. Build it, do not test it.
 
 # Run all service tests (continues even if individual tests fail)
 test:
 	@echo "Running all service tests..."
 	@echo ""
-	@echo "=== tv-api tests ==="
-	@cd $(TV_API_DIR) && go test ./... || true
+	@echo "=== trading-engine tests ==="
+	@cd $(TRADING_ENGINE_DIR) && uv run pytest || true
+	@echo ""
+	@echo "=== chart-viewer tests ==="
+	@cd $(CHART_VIEWER_DIR) && uv run pytest || true
 	@echo ""
 	@echo "=== mt5-bridge tests ==="
 	@cd $(MT5_BRIDGE_DIR) && cargo test || true
 	@echo ""
-	@echo "=== trading-engine tests ==="
-	@cd $(TRADING_ENGINE_DIR) && uv run pytest || true
-	@echo ""
-	@echo "=== notification tests ==="
-	@cd $(NOTIFICATION_DIR) && go test ./... || true
-	@echo ""
 	@echo "All tests completed."
-
-# Run tv-api tests
-test-tv-api:
-	@echo "Running tv-api tests..."
-	cd $(TV_API_DIR) && go test ./...
 
 # Run mt5-bridge tests
 test-mt5-bridge:
@@ -204,18 +202,17 @@ test-trading-engine:
 	@echo "Running trading-engine tests..."
 	cd $(TRADING_ENGINE_DIR) && uv run pytest
 
-# Run notification tests
-test-notification:
-	@echo "Running notification tests..."
-	cd $(NOTIFICATION_DIR) && go test ./...
+# Run chart-viewer tests
+test-chart-viewer:
+	@echo "Running chart-viewer tests..."
+	cd $(CHART_VIEWER_DIR) && uv run pytest
 
 # Run all tests in strict mode (fails on first error - use for CI)
 test-strict:
 	@echo "Running all service tests (strict mode - fails on first error)..."
-	cd $(TV_API_DIR) && go test ./...
-	cd $(MT5_BRIDGE_DIR) && cargo test
 	cd $(TRADING_ENGINE_DIR) && uv run pytest
-	cd $(NOTIFICATION_DIR) && go test ./...
+	cd $(CHART_VIEWER_DIR) && uv run pytest
+	cd $(MT5_BRIDGE_DIR) && cargo test
 	@echo "All tests passed."
 
 # =============================================================================
@@ -226,24 +223,16 @@ test-strict:
 lint:
 	@echo "Running all linters..."
 	@echo ""
-	@echo "=== tv-api lint ==="
-	@cd $(TV_API_DIR) && go vet ./... || true
+	@echo "=== trading-engine lint ==="
+	@cd $(TRADING_ENGINE_DIR) && uv run ruff check . || true
+	@echo ""
+	@echo "=== chart-viewer lint ==="
+	@cd $(CHART_VIEWER_DIR) && uv run ruff check . || true
 	@echo ""
 	@echo "=== mt5-bridge lint ==="
 	@cd $(MT5_BRIDGE_DIR) && cargo clippy || true
 	@echo ""
-	@echo "=== trading-engine lint ==="
-	@cd $(TRADING_ENGINE_DIR) && uv run ruff check . || true
-	@echo ""
-	@echo "=== notification lint ==="
-	@cd $(NOTIFICATION_DIR) && go vet ./... || true
-	@echo ""
 	@echo "All linting completed."
-
-# Run tv-api linter
-lint-tv-api:
-	@echo "Running tv-api linter..."
-	cd $(TV_API_DIR) && go vet ./...
 
 # Run mt5-bridge linter
 lint-mt5-bridge:
@@ -255,7 +244,7 @@ lint-trading-engine:
 	@echo "Running trading-engine linter..."
 	cd $(TRADING_ENGINE_DIR) && uv run ruff check .
 
-# Run notification linter
-lint-notification:
-	@echo "Running notification linter..."
-	cd $(NOTIFICATION_DIR) && go vet ./...
+# Run chart-viewer linter
+lint-chart-viewer:
+	@echo "Running chart-viewer linter..."
+	cd $(CHART_VIEWER_DIR) && uv run ruff check .

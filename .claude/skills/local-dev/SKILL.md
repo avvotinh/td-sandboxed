@@ -6,23 +6,26 @@ description: Local development knowledge — how to run, debug, and troubleshoot
 # Local Development Guide
 
 ## Architecture Overview
-Polyglot monorepo with 4 services communicating via ZeroMQ (order flow) and Redis pub/sub (events):
-- **trading-engine** (Python 3.11+) — NautilusTrader, rule engine, risk management
+- **trading-engine** (Python 3.11+) — NautilusTrader kernel + backtest lab + live path
+- **chart-viewer** (Python/FastAPI) — reads `results/*.json` (Contract v2), no Docker/DB
 - **mt5-bridge** (Rust) — MetaTrader 5 ZeroMQ bridge (ports 5555/5556/5557)
-- **tv-api** (Go) — TradingView webhook receiver
-- **notification** (Go) — Telegram bot notifications
+- **tv-api** (Go) — **frozen** (decision D4): only `cmd/tv-cli` survives, for historical
+  data fetch. No server, no webhook receiver. `notification` was deleted in v2.
 
 ## Infrastructure
+The **research loop needs none of it** (decision D6) — backtest, sweep, walk-forward and
+the viewer run on parquet + JSON files alone. Do not ask for `/up` or `/migrate` when the
+work is research.
+
+Live path only:
 - **Redis** (port 6379) — hot storage, pub/sub
 - **TimescaleDB** (port 5432) — PostgreSQL 16 + time-series hypertables
 
-## Quick Start
+## Quick Start (research loop)
 ```bash
-make infra-up          # Start Redis + TimescaleDB
-make build             # Build all Docker images
-make up                # Start all services
-make test              # Run all tests
-make lint              # Run all linters
+cd services/trading-engine
+uv run python -m src backtest run --job configs/backtest/<job>.yaml --export ../../results/
+cd ../chart-viewer && uv run chart-viewer --results-dir ../../results --port 8777
 ```
 
 ## Service-specific Development
@@ -38,15 +41,18 @@ uv run ruff check .    # Lint
 - Uses asyncio — never use `time.sleep()` in async code
 - MT5 bridge calls must timeout: `asyncio.wait_for(timeout=5.0)`
 
-### tv-api (Go)
+### tv-api (Go) — frozen, fetch only
 ```bash
 cd services/tv-api
-go test ./...          # Run tests
-go vet ./...           # Lint
-go build -o bin/tv-chart ./cmd/tv-chart
+go build ./...         # tv-cli is the only binary
+./scripts/chunked-fetch.sh --symbol OANDA:XAUUSD --bare-symbol XAUUSD \
+  --timeframe 5 --tf-label M5 --window-name in_sample --window-kind in_sample \
+  --from 2024-01-01T00:00:00Z --to 2026-01-01T00:00:00Z --step-days 20
 ```
-- Config: `config.yaml`
-- Needs SESSION_ID and SESSION_SIGN env vars for TradingView
+- Needs SESSION_ID and SESSION_SIGN env vars (they expire — refresh from browser cookies)
+- Writes into `data/historical/<symbol>/<tf>/<window>/chunks/`
+- Frozen per D4: do not add features here. `internal/protocol` has one pre-existing
+  test failure (`TestParseWSPacket`) that is deliberately not being fixed.
 
 ### mt5-bridge (Rust)
 ```bash
@@ -57,14 +63,13 @@ cargo build --release  # Build
 ```
 - ZeroMQ ports: 5555 (REQ/REP), 5556 (PUB), 5557 (SUB)
 
-### notification (Go)
+### chart-viewer (Python)
 ```bash
-cd services/notification
-go test ./...          # Run tests
-go vet ./...           # Lint
-go build -o bin/bot ./cmd/bot
+cd services/chart-viewer
+uv run pytest
+uv run chart-viewer --results-dir ../../results --port 8777
 ```
-- Needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars
+- Reads Contract v2 JSON + the parquet named by each run's `data_ref` — no Docker, no DB
 
 ## Database
 - Init schema: `infra/timescaledb/init.sql` (auto-applied on first docker run)
@@ -73,7 +78,8 @@ go build -o bin/bot ./cmd/bot
 
 ## Environment Variables
 - Dev config: `configs/dev/.env`
-- Required secrets: POSTGRES_PASSWORD, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, SESSION_ID, SESSION_SIGN
+- Required secrets: POSTGRES_PASSWORD (live path), SESSION_ID + SESSION_SIGN (tv-cli fetch).
+  The Telegram vars are gone with the `notification` service.
 - All secrets via env vars — never hardcode
 
 ## Docker Compose
@@ -98,4 +104,4 @@ go build -o bin/bot ./cmd/bot
 
 ### TradingView data not flowing
 1. Check SESSION_ID and SESSION_SIGN in env (they expire — need refresh from browser cookies)
-2. Check tv-api logs: `docker logs trading-tv-api --tail 30`
+2. Read the fetch log the script writes: `data/historical/<symbol>/<tf>/<window>/fetch.log`

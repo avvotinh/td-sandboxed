@@ -23,8 +23,11 @@
 #     --step-days 20
 set -euo pipefail
 
-REPO_ROOT=/home/hopdev/Dev/Sandboxed
-TV_API_DIR="$REPO_ROOT/services/tv-api"
+# Derived from this script's own location so the fetch works on any checkout
+# (it used to hardcode one developer's WSL path).
+TV_API_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$TV_API_DIR/../.." && pwd)"
+TV_CLI="$TV_API_DIR/tv-cli"
 
 MAX_ATTEMPTS=3
 BACKOFF_SECONDS=(10 30 60)
@@ -103,7 +106,7 @@ while :; do
     attempt=1
     success=0
     while (( attempt <= MAX_ATTEMPTS )); do
-      if ./bin/tv-cli -command backtest-fetch -replay-mode \
+      if "$TV_CLI" -command backtest-fetch -replay-mode \
           -symbol "$SYMBOL" -timeframe "$TIMEFRAME" \
           -from "$from" -to "$to" \
           -spec-name "$SPEC_NAME" -dataset-version "$DATASET_VERSION" \

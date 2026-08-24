@@ -53,25 +53,8 @@ services:
 
   # ================== APPLICATION SERVICES ==================
 
-  # TV-API - TradingView data collector (Go)
-  tv-api:
-    build:
-      context: ../../services/tv-api
-      dockerfile: Dockerfile
-    container_name: trading-tv-api
-    environment:
-      REDIS_URL: redis:6379
-      TIMESCALE_URL: postgres://${POSTGRES_USER:-trading}:${POSTGRES_PASSWORD:-devpassword}@timescaledb:5432/${POSTGRES_DB:-trading}
-      SESSION_ID: ${SESSION_ID:-}
-      SESSION_SIGN: ${SESSION_SIGN:-}
-    depends_on:
-      redis:
-        condition: service_healthy
-      timescaledb:
-        condition: service_healthy
-    networks:
-      - trading-net
-    restart: unless-stopped
+  # tv-api is not a service in v2 (decision D4) — it is frozen down to the
+  # tv-cli fetch binary, run from the host via services/tv-api/scripts/.
 
   # MT5-Bridge - MetaTrader 5 ZeroMQ bridge (Rust)
   mt5-bridge:
@@ -115,24 +98,6 @@ services:
         condition: service_started
     volumes:
       - engine_data:/app/data
-    networks:
-      - trading-net
-    restart: unless-stopped
-
-  # Notification - Telegram notification bot (Go)
-  notification:
-    build:
-      context: ../../services/notification
-      dockerfile: Dockerfile
-    container_name: trading-notification
-    environment:
-      REDIS_URL: redis:6379
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-      NOTIFICATION_LOG_LEVEL: ${LOG_LEVEL:-info}
-    depends_on:
-      redis:
-        condition: service_healthy
     networks:
       - trading-net
     restart: unless-stopped

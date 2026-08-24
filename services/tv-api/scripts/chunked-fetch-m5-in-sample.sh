@@ -11,10 +11,13 @@
 # so a transient failure can be resumed by simply running the script again.
 set -euo pipefail
 
-# All paths absolute so script works regardless of cwd.
-TV_API_DIR=/home/hopdev/Dev/Sandboxed/services/tv-api
-OUT_DIR=/home/hopdev/Dev/Sandboxed/data/historical/XAUUSD/M5/in_sample/chunks
-LOG_FILE=/home/hopdev/Dev/Sandboxed/data/historical/XAUUSD/M5/in_sample/fetch.log
+# All paths absolute so the script works regardless of cwd, but derived from
+# this script's own location rather than one developer's WSL checkout.
+TV_API_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$TV_API_DIR/../.." && pwd)"
+TV_CLI="$TV_API_DIR/tv-cli"
+OUT_DIR="$REPO_ROOT/data/historical/XAUUSD/M5/in_sample/chunks"
+LOG_FILE="$REPO_ROOT/data/historical/XAUUSD/M5/in_sample/fetch.log"
 
 CAMPAIGN_TO=2026-01-01T00:00:00Z
 CAMPAIGN_FROM=2024-01-01T00:00:00Z
@@ -56,7 +59,7 @@ while :; do
     attempt=1
     success=0
     while (( attempt <= MAX_ATTEMPTS )); do
-      if ./bin/tv-cli -command backtest-fetch -replay-mode \
+      if "$TV_CLI" -command backtest-fetch -replay-mode \
           -symbol OANDA:XAUUSD -timeframe 5 \
           -from "$from" -to "$to" \
           -spec-name xauusd-validation -dataset-version v1 \

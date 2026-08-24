@@ -1,3 +1,12 @@
+> **FROZEN (v2, decision D4).** Only `cmd/tv-cli` and the packages it needs are kept, for
+> historical data fetch: `internal/{auth,protocol,session,store,transport}` and
+> `pkg/tradingview`. The server, `tv-chart`, `tv-quote`, the benchmarks, the Dockerfile and
+> `config.yaml` were removed — as was the sibling `notification` service. Do not add
+> features here; it goes away entirely once MT5 history fetch lands over the bridge.
+> Sections below describing the server or those binaries are historical.
+>
+> Fetch entry point: `./scripts/chunked-fetch.sh` (see `.claude/skills/local-dev/`).
+
 # TradingView Go API
 
 A Go library for accessing TradingView's real-time market data via WebSocket connections. This is a port of the JavaScript TradingView API library, providing real-time quotes and historical chart data.

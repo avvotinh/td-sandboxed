@@ -42,6 +42,10 @@ Thumbs.db
 /bin/
 /dist/
 /cmd/tv-cli/tv-cli
+# The fetch scripts run ./tv-cli from here. It used to be committed as a Linux
+# ELF binary, which does not execute on a Windows checkout — build it instead:
+#   make build-tv-cli
+/tv-cli
 
 # Logs
 *.log

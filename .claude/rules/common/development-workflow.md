@@ -30,7 +30,6 @@ The Feature Implementation Workflow describes the development pipeline: research
 3. **Code Review**
    - Use the language-specific reviewer immediately after writing code:
      - Python → **python-reviewer**
-     - Go → **go-reviewer**
      - Rust → **rust-reviewer**
      - MQL5 → **mql5-reviewer**
      - SQL / migrations → **database-reviewer**
