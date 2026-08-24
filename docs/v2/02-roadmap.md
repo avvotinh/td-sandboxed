@@ -47,18 +47,23 @@ với đầy đủ trades/SL/TP/indicators/PnL. **Đây là điểm demo đầu 
 
 ## P3 — Kernel v2 & prune engine *(3–5 ngày)* — 🔵 ĐANG LÀM
 
-| Task | Chi tiết |
-|---|---|
-| 3.1 | Reorganize `src/` → `kernel/ lab/ live/ rules/` (git mv, giữ tests) theo 01-architecture §3.1 |
-| 3.2 | Xóa dead code: `accounts/` (multi-account), `config/firm_registry`, `engine/` orchestration cũ, `calendar/` (giữ news_blackout rule đọc file tĩnh), presets `the5ers/wmt` |
-| 3.3 | `kernel/entries/` — chuẩn hóa `EntryModel` interface; port các entry hiện có (supertrend flip, donchian cross, MR band) |
-| 3.4 | Quote-aware entries: limit/stop intent + spread model trên bar (D5); test chống lookahead cho mọi entry model |
-| 3.5 | `kernel/exits/ExitPolicy` — hợp nhất config ATR SL/TP + BE fee-offset + trailing + scale-out thành một block khai báo |
-| 3.6 | Xóa `notification/`; đóng băng `tv-api` chỉ còn fetch CLI (D4) |
-| 3.7 | Chạy lại full test suite + một backtest chuẩn (donchian XAUUSD 2y) đối chiếu metrics trước/sau reorganize — **parity check bắt buộc** |
+| Task | Chi tiết | Trạng thái |
+|---|---|---|
+| 3.1 | Reorganize `src/` → `kernel/ lab/ live/ rules/` (git mv, giữ tests) theo 01-architecture §3.1 | ✅ `7c6db26`, `5264e3a`, `b9778b9` |
+| 3.2 | Xóa dead code: `accounts/` (multi-account), `config/firm_registry`, `engine/` orchestration cũ, `calendar/` (giữ news_blackout rule đọc file tĩnh), presets `the5ers/wmt` | ✅ `1a28b5b` |
+| 3.3 | `kernel/entries/` — chuẩn hóa `EntryModel` interface; port các entry hiện có (supertrend flip, donchian cross, MR band) | ⬜ |
+| 3.4 | Quote-aware entries: limit/stop intent + spread model trên bar (D5); test chống lookahead cho mọi entry model | ⬜ |
+| 3.5 | `kernel/exits/ExitPolicy` — hợp nhất config ATR SL/TP + BE fee-offset + trailing + scale-out thành một block khai báo | ⬜ |
+| 3.6 | Xóa `notification/`; đóng băng `tv-api` chỉ còn fetch CLI (D4) | ⬜ |
+| 3.7 | Chạy lại full test suite + một backtest chuẩn (donchian XAUUSD 2y) đối chiếu metrics trước/sau reorganize — **parity check bắt buộc** | ✅ PASS 6/6 tại `1a28b5b` |
+
+Parity gate mở rộng thành 6 run (2 entry family × 2 timeframe + scale-out + mean-reversion)
+thay vì một run donchian như kế hoạch ban đầu — tooling và baseline ở
+`services/trading-engine/scripts/parity/`. Baseline chụp tại `960282c` (trước reorganize);
+sau prune 3.2 cả 8 section digest của cả 6 run đều trùng khít.
 
 **Exit:** test suite xanh, parity check khớp (same trades, same metrics), codebase chỉ còn
-những gì v2 dùng.
+những gì v2 dùng. → Còn lại 3.3–3.6.
 
 ## P4 — Vòng lặp nghiên cứu chiến lược *(liên tục — trọng tâm chính)*
 

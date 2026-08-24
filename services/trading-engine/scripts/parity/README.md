@@ -34,6 +34,15 @@ These are in-sample XAUUSD 2y runs at 0.5% risk with no regime gate. They are a
 **fixture, not a result** — none of them passes the promotion gate, and nothing
 here should be cited as a finding. Cite `results/*.json` run_ids instead.
 
+## Result
+
+Run at `1a28b5b` (after the 3.2 prune): **PASS, 6/6 runs identical**. Every
+section digest matched the baseline and every headline number in the table
+above reproduced exactly. The reorganize and the prune are behaviour-preserving.
+
+Re-run the gate after any further move under `src/` — the baseline stays valid
+as long as the strategies and the parquet data underneath do not change.
+
 ## Running the gate
 
 ```bash
