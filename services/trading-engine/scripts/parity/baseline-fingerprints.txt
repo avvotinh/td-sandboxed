@@ -64,3 +64,39 @@ supertrend-scaleout-m5.json  [522395d6667479fc]
   indicators       17fbbd1b6d161436
   metrics          8a794c36f3210ad1
   breaches         4f53cda18c2baa0c
+
+# --- gated-path fixtures, baseline cut at 8c2fc1a (the task-3.3 parent) ---
+
+
+donchian-gated-m5.json  [fa0ac3b52a8b8329]
+  trades=2094  equity=142130
+  schema_version   cc11310c456c3690
+  run              c42e2a1283cd6c37
+  account          93876978d222a21e
+  trades           11ecf2273cbf96db
+  equity_curve     08889b9fab00faa6
+  indicators       2eda73489457af80
+  metrics          8cb58d9fcebcfe64
+  breaches         4f53cda18c2baa0c
+
+supertrend-gated-m5.json  [653f1f4b1d244f05]
+  trades=841  equity=142130
+  schema_version   cc11310c456c3690
+  run              7d5daf6e73851a41
+  account          ce09a31691a38033
+  trades           15bf8b0fb8912506
+  equity_curve     605388e27aa62f36
+  indicators       ba5477f0ba18fa2e
+  metrics          94b558350708350c
+  breaches         4f53cda18c2baa0c
+
+mean-reversion-recross-m5.json  [7a075f1a03513fa5]
+  trades=1095  equity=142130
+  schema_version   cc11310c456c3690
+  run              b2895db0a59985e9
+  account          426ab9ce4455f5a4
+  trades           170094f79af48e58
+  equity_curve     8c000949a0af3e99
+  indicators       b39cff9a03d7aee0
+  metrics          c2e160c01e92aff7
+  breaches         4f53cda18c2baa0c

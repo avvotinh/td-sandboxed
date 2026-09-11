@@ -80,10 +80,10 @@ def _donchian(**overrides) -> DonchianBreakoutStrategy:
     )
     defaults.update(overrides)
     strategy = DonchianBreakoutStrategy(DonchianBreakoutConfig(**defaults))
-    strategy._donchian = Mock(initialized=True, upper=2420.0, lower=2380.0)
+    strategy._entry._donchian = Mock(initialized=True, upper=2420.0, lower=2380.0)
     strategy._atr = Mock(initialized=True, value=5.0)
-    strategy._prev_upper = 2418.0
-    strategy._prev_lower = 2380.0
+    strategy._entry._prev_upper = 2418.0
+    strategy._entry._prev_lower = 2380.0
     return strategy
 
 
@@ -95,9 +95,9 @@ def _supertrend(**overrides) -> SupertrendStrategy:
     )
     defaults.update(overrides)
     strategy = SupertrendStrategy(SupertrendConfig(**defaults))
-    strategy._supertrend = Mock(initialized=True, trend=1)
+    strategy._entry._supertrend = Mock(initialized=True, trend=1)
     strategy._atr = Mock(initialized=True, value=5.0)
-    strategy._prev_trend = -1  # flip -1 → +1 pending: raw signal is BUY
+    strategy._entry._prev_trend = -1  # flip -1 → +1 pending: raw signal is BUY
     return strategy
 
 
@@ -109,10 +109,10 @@ def _mean_reversion(**overrides) -> MeanReversionStrategy:
     )
     defaults.update(overrides)
     strategy = MeanReversionStrategy(MeanReversionConfig(**defaults))
-    strategy._bb = Mock(
+    strategy._entry._bb = Mock(
         initialized=True, upper=2420.0, middle=2400.0, lower=2380.0
     )
-    strategy._rsi = Mock(initialized=True, value=0.2)  # oversold zone
+    strategy._entry._rsi = Mock(initialized=True, value=0.2)  # oversold zone
     strategy._atr = Mock(initialized=True, value=5.0)
     return strategy
 
@@ -304,7 +304,7 @@ class TestDonchianCrossingSemantics:
         """Legacy behaviour: every bar outside the channel signals."""
         strategy = _donchian()
         assert strategy.generate_signal(_mock_bar(2425)) == SignalType.BUY
-        strategy._prev_upper = 2418.0  # keep prior band pinned
+        strategy._entry._prev_upper = 2418.0  # keep prior band pinned
         assert strategy.generate_signal(_mock_bar(2426)) == SignalType.BUY
 
     def test_cross_only_fires_on_first_breakout_bar(self) -> None:
@@ -314,25 +314,25 @@ class TestDonchianCrossingSemantics:
     def test_cross_only_suppresses_consecutive_breakout_bars(self) -> None:
         strategy = _donchian(entry_on_cross_only=True)
         assert strategy.generate_signal(_mock_bar(2425)) == SignalType.BUY
-        strategy._prev_upper = 2418.0
+        strategy._entry._prev_upper = 2418.0
         assert strategy.generate_signal(_mock_bar(2426)) == SignalType.NONE
-        strategy._prev_upper = 2418.0
+        strategy._entry._prev_upper = 2418.0
         assert strategy.generate_signal(_mock_bar(2427)) == SignalType.NONE
 
     def test_cross_only_rearms_after_close_back_inside(self) -> None:
         strategy = _donchian(entry_on_cross_only=True)
         assert strategy.generate_signal(_mock_bar(2425)) == SignalType.BUY
-        strategy._prev_upper = 2418.0
+        strategy._entry._prev_upper = 2418.0
         assert strategy.generate_signal(_mock_bar(2400)) == SignalType.NONE  # back in
-        strategy._prev_upper = 2418.0
+        strategy._entry._prev_upper = 2418.0
         assert strategy.generate_signal(_mock_bar(2425)) == SignalType.BUY  # new episode
 
     def test_cross_only_applies_to_short_side(self) -> None:
         strategy = _donchian(entry_on_cross_only=True)
-        strategy._prev_lower = 2382.0
+        strategy._entry._prev_lower = 2382.0
         assert strategy.generate_signal(_mock_bar(2378)) == SignalType.SELL
-        strategy._prev_upper = 2418.0
-        strategy._prev_lower = 2382.0
+        strategy._entry._prev_upper = 2418.0
+        strategy._entry._prev_lower = 2382.0
         assert strategy.generate_signal(_mock_bar(2377)) == SignalType.NONE
 
 
@@ -363,12 +363,12 @@ class TestMeanReversionRecross:
     def test_recross_requires_rsi_still_extreme(self) -> None:
         strategy = _mean_reversion(entry_mode="recross")
         assert strategy.generate_signal(_mock_bar(2375)) == SignalType.NONE
-        strategy._rsi = Mock(initialized=True, value=0.5)  # RSI recovered
+        strategy._entry._rsi = Mock(initialized=True, value=0.5)  # RSI recovered
         assert strategy.generate_signal(_mock_bar(2385)) == SignalType.NONE
 
     def test_recross_short_side(self) -> None:
         strategy = _mean_reversion(entry_mode="recross")
-        strategy._rsi = Mock(initialized=True, value=0.8)  # overbought
+        strategy._entry._rsi = Mock(initialized=True, value=0.8)  # overbought
         assert strategy.generate_signal(_mock_bar(2425)) == SignalType.NONE  # pierce up
         assert strategy.generate_signal(_mock_bar(2415)) == SignalType.SELL  # snap back
 
@@ -390,10 +390,10 @@ class TestSessionGateStateFreshness:
 
     def test_donchian_band_refs_advance_on_gated_bar(self) -> None:
         strategy = _donchian(**_SESSION_FIELDS)
-        strategy._donchian = Mock(initialized=True, upper=2430.0, lower=2390.0)
+        strategy._entry._donchian = Mock(initialized=True, upper=2430.0, lower=2390.0)
         strategy.generate_signal(_mock_bar(2400, ts_init=_OUT_SESSION_NS))
-        assert strategy._prev_upper == 2430.0
-        assert strategy._prev_lower == 2390.0
+        assert strategy._entry._prev_upper == 2430.0
+        assert strategy._entry._prev_lower == 2390.0
 
     def test_donchian_cross_only_episode_spans_session_gap(self) -> None:
         """A breakout episode that began on a gated bar must not read as
@@ -401,7 +401,7 @@ class TestSessionGateStateFreshness:
         strategy = _donchian(**_SESSION_FIELDS, entry_on_cross_only=True)
         gated = strategy.generate_signal(_mock_bar(2425, ts_init=_OUT_SESSION_NS))
         assert gated == SignalType.NONE  # out-of-session: no entry, episode arms
-        strategy._prev_upper = 2418.0  # keep prior band pinned
+        strategy._entry._prev_upper = 2418.0  # keep prior band pinned
         opened = strategy.generate_signal(_mock_bar(2426, ts_init=_IN_SESSION_NS))
         assert opened == SignalType.NONE  # still the same (overnight) episode
 
@@ -418,3 +418,26 @@ class TestSessionGateStateFreshness:
         # … so the in-session snap-back bar sees the true previous close.
         snap = strategy.generate_signal(_mock_bar(2385, ts_init=_IN_SESSION_NS))
         assert snap == SignalType.BUY
+
+    def test_supertrend_trend_ref_freezes_across_the_session_gap(self) -> None:
+        """Supertrend deliberately does NOT advance on gated bars.
+
+        It is the one strategy that gates *before* its entry model's
+        upkeep, so `_prev_trend` freezes at the last in-session bar and
+        an overnight flip is still there to trade at session open. That
+        is the opposite convention to Donchian / mean-reversion above,
+        and it is a choice, not an oversight — see the ordering note in
+        ``src/kernel/entries/base.py``. Pinned here so nobody "unifies"
+        the three strategies without noticing they diverge.
+        """
+        strategy = _supertrend(**_SESSION_FIELDS)
+        strategy._entry._prev_trend = -1
+        # Overnight: the trend flips to +1 on a gated bar. The flip is
+        # NOT consumed — the gate returns before update().
+        strategy._entry._supertrend = Mock(initialized=True, trend=1)
+        gated = strategy.generate_signal(_mock_bar(2400, ts_init=_OUT_SESSION_NS))
+        assert gated == SignalType.NONE
+        assert strategy._entry._prev_trend == -1  # frozen, not advanced
+        # So the first in-session bar still sees the flip and trades it.
+        opened = strategy.generate_signal(_mock_bar(2401, ts_init=_IN_SESSION_NS))
+        assert opened == SignalType.BUY

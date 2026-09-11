@@ -64,46 +64,46 @@ class TestSignalGeneration:
 
     def test_no_signal_when_uninitialised(self) -> None:
         strategy = _make_strategy()
-        strategy._supertrend = Mock(initialized=False, trend=0)
+        strategy._entry._supertrend = Mock(initialized=False, trend=0)
         strategy._atr = Mock(initialized=False, value=0)
         assert strategy.generate_signal(Mock()) == SignalType.NONE
 
     def test_no_signal_on_first_initialised_bar(self) -> None:
         """First bar after warmup seeds prev_trend — no signal yet."""
         strategy = _make_strategy()
-        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._entry._supertrend = Mock(initialized=True, trend=1)
         strategy._atr = Mock(initialized=True, value=5.0)
-        strategy._prev_trend = None
+        strategy._entry._prev_trend = None
         assert strategy.generate_signal(Mock()) == SignalType.NONE
 
     def test_buy_on_trend_flip_up(self) -> None:
         strategy = _make_strategy()
-        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._entry._supertrend = Mock(initialized=True, trend=1)
         strategy._atr = Mock(initialized=True, value=5.0)
-        strategy._prev_trend = -1  # Was downtrend
+        strategy._entry._prev_trend = -1  # Was downtrend
         assert strategy.generate_signal(Mock()) == SignalType.BUY
 
     def test_sell_on_trend_flip_down(self) -> None:
         strategy = _make_strategy()
-        strategy._supertrend = Mock(initialized=True, trend=-1)
+        strategy._entry._supertrend = Mock(initialized=True, trend=-1)
         strategy._atr = Mock(initialized=True, value=5.0)
-        strategy._prev_trend = 1
+        strategy._entry._prev_trend = 1
         assert strategy.generate_signal(Mock()) == SignalType.SELL
 
     def test_no_signal_when_trend_unchanged(self) -> None:
         strategy = _make_strategy()
-        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._entry._supertrend = Mock(initialized=True, trend=1)
         strategy._atr = Mock(initialized=True, value=5.0)
-        strategy._prev_trend = 1
+        strategy._entry._prev_trend = 1
         assert strategy.generate_signal(Mock()) == SignalType.NONE
 
     def test_prev_trend_updated_after_signal(self) -> None:
         strategy = _make_strategy()
-        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._entry._supertrend = Mock(initialized=True, trend=1)
         strategy._atr = Mock(initialized=True, value=5.0)
-        strategy._prev_trend = -1
+        strategy._entry._prev_trend = -1
         strategy.generate_signal(Mock())
-        assert strategy._prev_trend == 1
+        assert strategy._entry._prev_trend == 1
 
 
 class TestBracketParams:
@@ -167,7 +167,7 @@ class TestAtrZeroGuard:
         # non-positive ATR — that exception unwinds through on_bar and
         # halts the engine. Verify the strategy returns silently.
         strategy = _make_strategy()
-        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._entry._supertrend = Mock(initialized=True, trend=1)
         strategy._atr = Mock(initialized=True, value=0.0)
         strategy._submit_bracket_for_entry = Mock()
         strategy._execute_signal(SignalType.BUY)
@@ -177,7 +177,7 @@ class TestAtrZeroGuard:
         # First bars after warmup may report value=None on some
         # indicator paths — must not crash either.
         strategy = _make_strategy()
-        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._entry._supertrend = Mock(initialized=True, trend=1)
         strategy._atr = Mock(initialized=True, value=None)
         strategy._submit_bracket_for_entry = Mock()
         strategy._execute_signal(SignalType.BUY)
@@ -188,7 +188,7 @@ class TestAtrZeroGuard:
         # produce a transient negative ATR; guard must catch it before
         # the bracket helper rejects the offset.
         strategy = _make_strategy()
-        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._entry._supertrend = Mock(initialized=True, trend=1)
         strategy._atr = Mock(initialized=True, value=-5.0)
         strategy._submit_bracket_for_entry = Mock()
         strategy._execute_signal(SignalType.BUY)
@@ -199,7 +199,7 @@ class TestAtrZeroGuard:
         # a naive `atr <= 0` check would let NaN through. Decimal(str(nan))
         # then raises InvalidOperation deeper in the call stack.
         strategy = _make_strategy()
-        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._entry._supertrend = Mock(initialized=True, trend=1)
         strategy._atr = Mock(initialized=True, value=float("nan"))
         strategy._submit_bracket_for_entry = Mock()
         strategy._execute_signal(SignalType.BUY)
@@ -208,7 +208,7 @@ class TestAtrZeroGuard:
     def test_positive_atr_still_submits(self) -> None:
         # Sanity guard: the guard must not block the happy path.
         strategy = _make_strategy()
-        strategy._supertrend = Mock(initialized=True, trend=1)
+        strategy._entry._supertrend = Mock(initialized=True, trend=1)
         strategy._atr = Mock(initialized=True, value=5.0)
         strategy._submit_bracket_for_entry = Mock()
         strategy._execute_signal(SignalType.BUY)
@@ -238,11 +238,12 @@ class TestScaleOutMRO:
 
     def test_legacy_attributes_still_present(self) -> None:
         # Regression: prepending the mixin must not break the existing
-        # init chain that builds _supertrend / _atr / _prev_trend.
+        # init chain — the entry model (_entry._supertrend / _prev_trend)
+        # and the strategy-side _atr must both be built.
         strategy = _make_strategy()
-        assert strategy._supertrend is not None
+        assert strategy._entry._supertrend is not None
         assert strategy._atr is not None
-        assert strategy._prev_trend is None
+        assert strategy._entry._prev_trend is None
 
 
 class TestDispatchScaleOutEvent:
@@ -499,5 +500,5 @@ class TestTrailIndicatorWiring:
             trailing_atr_multiplier=Decimal("2.1"),
         )
 
-        assert strategy._supertrend.period == 10
-        assert strategy._supertrend.multiplier == 3.0
+        assert strategy._entry._supertrend.period == 10
+        assert strategy._entry._supertrend.multiplier == 3.0

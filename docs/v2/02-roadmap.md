@@ -51,19 +51,38 @@ với đầy đủ trades/SL/TP/indicators/PnL. **Đây là điểm demo đầu 
 |---|---|---|
 | 3.1 | Reorganize `src/` → `kernel/ lab/ live/ rules/` (git mv, giữ tests) theo 01-architecture §3.1 | ✅ `7c6db26`, `5264e3a`, `b9778b9` |
 | 3.2 | Xóa dead code: `accounts/` (multi-account), `config/firm_registry`, `engine/` orchestration cũ, `calendar/` (giữ news_blackout rule đọc file tĩnh), presets `the5ers/wmt` | ✅ `1a28b5b` |
-| 3.3 | `kernel/entries/` — chuẩn hóa `EntryModel` interface; port các entry hiện có (supertrend flip, donchian cross, MR band) | ⬜ |
+| 3.3 | `kernel/entries/` — chuẩn hóa `EntryModel` interface; port các entry hiện có (supertrend flip, donchian cross, MR band) | ✅ |
 | 3.4 | Quote-aware entries: limit/stop intent + spread model trên bar (D5); test chống lookahead cho mọi entry model | ⬜ |
 | 3.5 | `kernel/exits/ExitPolicy` — hợp nhất config ATR SL/TP + BE fee-offset + trailing + scale-out thành một block khai báo | ⬜ |
-| 3.6 | Xóa `notification/`; đóng băng `tv-api` chỉ còn fetch CLI (D4) | ⬜ |
+
+Hai nợ kỹ thuật **pre-existing** (không phải do 3.3 gây ra) mà quant review phát hiện,
+phải xử lý đúng task tương ứng — đừng để trôi tới lúc chạm promotion gate D7:
+
+- **3.4 — execution seam bỏ qua `EntryIntent.kind`/`price`.** `EntryIntent` đã có
+  `kind`/`price` từ 3.3 nhưng host chỉ dùng `intent.signal_type`;
+  `bracket_strategy.py:482` neo cả sizing lẫn SL/TP vào `last_bar.close`. Một intent
+  LIMIT/STOP của 3.4 sẽ vẫn bị size theo close → R thực tế ≠ R dự định. Phải luồng
+  intent vào `_submit_bracket_for_entry` **trước khi** tin bất kỳ kết quả quote-aware nào.
+  Kèm theo: 6 fixture parity gốc chạy `commission_per_lot_usd: "0"`, không spread,
+  không slippage — fill = close của bar, giả định lạc quan nhất, chính là red flag mà D5
+  cảnh báo. Chúng là *fixture*, không phải *result*; không con số nào trong đó được
+  phép đi vào `docs/v2/studies/`.
+- **3.5 — squeeze guard của MR chặn luôn EXIT.** `mean_reversion.generate_signal` return
+  `NONE` khi band collapse, **trước** nhánh middle-band exit: đang LONG mà feed đứng
+  (H=L=C lặp lại) thì `close >= middle` đúng nhưng vị thế vẫn bị giữ qua bar đó. Verdict
+  của entry model không được phép phủ quyết exit. Khi tách `ExitPolicy`, exit phải có
+  band reference độc lập.
+| 3.6 | Xóa `notification/`; đóng băng `tv-api` chỉ còn fetch CLI (D4) | ✅ `8c2fc1a` |
 | 3.7 | Chạy lại full test suite + một backtest chuẩn (donchian XAUUSD 2y) đối chiếu metrics trước/sau reorganize — **parity check bắt buộc** | ✅ PASS 6/6 tại `1a28b5b` |
 
 Parity gate mở rộng thành 6 run (2 entry family × 2 timeframe + scale-out + mean-reversion)
 thay vì một run donchian như kế hoạch ban đầu — tooling và baseline ở
 `services/trading-engine/scripts/parity/`. Baseline chụp tại `960282c` (trước reorganize);
-sau prune 3.2 cả 8 section digest của cả 6 run đều trùng khít.
+sau prune 3.2 cả 8 section digest của cả 6 run đều trùng khít, và sau port entry 3.3
+chạy lại vẫn PASS 6/6 — port là behaviour-preserving có bằng chứng, không phải niềm tin.
 
 **Exit:** test suite xanh, parity check khớp (same trades, same metrics), codebase chỉ còn
-những gì v2 dùng. → Còn lại 3.3–3.6.
+những gì v2 dùng. → Còn lại 3.4–3.5.
 
 ## P4 — Vòng lặp nghiên cứu chiến lược *(liên tục — trọng tâm chính)*
 

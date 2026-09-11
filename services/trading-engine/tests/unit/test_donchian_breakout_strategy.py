@@ -65,52 +65,52 @@ class TestConfigValidation:
 class TestSignalGeneration:
     def test_no_signal_until_initialised(self) -> None:
         strategy = _make_strategy()
-        strategy._donchian = Mock(initialized=False, upper=0, lower=0)
+        strategy._entry._donchian = Mock(initialized=False, upper=0, lower=0)
         strategy._atr = Mock(initialized=False, value=0)
         assert strategy.generate_signal(_mock_bar(2400)) == SignalType.NONE
 
     def test_no_signal_on_first_bar_seeds_prior(self) -> None:
         """First initialised bar just caches prior band — no signal yet."""
         strategy = _make_strategy()
-        strategy._donchian = Mock(initialized=True, upper=2420.0, lower=2380.0)
+        strategy._entry._donchian = Mock(initialized=True, upper=2420.0, lower=2380.0)
         strategy._atr = Mock(initialized=True, value=5.0)
-        strategy._prev_upper = None
-        strategy._prev_lower = None
+        strategy._entry._prev_upper = None
+        strategy._entry._prev_lower = None
         assert strategy.generate_signal(_mock_bar(2405)) == SignalType.NONE
 
     def test_breakout_up_triggers_buy(self) -> None:
         strategy = _make_strategy()
-        strategy._donchian = Mock(initialized=True, upper=2420.0, lower=2380.0)
+        strategy._entry._donchian = Mock(initialized=True, upper=2420.0, lower=2380.0)
         strategy._atr = Mock(initialized=True, value=5.0)
-        strategy._prev_upper = 2418.0
-        strategy._prev_lower = 2380.0
+        strategy._entry._prev_upper = 2418.0
+        strategy._entry._prev_lower = 2380.0
         # Close 2420 > prior upper 2418 → breakout long
         assert strategy.generate_signal(_mock_bar(2420)) == SignalType.BUY
 
     def test_breakout_down_triggers_sell(self) -> None:
         strategy = _make_strategy()
-        strategy._donchian = Mock(initialized=True, upper=2420.0, lower=2378.0)
+        strategy._entry._donchian = Mock(initialized=True, upper=2420.0, lower=2378.0)
         strategy._atr = Mock(initialized=True, value=5.0)
-        strategy._prev_upper = 2420.0
-        strategy._prev_lower = 2380.0
+        strategy._entry._prev_upper = 2420.0
+        strategy._entry._prev_lower = 2380.0
         # Close 2378 < prior lower 2380 → breakout short
         assert strategy.generate_signal(_mock_bar(2378)) == SignalType.SELL
 
     def test_inside_channel_no_signal(self) -> None:
         strategy = _make_strategy()
-        strategy._donchian = Mock(initialized=True, upper=2420.0, lower=2380.0)
+        strategy._entry._donchian = Mock(initialized=True, upper=2420.0, lower=2380.0)
         strategy._atr = Mock(initialized=True, value=5.0)
-        strategy._prev_upper = 2420.0
-        strategy._prev_lower = 2380.0
+        strategy._entry._prev_upper = 2420.0
+        strategy._entry._prev_lower = 2380.0
         assert strategy.generate_signal(_mock_bar(2400)) == SignalType.NONE
 
     def test_equal_to_prior_upper_does_not_trigger(self) -> None:
         """Strict > comparison — close == prior upper is inside, not out."""
         strategy = _make_strategy()
-        strategy._donchian = Mock(initialized=True, upper=2420.0, lower=2380.0)
+        strategy._entry._donchian = Mock(initialized=True, upper=2420.0, lower=2380.0)
         strategy._atr = Mock(initialized=True, value=5.0)
-        strategy._prev_upper = 2420.0
-        strategy._prev_lower = 2380.0
+        strategy._entry._prev_upper = 2420.0
+        strategy._entry._prev_lower = 2380.0
         assert strategy.generate_signal(_mock_bar(2420)) == SignalType.NONE
 
     def test_uses_prior_band_not_current(self) -> None:
@@ -119,10 +119,10 @@ class TestSignalGeneration:
         # Simulate: the current bar's close pushed the Donchian upper out.
         # Current upper = 2430 (includes the current bar). Prior = 2420.
         # Close = 2425. Should still signal BUY (above prior 2420).
-        strategy._donchian = Mock(initialized=True, upper=2430.0, lower=2380.0)
+        strategy._entry._donchian = Mock(initialized=True, upper=2430.0, lower=2380.0)
         strategy._atr = Mock(initialized=True, value=5.0)
-        strategy._prev_upper = 2420.0
-        strategy._prev_lower = 2380.0
+        strategy._entry._prev_upper = 2420.0
+        strategy._entry._prev_lower = 2380.0
         assert strategy.generate_signal(_mock_bar(2425)) == SignalType.BUY
 
 
@@ -195,12 +195,13 @@ class TestScaleOutMRO:
 
     def test_legacy_attributes_still_present(self) -> None:
         # Regression: prepending the mixin must not break the existing
-        # init chain that builds _donchian / _atr / _prev_upper / _prev_lower.
+        # init chain — the entry model (_entry._donchian / _prev_upper /
+        # _prev_lower) and the strategy-side _atr must both be built.
         strategy = _make_strategy()
-        assert strategy._donchian is not None
+        assert strategy._entry._donchian is not None
         assert strategy._atr is not None
-        assert strategy._prev_upper is None
-        assert strategy._prev_lower is None
+        assert strategy._entry._prev_upper is None
+        assert strategy._entry._prev_lower is None
 
 
 class TestDispatchScaleOutEvent:
@@ -419,5 +420,5 @@ class TestTrailIndicatorWiring:
             trailing_atr_period=7,
             trailing_atr_multiplier=Decimal("2.1"),
         )
-        assert strategy._donchian is not None
+        assert strategy._entry._donchian is not None
         assert strategy._atr is not None

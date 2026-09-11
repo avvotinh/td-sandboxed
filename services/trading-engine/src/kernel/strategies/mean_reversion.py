@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 from nautilus_trader.indicators.volatility import AverageTrueRange
 from nautilus_trader.model.data import Bar
 
-from src.kernel.indicators import RSI, Bollinger
+from src.kernel.entries import ENTRY_MODES, MeanReversionBandEntry
 from src.kernel.signal import SignalType
 from src.kernel.regime.states import RegimeState
 from src.kernel.strategies.base_strategy import BaseStrategy
@@ -92,9 +92,9 @@ class MeanReversionConfig(BracketStrategyConfig, frozen=True, kw_only=True):
                 "thresholds must satisfy 0 ≤ oversold < overbought ≤ 1; "
                 f"got oversold={self.oversold} overbought={self.overbought}"
             )
-        if self.entry_mode not in ("pierce", "recross"):
+        if self.entry_mode not in ENTRY_MODES:
             raise ValueError(
-                f"entry_mode must be 'pierce' or 'recross', got {self.entry_mode!r}"
+                f"entry_mode must be one of {ENTRY_MODES}, got {self.entry_mode!r}"
             )
 
 
@@ -106,8 +106,17 @@ class MeanReversionStrategy(
 
     def __init__(self, config: MeanReversionConfig) -> None:
         super().__init__(config)
-        self._bb = Bollinger(period=config.bb_period, k=config.num_std)
-        self._rsi = RSI(config.rsi_period)
+        # Entry decision + its band/re-cross state live in the entry model
+        # (roadmap 3.3); the strategy keeps the gate, the middle-band exit,
+        # and the ATR that sizes the bracket.
+        self._entry = MeanReversionBandEntry(
+            bb_period=config.bb_period,
+            num_std=config.num_std,
+            rsi_period=config.rsi_period,
+            oversold=config.oversold,
+            overbought=config.overbought,
+            entry_mode=config.entry_mode,
+        )
         self._atr = AverageTrueRange(config.atr_period)
         self.set_position_sizer(
             RiskBasedPositionSizer(
@@ -115,65 +124,30 @@ class MeanReversionStrategy(
             )
         )
         self._init_entry_filters()
-        # Recross entry state: previous bar's close and band values.
-        self._prev_close: float | None = None
-        self._prev_band_lower: float | None = None
-        self._prev_band_upper: float | None = None
 
     def on_start(self) -> None:
         super().on_start()
-        self.register_indicator_for_bars(self.config.bar_type, self._bb)
-        self.register_indicator_for_bars(self.config.bar_type, self._rsi)
+        for indicator in self._entry.indicators():
+            self.register_indicator_for_bars(self.config.bar_type, indicator)
         self.register_indicator_for_bars(self.config.bar_type, self._atr)
         self._register_entry_filter_indicators()
 
     def on_reset(self) -> None:
         super().on_reset()
-        self._bb.reset()
-        self._rsi.reset()
+        self._entry.reset()
         self._atr.reset()
         self._reset_entry_filters()
-        self._prev_close = None
-        self._prev_band_lower = None
-        self._prev_band_upper = None
 
     def generate_signal(self, bar: Bar) -> SignalType:
-        if not (
-            self._bb.initialized
-            and self._rsi.initialized
-            and self._atr.initialized
-        ):
+        if not (self._entry.ready and self._atr.initialized):
             return SignalType.NONE
 
-        close = bar.close.as_double()
-        upper = self._bb.upper
-        middle = self._bb.middle
-        lower = self._bb.lower
-        rsi = self._rsi.value
-
-        # Squeeze guard: a collapsed band (upper <= lower) makes both the
-        # entry condition and the middle-band exit semantically undefined.
-        # Warn + NONE so backtests surface the broken state instead of
-        # idling silently (same rationale as the archived Bollinger MR).
-        if upper <= lower:
-            logger.warning(
-                "Bollinger band collapsed (upper=%.4f lower=%.4f); skipping bar",
-                upper,
-                lower,
-            )
+        # Advance the model's re-cross reference BEFORE any exit / entry /
+        # session return path, so a pierce that lands on a session-gated
+        # bar still arms the snap-back comparison for the first in-session
+        # bar. False means a collapsed band — the model warned; skip.
+        if not self._entry.update(bar):
             return SignalType.NONE
-
-        # Advance recross state BEFORE any exit/entry/session return
-        # path so the previous-bar reference is never stale (bands are
-        # valid here — the squeeze guard above already returned). A
-        # pierce that lands on a session-gated bar still arms the
-        # snap-back reference for the first in-session bar.
-        prev_close = self._prev_close
-        prev_lower = self._prev_band_lower
-        prev_upper = self._prev_band_upper
-        self._prev_close = close
-        self._prev_band_lower = lower
-        self._prev_band_upper = upper
 
         # Session filter (Track 5.1), after state upkeep. With the
         # MR-shaped "block_entry" policy the gate passes through while a
@@ -185,6 +159,8 @@ class MeanReversionStrategy(
 
         # Exit first — middle-band mean-reversion target wins the
         # same-bar race against a fresh opposite-side entry.
+        close = bar.close.as_double()
+        middle = self._entry.middle
         if self.is_long and close >= middle:
             return SignalType.CLOSE
         if self.is_short and close <= middle:
@@ -193,35 +169,8 @@ class MeanReversionStrategy(
         if not self.is_flat:
             return SignalType.NONE
 
-        if self.config.entry_mode == "recross":
-            # Snap-back confirmation: previous close pierced the band,
-            # this close is back inside, RSI still extreme — enter on
-            # the reversal evidence, not the falling knife.
-            if prev_close is None:
-                return SignalType.NONE
-            if (
-                prev_close < prev_lower
-                and close >= lower
-                and rsi <= self.config.oversold
-            ):
-                return SignalType.BUY
-            if (
-                prev_close > prev_upper
-                and close <= upper
-                and rsi >= self.config.overbought
-            ):
-                return SignalType.SELL
-            return SignalType.NONE
-
-        # Confluence entry: band pierce AND RSI extreme. The RSI side is
-        # a static zone check (inclusive thresholds) — deliberately NOT
-        # the archived RSI MR's momentum-cross requirement, which would
-        # rarely coincide with the band pierce on the same bar.
-        if close < lower and rsi <= self.config.oversold:
-            return SignalType.BUY
-        if close > upper and rsi >= self.config.overbought:
-            return SignalType.SELL
-        return SignalType.NONE
+        intent = self._entry.evaluate()
+        return SignalType.NONE if intent is None else intent.signal_type
 
     def _execute_signal(self, signal: SignalType) -> None:
         if signal == SignalType.CLOSE:
@@ -240,32 +189,4 @@ class MeanReversionStrategy(
         self, bar: Bar, recorder: IndicatorRecorder
     ) -> None:
         """Record Bollinger bands (overlay) + RSI (own pane, with levels)."""
-        from src.lab.recorder.indicator_recorder import ns_to_utc
-
-        ts = ns_to_utc(bar.ts_init)
-        bb = self._bb
-        if bb.initialized:
-            if not recorder.is_registered("bb_upper"):
-                recorder.register(
-                    "bb_upper", title="BB upper", pane="overlay", color="#2962ff"
-                )
-                recorder.register(
-                    "bb_middle", title="BB middle", pane="overlay", color="#9e9e9e"
-                )
-                recorder.register(
-                    "bb_lower", title="BB lower", pane="overlay", color="#2962ff"
-                )
-            recorder.record("bb_upper", ts, bb.upper)
-            recorder.record("bb_middle", ts, bb.middle)
-            recorder.record("bb_lower", ts, bb.lower)
-        rsi = self._rsi
-        if rsi.initialized:
-            if not recorder.is_registered("rsi"):
-                recorder.register(
-                    "rsi",
-                    title=f"RSI ({self.config.rsi_period})",
-                    pane="rsi",
-                    color="#ab47bc",
-                    levels=(self.config.oversold, self.config.overbought),
-                )
-            recorder.record("rsi", ts, rsi.value)
+        self._entry.export_indicators(bar, recorder)

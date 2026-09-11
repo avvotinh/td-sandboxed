@@ -63,8 +63,8 @@ def _arm(
     atr: float = 5.0,
 ) -> None:
     """Put both indicators in an initialised, deterministic state."""
-    strategy._bb = Mock(initialized=True, upper=upper, middle=middle, lower=lower)
-    strategy._rsi = Mock(initialized=True, value=rsi)
+    strategy._entry._bb = Mock(initialized=True, upper=upper, middle=middle, lower=lower)
+    strategy._entry._rsi = Mock(initialized=True, value=rsi)
     strategy._atr = Mock(initialized=True, value=atr)
 
 
@@ -114,8 +114,8 @@ class TestConfluenceEntry:
 
     def test_no_signal_before_init(self) -> None:
         strategy = _make_strategy()
-        strategy._bb = Mock(initialized=False)
-        strategy._rsi = Mock(initialized=False)
+        strategy._entry._bb = Mock(initialized=False)
+        strategy._entry._rsi = Mock(initialized=False)
         strategy._atr = Mock(initialized=False)
         assert strategy.generate_signal(_mock_bar(2379)) == SignalType.NONE
 

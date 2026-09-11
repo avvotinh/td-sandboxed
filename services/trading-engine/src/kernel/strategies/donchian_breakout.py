@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from nautilus_trader.indicators.volatility import AverageTrueRange
 from nautilus_trader.model.data import Bar
 
-from src.kernel.indicators import Donchian
+from src.kernel.entries import DonchianCrossEntry
 from src.kernel.indicators.supertrend import Supertrend
 from src.kernel.signal import SignalType
 from src.kernel.strategies.base_strategy import BaseStrategy
@@ -99,7 +99,13 @@ class DonchianBreakoutStrategy(
 
     def __init__(self, config: DonchianBreakoutConfig) -> None:
         super().__init__(config)
-        self._donchian = Donchian(config.channel_period)
+        # Entry decision + its rolling band state live in the entry model
+        # (roadmap 3.3); the strategy keeps the gates, the exits, and the
+        # ATR that sizes them.
+        self._entry = DonchianCrossEntry(
+            channel_period=config.channel_period,
+            entry_on_cross_only=config.entry_on_cross_only,
+        )
         self._atr = AverageTrueRange(config.atr_period)
         # Phase 1 trail indicator — separate Supertrend instance keyed on
         # trailing_atr_period / trailing_atr_multiplier so the trail line
@@ -119,16 +125,11 @@ class DonchianBreakoutStrategy(
             )
         )
         self._init_entry_filters()
-        self._prev_upper: float | None = None
-        self._prev_lower: float | None = None
-        # Crossing-semantics episode state: was the previous close
-        # already outside the (then-prior) channel on each side?
-        self._prev_breakout_up: bool = False
-        self._prev_breakout_down: bool = False
 
     def on_start(self) -> None:
         super().on_start()
-        self.register_indicator_for_bars(self.config.bar_type, self._donchian)
+        for indicator in self._entry.indicators():
+            self.register_indicator_for_bars(self.config.bar_type, indicator)
         self.register_indicator_for_bars(self.config.bar_type, self._atr)
         if self._supertrend_trail is not None:
             self.register_indicator_for_bars(
@@ -137,63 +138,38 @@ class DonchianBreakoutStrategy(
         self._register_entry_filter_indicators()
 
     def on_reset(self) -> None:
-        self._donchian.reset()
+        self._entry.reset()
         self._atr.reset()
         if self._supertrend_trail is not None:
             self._supertrend_trail.reset()
         self._reset_entry_filters()
-        self._prev_upper = None
-        self._prev_lower = None
-        self._prev_breakout_up = False
-        self._prev_breakout_down = False
 
     def generate_signal(self, bar: Bar) -> SignalType:
-        if not self._donchian.initialized or not self._atr.initialized:
+        if not self._entry.ready or not self._atr.initialized:
             return SignalType.NONE
 
-        close = bar.close.as_double()
-        prev_upper = self._prev_upper
-        prev_lower = self._prev_lower
-
-        # Capture current band as the "prior" reference for the next bar
-        # BEFORE any return path — otherwise the seed bar never stores it.
-        # Rolling references advance on EVERY bar, including session-gated
-        # ones, so the first in-session bar after a gap compares against
-        # the true prior bar rather than a frozen pre-gap snapshot.
-        self._prev_upper = self._donchian.upper
-        self._prev_lower = self._donchian.lower
-
-        if prev_upper is None or prev_lower is None:
+        # State upkeep runs on EVERY bar, including session-gated ones, so
+        # the first in-session bar after a gap compares against the true
+        # prior bar rather than a frozen pre-gap snapshot — and a breakout
+        # episode that begins overnight does not read as "first breakout
+        # bar" at session open. A False return means the model called the
+        # bar unusable and left its state alone — skip it.
+        if not self._entry.update(bar):
             return SignalType.NONE
-
-        breakout_up = close > prev_upper
-        breakout_down = close < prev_lower
-
-        # Advance episode state before any gating so a suppressed,
-        # session-gated, or ADX-blocked breakout bar still arms/disarms
-        # the edge trigger — an episode that begins overnight must not
-        # read as "first breakout bar" at session open.
-        was_up = self._prev_breakout_up
-        was_down = self._prev_breakout_down
-        self._prev_breakout_up = breakout_up
-        self._prev_breakout_down = breakout_down
 
         # Session filter (Track 5.1): after state upkeep, before entries.
         gated = self._session_gate(bar)
         if gated is not None:
             return gated
 
-        if self.config.entry_on_cross_only:
-            breakout_up = breakout_up and not was_up
-            breakout_down = breakout_down and not was_down
-
-        if not (breakout_up or breakout_down):
+        intent = self._entry.evaluate()
+        if intent is None:
             return SignalType.NONE
 
         if self._adx_gate_blocks():
             return SignalType.NONE
 
-        return SignalType.BUY if breakout_up else SignalType.SELL
+        return intent.signal_type
 
     def _execute_signal(self, signal: SignalType) -> None:
         if signal == SignalType.CLOSE:
@@ -217,35 +193,7 @@ class DonchianBreakoutStrategy(
         self, bar: Bar, recorder: IndicatorRecorder
     ) -> None:
         """Record the Donchian channel bands + optional trail line."""
-        from src.lab.recorder.indicator_recorder import ns_to_utc
-
-        dc = self._donchian
-        if dc.initialized:
-            if not recorder.is_registered("donchian_upper"):
-                recorder.register(
-                    "donchian_upper",
-                    title="Donchian upper",
-                    pane="overlay",
-                    color="#2962ff",
-                )
-                recorder.register(
-                    "donchian_lower",
-                    title="Donchian lower",
-                    pane="overlay",
-                    color="#f57c00",
-                )
-                recorder.register(
-                    "donchian_middle",
-                    title="Donchian middle",
-                    pane="overlay",
-                    color="#9e9e9e",
-                )
-            ts = ns_to_utc(bar.ts_init)
-            recorder.record("donchian_upper", ts, dc.upper)
-            recorder.record("donchian_lower", ts, dc.lower)
-            # Nautilus DonchianChannel computes a middle band; guard
-            # with getattr in case a future indicator swap drops it.
-            recorder.record("donchian_middle", ts, getattr(dc, "middle", None))
+        self._entry.export_indicators(bar, recorder)
         self._export_trail_indicator(bar, recorder)
 
     # Story 13.10 originally inlined the scale-out wiring here per the

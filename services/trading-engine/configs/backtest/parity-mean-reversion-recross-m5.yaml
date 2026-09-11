@@ -1,0 +1,34 @@
+# P3 parity fixture — the GATED, re-cross mean-reversion path.
+#
+# entry_mode=recross is the only entry branch that reads the previous bar's
+# close and bands, so it is the strictest test that the snap-back reference
+# advances on bars a gate throws away. block_entry (not flatten) is the
+# MR-shaped policy: the gate passes through while a position is open so the
+# middle-band exit keeps managing the trade out-of-session.
+#
+# A fixture, not a result.
+strategy: mean_reversion
+instrument_symbol: XAUUSD
+bar_type_suffix: 5-MINUTE-LAST-EXTERNAL
+venue:
+  name: SIM
+  starting_balance: "100000"
+  currency: USD
+  commission_per_lot_usd: "0"
+  oms_type: HEDGING
+strategy_params:
+  bb_period: 20
+  rsi_period: 14
+  sl_atr_mult: "1.0"
+  tp_atr_mult: "2.0"
+  risk_percent: "0.5"
+  scale_out_enabled: false
+  trailing_enabled: false
+  entry_mode: recross
+  session_filter_tz: America/New_York
+  session_filter_open_hour: 7
+  session_filter_close_hour: 16
+  session_filter_exit_policy: block_entry
+data:
+  kind: parquet
+  path: data/historical/XAUUSD/M5/in_sample.parquet

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from nautilus_trader.model.data import Bar
 
+from src.kernel.entries import SupertrendFlipEntry
 from src.kernel.indicators.supertrend import Supertrend
 from src.kernel.signal import SignalType
 from src.kernel.strategies.base_strategy import BaseStrategy
@@ -93,7 +94,10 @@ class SupertrendStrategy(
 
     def __init__(self, config: SupertrendConfig) -> None:
         super().__init__(config)
-        self._supertrend = Supertrend(
+        # Entry decision + its trend-flip state live in the entry model
+        # (roadmap 3.3); the strategy keeps the gates, the exits, and the
+        # separately-tuned trail line below.
+        self._entry = SupertrendFlipEntry(
             period=config.period, multiplier=config.multiplier
         )
         # Import inside __init__ to avoid circulars at module load.
@@ -118,11 +122,11 @@ class SupertrendStrategy(
             )
         )
         self._init_entry_filters()
-        self._prev_trend: int | None = None
 
     def on_start(self) -> None:
         super().on_start()
-        self.register_indicator_for_bars(self.config.bar_type, self._supertrend)
+        for indicator in self._entry.indicators():
+            self.register_indicator_for_bars(self.config.bar_type, indicator)
         self.register_indicator_for_bars(self.config.bar_type, self._atr)
         if self._supertrend_trail is not None:
             self.register_indicator_for_bars(
@@ -134,12 +138,11 @@ class SupertrendStrategy(
         )
 
     def on_reset(self) -> None:
-        self._supertrend.reset()
+        self._entry.reset()
         self._atr.reset()
         if self._supertrend_trail is not None:
             self._supertrend_trail.reset()
         self._reset_entry_filters()
-        self._prev_trend = None
 
     def generate_signal(self, bar: Bar) -> SignalType:
         # Session filter first (Track 5.1): out-of-session bars flatten
@@ -150,30 +153,25 @@ class SupertrendStrategy(
         if gated is not None:
             return gated
 
-        if not self._supertrend.initialized or not self._atr.initialized:
+        if not self._entry.ready or not self._atr.initialized:
             return SignalType.NONE
 
-        current_trend = self._supertrend.trend
-        prev = self._prev_trend
-        self._prev_trend = current_trend
+        # A False return means the model called the bar unusable and left
+        # its state alone — skip it.
+        if not self._entry.update(bar):
+            return SignalType.NONE
 
-        if prev is None:
-            return SignalType.NONE  # First initialised bar — seed only.
-
-        if current_trend == prev:
+        intent = self._entry.evaluate()
+        if intent is None:
             return SignalType.NONE
 
         # Trend flipped — admit only when the ADX gate sees trend
-        # strength. _prev_trend has already advanced, so a blocked flip
-        # does not re-fire when ADX recovers bars later.
+        # strength. The model's trend reference has already advanced, so
+        # a blocked flip does not re-fire when ADX recovers bars later.
         if self._adx_gate_blocks():
             return SignalType.NONE
 
-        if current_trend == 1:
-            return SignalType.BUY
-        if current_trend == -1:
-            return SignalType.SELL
-        return SignalType.NONE
+        return intent.signal_type
 
     def _execute_signal(self, signal: SignalType) -> None:
         if signal == SignalType.NONE:
@@ -211,30 +209,7 @@ class SupertrendStrategy(
         self, bar: Bar, recorder: IndicatorRecorder
     ) -> None:
         """Record the Supertrend line (split up/down) + optional trail."""
-        from src.lab.recorder.indicator_recorder import ns_to_utc
-
-        st = self._supertrend
-        if st.initialized and st.value is not None:
-            if not recorder.is_registered("supertrend_up"):
-                recorder.register(
-                    "supertrend_up",
-                    title="Supertrend (up)",
-                    pane="overlay",
-                    color="#26a69a",
-                )
-                recorder.register(
-                    "supertrend_down",
-                    title="Supertrend (down)",
-                    pane="overlay",
-                    color="#ef5350",
-                )
-            ts = ns_to_utc(bar.ts_init)
-            recorder.record(
-                "supertrend_up", ts, st.value if st.trend == 1 else None
-            )
-            recorder.record(
-                "supertrend_down", ts, st.value if st.trend == -1 else None
-            )
+        self._entry.export_indicators(bar, recorder)
         self._export_trail_indicator(bar, recorder)
 
     # Story 13.5: scale-out lifecycle wiring lived here per-strategy

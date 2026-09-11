@@ -1,0 +1,37 @@
+# P3 parity fixture — the GATED Donchian path.
+#
+# The six original parity jobs all run with every gate off, so update() and
+# evaluate() are called back-to-back with nothing between them and the task-3.3
+# two-phase split is observationally identical to the fused original by
+# construction. That is exactly the path the split exists for, so it needs its
+# own fixture: edge-triggered entries (entry_on_cross_only) plus a session
+# window, which together make episode-state upkeep on gated bars observable in
+# the trade list.
+#
+# A fixture, not a result. Absolute performance is irrelevant — parity only
+# needs before == after.
+strategy: donchian_breakout
+instrument_symbol: XAUUSD
+bar_type_suffix: 5-MINUTE-LAST-EXTERNAL
+venue:
+  name: SIM
+  starting_balance: "100000"
+  currency: USD
+  commission_per_lot_usd: "0"
+  oms_type: HEDGING
+strategy_params:
+  channel_period: 20
+  atr_period: 14
+  sl_atr_mult: "2.0"
+  tp_atr_mult: "4.0"
+  risk_percent: "0.5"
+  scale_out_enabled: false
+  trailing_enabled: false
+  entry_on_cross_only: true
+  session_filter_tz: America/New_York
+  session_filter_open_hour: 7
+  session_filter_close_hour: 16
+  session_filter_exit_policy: flatten
+data:
+  kind: parquet
+  path: data/historical/XAUUSD/M5/in_sample.parquet

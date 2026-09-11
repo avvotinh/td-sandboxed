@@ -5,10 +5,11 @@ same trades, same metrics, before and after. These are the tools that gate it.
 
 ## The baseline
 
-`baseline-fingerprints.txt` holds per-section SHA-256 digests of six Contract v2
-exports taken from commit `960282c` — the last commit before `src/` was
-reorganized. The six jobs cover both entry families, both timeframes, and the
-scale-out exit path:
+`baseline-fingerprints.txt` holds per-section SHA-256 digests of nine Contract v2
+exports. Six come from commit `960282c` — the last commit before `src/` was
+reorganized — and cover both entry families, both timeframes, and the scale-out
+exit path. Three more were added at task 3.3 to cover the *gated* entry paths;
+they are listed under **Result** below, along with why six was not enough.
 
 | run | job |
 |---|---|
@@ -40,8 +41,39 @@ Run at `1a28b5b` (after the 3.2 prune): **PASS, 6/6 runs identical**. Every
 section digest matched the baseline and every headline number in the table
 above reproduced exactly. The reorganize and the prune are behaviour-preserving.
 
+Re-run at task 3.3 (entry logic extracted into `src/kernel/entries/`): **PASS,
+9/9 runs identical** — all eight section digests match on every run.
+
+The six original jobs alone would not have been enough evidence. They all run
+with every gate off (`entry_on_cross_only` absent, `entry_mode` absent,
+`session_filter_tz` absent, `adx_gate_min` absent), so `update()` and
+`evaluate()` fire back to back with nothing between them and the two-phase
+split is observationally identical to the fused original *by construction*.
+The gated paths — the only reason the split exists — were untested. Hence the
+three fixtures below, baselined at `8c2fc1a` (the task-3.3 parent) rather than
+at `960282c`:
+
+| run | job | exercises |
+|---|---|---|
+| donchian-gated-m5 | `configs/backtest/parity-donchian-gated-m5.yaml` | edge-triggered entries + session window: episode state must advance on gated bars |
+| supertrend-gated-m5 | `configs/backtest/parity-supertrend-gated-m5.yaml` | gate-before-upkeep ordering + the ADX gate that sits after `evaluate()` |
+| mean-reversion-recross-m5 | `configs/backtest/parity-mean-reversion-recross-m5.yaml` | re-cross entry (reads the prior bar) + `block_entry` policy |
+
+| run | trades | net PnL | max DD |
+|---|---|---|---|
+| donchian-gated-m5 | 2094 | −31,120.41 | 38.45% |
+| supertrend-gated-m5 | 841 | −19,345.16 | 22.40% |
+| mean-reversion-recross-m5 | 1095 | −1,931.55 | 23.14% |
+
 Re-run the gate after any further move under `src/` — the baseline stays valid
 as long as the strategies and the parquet data underneath do not change.
+
+One thing the baseline deliberately does **not** yet cover: Contract v2 still
+writes `trade.entry.reason` as `null` and `trade.entry.kind` as the literal
+`"market"` (`src/lab/export/result_writer.py`). The entry models now produce
+real reasons (`donchian_upper_cross`, …) but nothing threads them into
+`TradeRecord`. Wiring that up **will** change the `trades` digest by design —
+re-cut the baseline in the same commit that does it.
 
 ## Running the gate
 
